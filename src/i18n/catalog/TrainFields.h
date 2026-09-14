@@ -2514,99 +2514,161 @@ SS_MSG(background_mode,
     KO("배경"), DE("Hintergrund"), FR("Arrière-plan"), ES("Fondo"),
     PT("Fundo"), IT("Sfondo"), NL("Achtergrond"), RU("Фон"), TR("Arka plan"));
 SS_MSG(background_mode_help,
-    EN("What fills pixels no splat covers. `black` is the usual choice. "
-       "`noise` and `pseudorandom` both discourage half-transparent "
+    EN("What fills pixels no splat covers. `color` is the usual choice: one "
+       "colour you pick, and black costs nothing at all. `noise`, "
+       "`pseudorandom` and `random` all discourage half-transparent "
        "surfaces by making a pixel left uncovered land on a colour that "
-       "changes every step; pseudorandom draws vivid tiles rather than "
-       "per-pixel speckle, which the loss cannot average away, so it "
-       "presses harder. `sh` learns a skybox so distant background is "
-       "represented instead of ignored."),
-    JA("スプラットが覆わない画素を何で埋めるかです。`black"
-       "` が通常の選択です。`noise` と `"
-       "pseudorandom` はどちらも、覆われていない画"
+       "changes every step; they differ in how big the patches are, from "
+       "one pixel to vivid tiles to the whole frame, and the bigger ones "
+       "the loss cannot average away press harder. `sh` learns a skybox so "
+       "distant background is represented instead of ignored."),
+    JA("スプラットが覆わない画素を何で埋めるかです。`color"
+       "` が通常の選択で、選んだ一つの色を使います。黒なら何"
+       "の処理もしません。`noise` と `pseudorandom` と "
+       "`random` はどれも、覆われていない画"
        "素の色が毎ステップ変わるようにして半透明な面を抑えます。"
-       "`pseudorandom` は画素ごとの細かいノイズで"
-       "はなく鮮やかなタイルを使うため、損失に平均化されず効き目"
-       "が強くなります。`sh` は空を学習し、遠くの背景を無視"
+       "色のまとまりの大きさが違い、画素ごと、鮮やかなタイル、画"
+       "面全体と大きくなります。大きいほど損失に平均化されず効き"
+       "目が強くなります。`sh` は空を学習し、遠くの背景を無視"
        "せず表現します。"),
-    ZH_HANS("用什么填充没有泼溅覆盖的像素。`black` 是通常的选"
-            "择。`noise` 和 `pseudorandom` 都"
-            "通过让未覆盖像素的颜色每步都变来抑制半透明表面；`"
-            "pseudorandom` 用的是鲜艳的色块而不是逐像素"
-            "的细噪点，损失无法把它平均掉，所以压得更狠。`sh` 会"
+    ZH_HANS("用什么填充没有泼溅覆盖的像素。`color` 是通常的选"
+            "择，用你指定的一种颜色；黑色则完全不做处理。`noise`、"
+            "`pseudorandom` 和 `random` "
+            "都通过让未覆盖像素的颜色每步都变来抑制半透明表面；区别"
+            "在于色块的大小，从逐像素到鲜艳的色块再到整帧一色，越大"
+            "损失越难把它平均掉，压得也越狠。`sh` 会"
             "学习一个天空盒，让远处背景被表示而不是被忽略。"),
-    ZH_HANT("用什麼填充沒有潑濺覆蓋的像素。`black` 是通常的選"
-            "擇。`noise` 和 `pseudorandom` 都"
-            "透過讓未覆蓋像素的顏色每步都變來抑制半透明表面；`"
-            "pseudorandom` 用的是鮮豔的色塊而不是逐像素"
-            "的細雜訊，損失無法把它平均掉，所以壓得更狠。`sh` 會"
+    ZH_HANT("用什麼填充沒有潑濺覆蓋的像素。`color` 是通常的選"
+            "擇，用你指定的一種顏色；黑色則完全不做處理。`noise`、"
+            "`pseudorandom` 和 `random` "
+            "都透過讓未覆蓋像素的顏色每步都變來抑制半透明表面；區別"
+            "在於色塊的大小，從逐像素到鮮豔的色塊再到整幀一色，越大"
+            "損失越難把它平均掉，壓得也越狠。`sh` 會"
             "學習一個天空盒，讓遠處背景被表示而不是被忽略。"),
     KO("스플랫이 덮지 않은 픽셀을 무엇으로 채울지입니다. "
-       "`black`이 보통의 선택입니다. `noise`와"
-       " `pseudorandom`은 덮이지 않은 픽셀의 "
-       "색이 매 스텝 바뀌게 해서 반투명한 표면을 억제합니"
-       "다. `pseudorandom`은 픽셀 단위의 잔 "
-       "노이즈 대신 선명한 타일을 쓰므로 손실이 평균으로 "
-       "지워 버리지 못해 더 세게 누릅니다. `sh`는 스"
+       "`color`가 보통의 선택으로, 직접 고른 한 가지 "
+       "색을 씁니다. 검정이면 아무 처리도 하지 않습니다. "
+       "`noise`와 `pseudorandom`과 `random`은 "
+       "모두 덮이지 않은 픽셀의 색이 매 스텝 바뀌게 해서 "
+       "반투명한 표면을 억제합니다. 색 덩어리의 크기가 다"
+       "른데, 픽셀 단위에서 선명한 타일, 화면 전체 한 색"
+       "으로 커집니다. 클수록 손실이 평균으로 지워 버리지 "
+       "못해 더 세게 누릅니다. `sh`는 스"
        "카이박스를 학습해 먼 배경을 무시하지 않고 표현합니"
        "다."),
-    DE("Was Pixel füllt, die kein Splat bedeckt. `black` ist die übliche "
-       "Wahl. `noise` und `pseudorandom` entmutigen beide "
+    DE("Was Pixel füllt, die kein Splat bedeckt. `color` ist die übliche "
+       "Wahl: eine Farbe nach Wahl, und Schwarz kostet gar nichts. `noise`, "
+       "`pseudorandom` und `random` entmutigen alle "
        "halbdurchsichtige Flächen, indem ein unbedecktes Pixel auf einer "
-       "Farbe landet, die sich jeden Schritt ändert; pseudorandom zeichnet "
-       "kräftige Kacheln statt Sprenkel pro Pixel, die der Verlust nicht "
-       "wegmitteln kann, und drückt deshalb stärker. `sh` lernt eine "
+       "Farbe landet, die sich jeden Schritt ändert; sie unterscheiden sich "
+       "in der Fleckengröße -- pro Pixel, kräftige Kacheln oder eine Farbe "
+       "für das ganze Bild -- und je größer, desto weniger kann der Verlust "
+       "sie wegmitteln. `sh` lernt eine "
        "Skybox, damit ferner Hintergrund dargestellt statt ignoriert wird."),
-    FR("Ce qui remplit les pixels qu'aucun splat ne couvre. `black` est le "
-       "choix habituel. `noise` et `pseudorandom` découragent tous deux "
+    FR("Ce qui remplit les pixels qu'aucun splat ne couvre. `color` est le "
+       "choix habituel : une couleur de votre choix, et le noir ne coûte "
+       "rien. `noise`, `pseudorandom` et `random` découragent tous "
        "les surfaces à demi transparentes en faisant tomber un pixel non "
-       "couvert sur une couleur qui change à chaque étape ; pseudorandom "
-       "dessine des tuiles vives plutôt qu'un grain par pixel, que la "
-       "perte ne peut pas moyenner, et appuie donc plus fort. `sh` apprend "
+       "couvert sur une couleur qui change à chaque étape ; ils diffèrent "
+       "par la taille des taches -- par pixel, tuiles vives, ou une seule "
+       "couleur pour toute l'image -- et plus elles sont grandes, moins la "
+       "perte peut les moyenner. `sh` apprend "
        "une skybox pour que l'arrière-plan lointain soit représenté au "
        "lieu d'être ignoré."),
-    ES("Qué rellena los píxeles que ningún splat cubre. `black` es la "
-       "elección habitual. `noise` y `pseudorandom` desincentivan las "
+    ES("Qué rellena los píxeles que ningún splat cubre. `color` es la "
+       "elección habitual: un color que eliges, y el negro no cuesta nada. "
+       "`noise`, `pseudorandom` y `random` desincentivan las "
        "superficies semitransparentes haciendo que un píxel sin cubrir "
-       "caiga sobre un color que cambia en cada paso; pseudorandom dibuja "
-       "baldosas vivas en vez de grano por píxel, que la pérdida no puede "
-       "promediar, así que aprieta más. `sh` aprende un cielo para que el "
+       "caiga sobre un color que cambia en cada paso; se diferencian en el "
+       "tamaño de las manchas -- por píxel, baldosas vivas o un solo color "
+       "para todo el fotograma -- y cuanto mayores, menos puede "
+       "promediarlas la pérdida. `sh` aprende un cielo para que el "
        "fondo lejano quede representado en vez de ignorado."),
-    PT("O que preenche os pixels que nenhum splat cobre. `black` é a "
-       "escolha habitual. `noise` e `pseudorandom` desencorajam "
+    PT("O que preenche os pixels que nenhum splat cobre. `color` é a "
+       "escolha habitual: uma cor à sua escolha, e o preto não custa nada. "
+       "`noise`, `pseudorandom` e `random` desencorajam "
        "superfícies semitransparentes fazendo um pixel descoberto cair "
-       "sobre uma cor que muda a cada passo; pseudorandom desenha "
-       "ladrilhos vivos em vez de grão por pixel, que a perda não consegue "
-       "mediar, então aperta mais. `sh` aprende um céu para que o fundo "
+       "sobre uma cor que muda a cada passo; diferem no tamanho das manchas "
+       "-- por pixel, ladrilhos vivos ou uma só cor para o quadro inteiro "
+       "-- e quanto maiores, menos a perda consegue "
+       "mediá-las. `sh` aprende um céu para que o fundo "
        "distante seja representado em vez de ignorado."),
-    IT("Che cosa riempie i pixel che nessuno splat copre. `black` è la "
-       "scelta abituale. `noise` e `pseudorandom` scoraggiano entrambi le "
+    IT("Che cosa riempie i pixel che nessuno splat copre. `color` è la "
+       "scelta abituale: un colore a tua scelta, e il nero non costa nulla. "
+       "`noise`, `pseudorandom` e `random` scoraggiano le "
        "superfici semitrasparenti facendo cadere un pixel scoperto su un "
-       "colore che cambia a ogni passo; pseudorandom disegna piastrelle "
-       "vivaci invece di grana per pixel, che la perdita non può mediare, "
-       "e quindi preme di più. `sh` impara un cielo perché lo sfondo "
+       "colore che cambia a ogni passo; differiscono per la dimensione "
+       "delle chiazze -- per pixel, piastrelle vivaci o un solo colore per "
+       "l'intero fotogramma -- e più sono grandi, meno la perdita può "
+       "mediarle. `sh` impara un cielo perché lo sfondo "
        "lontano sia rappresentato invece che ignorato."),
-    NL("Wat pixels vult die geen splat bedekt. `black` is de gebruikelijke "
-       "keuze. `noise` en `pseudorandom` ontmoedigen allebei "
+    NL("Wat pixels vult die geen splat bedekt. `color` is de gebruikelijke "
+       "keuze: een kleur naar keuze, en zwart kost helemaal niets. `noise`, "
+       "`pseudorandom` en `random` ontmoedigen allemaal "
        "halfdoorzichtige oppervlakken doordat een onbedekte pixel op een "
-       "kleur valt die elke stap verandert; pseudorandom tekent felle "
-       "tegels in plaats van korrel per pixel, die het verlies niet kan "
-       "wegmiddelen, en drukt dus harder. `sh` leert een skybox zodat "
+       "kleur valt die elke stap verandert; ze verschillen in de grootte "
+       "van de vlekken -- per pixel, felle tegels of één kleur voor het "
+       "hele beeld -- en hoe groter, hoe minder het verlies ze kan "
+       "wegmiddelen. `sh` leert een skybox zodat "
        "verre achtergrond wordt weergegeven in plaats van genegeerd."),
-    RU("Чем заполняются пиксели, которые не покрыл ни один сплат. `black` "
-       "— обычный выбор. `noise` и `pseudorandom` оба мешают "
+    RU("Чем заполняются пиксели, которые не покрыл ни один сплат. `color` "
+       "— обычный выбор: любой заданный вами цвет, а чёрный не стоит "
+       "ничего. `noise`, `pseudorandom` и `random` мешают "
        "полупрозрачным поверхностям: непокрытый пиксель попадает на цвет, "
-       "меняющийся каждый шаг; pseudorandom рисует яркие плитки, а не "
-       "зерно на каждый пиксель, и функция потерь не может их усреднить, "
-       "поэтому давит сильнее. `sh` обучает скайбокс, чтобы дальний фон "
+       "меняющийся каждый шаг; они отличаются размером пятен — на пиксель, "
+       "яркие плитки или один цвет на весь кадр — и чем крупнее, тем хуже "
+       "функция потерь их усредняет. `sh` обучает скайбокс, чтобы дальний фон "
        "был представлен, а не проигнорирован."),
-    TR("Hiçbir splat'ın kaplamadığı pikselleri neyin dolduracağı. `black` "
-       "alışılmış seçimdir. `noise` ve `pseudorandom` yarı saydam "
+    TR("Hiçbir splat'ın kaplamadığı pikselleri neyin dolduracağı. `color` "
+       "alışılmış seçimdir: seçtiğiniz bir renk, siyah ise hiçbir şeye mal "
+       "olmaz. `noise`, `pseudorandom` ve `random` yarı saydam "
        "yüzeyleri caydırır: kaplanmamış bir piksel her adımda değişen bir "
-       "renge düşer; pseudorandom piksel başına tanecik yerine canlı "
-       "karolar çizer, kayıp bunları ortalamayla silemez, bu yüzden daha "
-       "çok bastırır. `sh` bir gökyüzü öğrenir, böylece uzak arka plan yok "
+       "renge düşer; benek boyutlarıyla ayrılırlar -- piksel başına, canlı "
+       "karolar ya da tüm kare için tek renk -- ve büyüdükçe kayıp bunları "
+       "ortalamayla silemez. `sh` bir gökyüzü öğrenir, böylece uzak arka plan yok "
        "sayılmak yerine temsil edilir."));
+
+SS_MSG(background_color,
+    EN("Background color"), JA("背景色"), ZH_HANS("背景颜色"),
+    ZH_HANT("背景顏色"), KO("배경색"), DE("Hintergrundfarbe"),
+    FR("Couleur de l'arrière-plan"), ES("Color del fondo"),
+    PT("Cor do fundo"), IT("Colore dello sfondo"), NL("Achtergrondkleur"),
+    RU("Цвет фона"), TR("Arka plan rengi"));
+SS_MSG(background_color_help,
+    EN("The color that fills pixels no splat covers. Black is free -- it skips "
+       "the blend entirely. Only used with the `color` background."),
+    JA("スプラットが覆わない画素を埋める色です。黒なら合成そのものを省くので費"
+       "用はかかりません。背景が `color` のときだけ使われます。"),
+    ZH_HANS("用来填充没有泼溅覆盖的像素的颜色。黑色是免费的，会整个跳过混合。"
+            "仅在背景为 `color` 时使用。"),
+    ZH_HANT("用來填充沒有潑濺覆蓋的像素的顏色。黑色是免費的，會整個跳過混合。"
+            "僅在背景為 `color` 時使用。"),
+    KO("스플랫이 덮지 않은 픽셀을 채우는 색입니다. 검정은 합성 자체를 건너뛰므"
+       "로 비용이 없습니다. 배경이 `color`일 때만 쓰입니다."),
+    DE("Die Farbe, die Pixel füllt, die kein Splat bedeckt. Schwarz ist "
+       "kostenlos -- es überspringt die Überblendung ganz. Wird nur mit dem "
+       "Hintergrund `color` verwendet."),
+    FR("La couleur qui remplit les pixels qu'aucun splat ne couvre. Le noir "
+       "est gratuit : il saute entièrement le mélange. Utilisée "
+       "uniquement avec l'arrière-plan `color`."),
+    ES("El color que rellena los píxeles que ningún splat cubre. El negro es "
+       "gratis: se salta la mezcla por completo. Solo se usa "
+       "con el fondo `color`."),
+    PT("A cor que preenche os pixels que nenhum splat cobre. O preto é de "
+       "graça: ignora a mistura por completo. Só é usada com o "
+       "fundo `color`."),
+    IT("Il colore che riempie i pixel che nessuno splat copre. Il nero è "
+       "gratis: salta del tutto la fusione. Usato solo con "
+       "lo sfondo `color`."),
+    NL("De kleur die pixels vult die geen splat bedekt. Zwart is gratis: het "
+       "slaat het mengen helemaal over. Wordt alleen bij "
+       "achtergrond `color` gebruikt."),
+    RU("Цвет, которым заполняются пиксели, не покрытые ни одним сплатом. "
+       "Чёрный бесплатен: смешивание пропускается целиком. "
+       "Используется только с фоном `color`."),
+    TR("Hiçbir splat'ın kaplamadığı pikselleri dolduran renk. Siyah "
+       "bedavadır: harmanlamayı tümüyle atlar. Yalnızca "
+       "`color` arka planıyla kullanılır."));
 
 SS_MSG(background_sh_degree,
     EN("Skybox detail"), JA("スカイボックスの細かさ"), ZH_HANS("天空盒细节"),
@@ -2654,29 +2716,33 @@ SS_MSG(background_noise_warmup,
     TR("Arka plan gürültüsü ısınması"));
 SS_MSG(background_noise_warmup_help,
     EN("How many steps the background noise takes to reach full strength. Only "
-       "used with the `noise` background."),
-    JA("背景ノイズが最大の強さになるまでのステップ数です。背景が `noise` のと"
-       "きだけ使われます。"),
-    ZH_HANS("背景噪声达到最大强度所需的步数。仅在背景为 `noise` 时使用。"),
-    ZH_HANT("背景雜訊達到最大強度所需的步數。僅在背景為 `noise` 時使用。"),
-    KO("배경 노이즈가 최대 세기에 이르기까지의 스텝 수입니다. 배경이 `noise`일"
-       " 때만 쓰입니다."),
+       "used with the `noise` / `pseudorandom` / `random` backgrounds."),
+    JA("背景ノイズが最大の強さになるまでのステップ数です。背景が `noise` / "
+       "`pseudorandom` / `random` のときだけ使われます。"),
+    ZH_HANS("背景噪声达到最大强度所需的步数。仅在背景为 `noise` / "
+            "`pseudorandom` / `random` 时使用。"),
+    ZH_HANT("背景雜訊達到最大強度所需的步數。僅在背景為 `noise` / "
+            "`pseudorandom` / `random` 時使用。"),
+    KO("배경 노이즈가 최대 세기에 이르기까지의 스텝 수입니다. 배경이 `noise` /"
+       " `pseudorandom` / `random`일 때만 쓰입니다."),
     DE("Wie viele Schritte das Hintergrundrauschen braucht, um volle Stärke zu "
-       "erreichen. Wird nur mit dem Hintergrund `noise` verwendet."),
+       "erreichen. Wird nur mit den Hintergründen `noise` / `pseudorandom` / "
+       "`random` verwendet."),
     FR("Combien d'étapes le bruit de fond met à atteindre sa pleine force. Utilisé "
-       "uniquement avec l'arrière-plan `noise`."),
+       "uniquement avec les arrière-plans `noise` / `pseudorandom` / `random`."),
     ES("Cuántos pasos tarda el ruido de fondo en alcanzar toda su fuerza. Solo "
-       "se usa con el fondo `noise`."),
+       "se usa con los fondos `noise` / `pseudorandom` / `random`."),
     PT("Quantos passos o ruído de fundo leva para atingir força total. Só é usado "
-       "com o fundo `noise`."),
+       "com os fundos `noise` / `pseudorandom` / `random`."),
     IT("Quanti passi impiega il rumore di fondo a raggiungere la piena forza. "
-       "Usato solo con lo sfondo `noise`."),
+       "Usato solo con gli sfondi `noise` / `pseudorandom` / `random`."),
     NL("Hoeveel stappen de achtergrondruis nodig heeft om op volle sterkte te "
-       "komen. Wordt alleen bij achtergrond `noise` gebruikt."),
+       "komen. Wordt alleen bij de achtergronden `noise` / `pseudorandom` / "
+       "`random` gebruikt."),
     RU("За сколько шагов фоновый шум набирает полную силу. Используется только "
-       "с фоном `noise`."),
+       "с фонами `noise` / `pseudorandom` / `random`."),
     TR("Arka plan gürültüsünün tam güce ulaşması için gereken adım sayısı. Yalnızca "
-       "`noise` arka planıyla kullanılır."));
+       "`noise` / `pseudorandom` / `random` arka planlarıyla kullanılır."));
 
 SS_MSG(background_noise_pre_warmup,
     EN("Initial background noise"), JA("最初の背景ノイズの強さ"),

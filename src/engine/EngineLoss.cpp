@@ -435,6 +435,24 @@ void engine_backward_from_render_grad(
 }
 
 
+// loss_scale_min_pixels > 0 overrides num_loss_scales so the smallest image
+// dimension halves down toward (not below) that count -- 2000 makes min dim
+// 1999 one scale, 2000 two, 8000 four. Per step, so mixed resolutions adapt.
+int engine_resolve_num_loss_scales(int num_loss_scales,
+                                   int loss_scale_min_pixels,
+                                   int64_t H, int64_t W) {
+    if (loss_scale_min_pixels <= 0) return num_loss_scales;
+    int64_t min_dim = std::min(H, W);
+    int auto_scales = 1;
+    if (min_dim >= (int64_t)loss_scale_min_pixels)
+        auto_scales = (int)std::floor(
+            std::log2((double)min_dim / (double)loss_scale_min_pixels)) + 2;
+    // Clamp to the kernel's MAX_SCALES (see PerPixelLoss.cu) so extreme
+    // resolutions saturate the scale count rather than throwing.
+    return std::min(auto_scales, 4);
+}
+
+
 // Shared by engine_compute_loss_backward and engine_preview_loss_map: a valid
 // `map_out` stops after the per-pixel loss and copies the loss map there,
 // before anything that mutates a gradient or an optimizer moment.
@@ -471,22 +489,8 @@ static std::map<std::string, float> _engine_loss(
     int64_t H = engine().camera.height;
     int64_t W = engine().camera.width;
 
-    // Resolution-adaptive multi-scale loss: when loss_scale_min_pixels > 0 it
-    // overrides num_loss_scales based on this step's render resolution, so that
-    // the smallest image dimension is halved down toward (but not below) the
-    // requested pixel count. e.g. loss_scale_min_pixels=2000 -> min dim 1999
-    // gives 1 scale, 2000 gives 2, 4000 gives 3, 8000 gives 4. Adapts per step,
-    // so mixed-resolution datasets pick the right count per image automatically.
-    if (loss_scale_min_pixels > 0) {
-        int64_t min_dim = std::min(H, W);
-        int auto_scales = 1;
-        if (min_dim >= (int64_t)loss_scale_min_pixels)
-            auto_scales = (int)std::floor(
-                std::log2((double)min_dim / (double)loss_scale_min_pixels)) + 2;
-        // Clamp to the kernel's MAX_SCALES (see PerPixelLoss.cu) so extreme
-        // resolutions saturate the scale count rather than throwing.
-        num_loss_scales = std::min(auto_scales, 4);
-    }
+    num_loss_scales = engine_resolve_num_loss_scales(
+        num_loss_scales, loss_scale_min_pixels, H, W);
 
     // Pool-allocate intermediates for loss computation
     TorchTensorView loss_map_buf = compute_loss_map ?

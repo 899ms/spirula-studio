@@ -145,6 +145,13 @@ void _engine_bilagrid_backward_hook(
 void _ensure_bilagrid_optim_state();
 void _engine_bilagrid_tv_into(float* tv_buf3_device);
 
+// How many pyramid levels the per-pixel loss will actually use at this render
+// resolution. The randomized backgrounds size their cells off the same count,
+// so the two must not drift.
+int engine_resolve_num_loss_scales(int num_loss_scales,
+                                   int loss_scale_min_pixels,
+                                   int64_t H, int64_t W);
+
 // Background blend: forward runs inside forward_3dgs, out of place, so viewer
 // renders blend too. The backward hook adds v_T, rewrites v_render_rgb, and
 // folds in overexposure_reg -- which needs the blend composite.

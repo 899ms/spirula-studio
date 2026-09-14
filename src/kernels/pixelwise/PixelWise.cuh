@@ -206,6 +206,7 @@ void blend_background_noise_forward(
     int transfer,
     bool is_linear,
     bool blocky,                          // tiled RGB corners instead of U[0,1)
+    unsigned block_px,                    // cell side; 0 = one cell per image
     DeviceTensor3D<float3> rgb,           // [B, H, W, 3]
     DeviceTensor3D<float>  transmittance, // [B, H, W, 1]
     float randomize_weight,
@@ -218,10 +219,30 @@ void blend_background_noise_backward(
     int transfer,
     bool is_linear,
     bool blocky,                             // tiled RGB corners instead of noise
+    unsigned block_px,                       // cell side; 0 = one cell per image
     DeviceTensor3D<float3> rgb,              // [B, H, W, 3] PRE-blend
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    float overexposure_weight,               // fused image-space reg, 0 = off
+    DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
+    DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]
+    DeviceTensor3D<float>  v_transmittance   // [B, H, W, 1]
+);
+
+
+void blend_background_color_forward(
+    DeviceTensor3D<float3> rgb,           // [B, H, W, 3]
+    DeviceTensor3D<float>  transmittance, // [B, H, W, 1]
+    float3 background,                    // working color space
+    DeviceTensor3D<float3> out_rgb        // [B, H, W, 3]
+);
+
+
+void blend_background_color_backward(
+    DeviceTensor3D<float3> rgb,              // [B, H, W, 3] PRE-blend
+    DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
+    float3 background,                       // working color space
     float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]

@@ -247,35 +247,40 @@ void engine_ppisp_forward(TorchTensorView cam_indices);
 void engine_ppisp_optim_step(int step, const PpispStepConfig& cfg);
 
 // --- Background blending (applied BEFORE bilagrid/PPISP) ---
-//
-// Two modes -- exactly one of these init calls activates background blending:
-//   Noise: random per-pixel color, warmup-weighted via cfg.background.randomize_weight.
-//   SH:    skybox = SH(world ray dir), DC (slot 0) seeds the "background_color"
-//          plus higher-order bands; both updated by Adam when train_color=true.
-//
-// dc_color is the linear-space DC color used at SH init time (set slot 0).
+// Exactly one of these init calls activates it; `--background-mode` picks.
+
+// Random color per pixel, warmup-weighted via cfg.background.randomize_weight.
 void engine_init_background_noise(int splat_transfer, bool splat_is_linear);
 // Same blend, but the draw is one of the 8 RGB cube corners per tile instead
 // of per-pixel noise: the extremes cost residual transparency the most, and a
 // tile survives the SSIM window that averages per-pixel noise back to grey.
 void engine_init_background_pseudorandom(int splat_transfer, bool splat_is_linear);
+// Same blend again over one cell covering the whole frame: a flat color that
+// changes every step, warmup-weighted like the other two.
+void engine_init_background_random(int splat_transfer, bool splat_is_linear);
+// `color` is display-referred RGB in [0, 1]; the engine converts it once, and
+// all-black turns the background OFF instead of blending a no-op.
+void engine_init_background_color(const float color[3], int splat_transfer,
+                                  bool splat_is_linear);
+// Skybox = SH(world ray dir); slot 0 is the DC color, and Adam updates the
+// whole table.
 void engine_init_background_sh(
     int sh_degree, int splat_transfer, bool splat_is_linear);
 
-// Per-iter (seed, randomize_weight) for the next forward_3dgs background blend.
-// Training calls this each step; the viewer/eval path can ignore it and reuse
-// the last-stashed values (the engine defaults of 0/0 produce a uniform
-// half-gray noise blend, avoiding per-frame flicker in noise-mode viewer renders).
-void engine_set_background_step_params(uint32_t seed, float randomize_weight);
+// Per-iter values for the next forward_3dgs blend. The loss scale pair is the
+// LossConfig's, because the randomized backgrounds size their cells over the
+// same pyramid. All-zero is the flicker-free viewer/eval default.
+void engine_set_background_step_params(uint32_t seed, float randomize_weight,
+                                       int num_loss_scales,
+                                       int loss_scale_min_pixels);
 
 // Adam step over the SH coefficient table. No-op for Noise mode or when SH
 // training was not enabled at init.
 void engine_background_optim_step(int step, const BackgroundStepConfig& cfg);
 
-// Copy the engine's background image for the current camera setup to a host
-// (..., H, W, 3) float buffer. SH mode: returns the skybox rendered by the
-// most recent forward_3dgs. Noise mode: returns a uniform mean-color image.
-// Returns 1 on success, 0 if no engine background is active.
+// Copy the engine's background for the current cameras into a host
+// (..., H, W, 3) float buffer: SH gives the last forward's skybox, Color and
+// the randomized modes a flat fill. 0 when no background is active.
 int engine_copy_background_to_host(TorchTensorView out_image);
 
 // --- Linear / wide-gamut color space ---
