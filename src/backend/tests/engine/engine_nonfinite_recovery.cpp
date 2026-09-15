@@ -201,7 +201,7 @@ static int64_t run_case(const char* which, const char* label,
                           ttv(s.intr.data(), 4, {C, 4}),
                           ttv(s.dist.data(), 4, {C, kCameraDistortionParams}));
         engine_init_bilagrid_rgb(C, "ppisp", 8, 16, 16, 8, 16, true);
-        engine_init_ppisp(C, "no_crf", true);
+        engine_init_ppisp(C, "no_crf", true, true);
     }
     step_n(s, 1, 6);
     Health before = count_dead();
@@ -229,7 +229,8 @@ static bool ppisp_grad_case(float poison) {
                       ttv(s.vm.data(), 4, {C, 4, 4}),
                       ttv(s.intr.data(), 4, {C, 4}),
                       ttv(s.dist.data(), 4, {C, kCameraDistortionParams}));
-    engine_init_ppisp(C, "no_crf", /*use_adagrad=*/true);
+    engine_init_ppisp(C, "no_crf", /*use_adagrad=*/true,
+                      /*exposure_arithmetic_mean=*/true);
     step_n(s, 1, 2);
 
     int64_t n = engine().ppisp.params.numel();

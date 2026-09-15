@@ -258,6 +258,7 @@ inline int train_tier_rank(const char* tier) {
     X(bool, use_ppisp, true, "correction", "basic", "")                      \
     X(std::string, ppisp_param_type, "no_crf_no_vig", "correction", "basic", "original|rqs|no_crf|no_crf_clamp|no_crf_no_vig|no_crf_no_vig_clamp") \
     X(bool, ppisp_exposure_from_exif, false, "correction", "basic", "")      \
+    X(bool, ppisp_exposure_arithmetic_mean, true, "correction", "expert", "") \
     X(bool, apply_ppisp_before_bilagrid, true, "correction", "advanced", "") \
     X(bool, apply_ppisp_before_color_space, false, "correction", "advanced", "") \
     X(bool, use_adagrad_ppisp_optim, true, "correction", "advanced", "")     \
@@ -431,7 +432,7 @@ inline bool train_apply_preset(TrainConfig& c, const std::string& name) {
         // c.apply_ppisp_before_color_space = true;
         // c.ppisp_adagrad_lr = 0.25f;
         c.ppisp_exposure_from_exif = true;
-        // c.background_mode = "noise";
+        c.background_mode = "random";
         // c.depth_distortion_reg = 0.01f;
         c.loss_saturation_threshold = 0.98f;
         c.normalize_loss_by_luminance = true;

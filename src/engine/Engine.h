@@ -231,8 +231,11 @@ void engine_bilagrid_optim_step(int step, const BilagridStepConfig& cfg);
 
 // --- PPISP (RGB only; PpispStepConfig picks where in the chain it runs) ---
 // ppisp_param_spec (kernels/pixelwise/PixelWise.cuh) owns the param_type list.
-// exposure_init optionally seeds params[:, 0] with [n_grids] log2 gains.
+
+// exposure_init optionally seeds params[:, 0] with [n_grids] log2 gains;
+// exposure_arithmetic_mean regularizes log2(mean gain), else mean(log2 gain).
 void engine_init_ppisp(int n_grids, std::string param_type, bool use_adagrad,
+                       bool exposure_arithmetic_mean,
                        const std::vector<float>& exposure_init = {});
 
 // Apply PPISP forward in place on the current rendered RGB; saves a pre-PPISP

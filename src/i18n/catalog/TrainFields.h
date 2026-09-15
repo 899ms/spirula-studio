@@ -7606,6 +7606,80 @@ SS_MSG(ppisp_exposure_from_exif_help,
        "etiketleri olmayan fotoğraflar ortalamadan başlar. Pozlama çekim boyunca "
        "değişiyorsa yardımcı olur."));
 
+SS_MSG(ppisp_exposure_arithmetic_mean,
+    EN("Neutral exposure by average gain"), JA("平均の倍率で露出を中立に"),
+    ZH_HANS("按平均倍率保持曝光中性"), ZH_HANT("按平均倍率保持曝光中性"),
+    KO("평균 배율로 노출 중립"), DE("Neutrale Belichtung über mittleren Faktor"),
+    FR("Exposition neutre par gain moyen"),
+    ES("Exposición neutra por ganancia media"),
+    PT("Exposição neutra pelo ganho médio"),
+    IT("Esposizione neutra per guadagno medio"),
+    NL("Neutrale belichting via gemiddelde factor"),
+    RU("Нейтральная экспозиция по среднему множителю"),
+    TR("Ortalama çarpanla nötr pozlama"));
+SS_MSG(ppisp_exposure_arithmetic_mean_help,
+    EN("Center the per-photo exposure corrections so their brightness multipliers "
+       "average to 1, rather than their values in stops averaging to 0. Applies "
+       "to both the neutral exposure penalty and the EXIF start. When exposure "
+       "varies widely, this keeps the splats at the photos' average brightness "
+       "instead of darker."),
+    JA("写真ごとの露出補正を、段数での値の平均が 0 になるようにではなく、明るさ"
+       "の倍率の平均が 1 になるように中心を合わせます。露出を中立に保つ強さと "
+       "EXIF による露出の初期化の両方に適用されます。露出の差が大きいとき、スプ"
+       "ラットが暗くならず、写真の平均的な明るさに保たれます。"),
+    ZH_HANS("让逐张照片的曝光校正以亮度倍率的平均值为 1 为中心，而不是以档数"
+            "的平均值为 0。同时作用于保持曝光中性的强度和用 EXIF 初始化曝光。"
+            "曝光差异很大时，这会让泼溅保持在照片的平均亮度，而不是更暗。"),
+    ZH_HANT("讓逐張照片的曝光校正以亮度倍率的平均值為 1 為中心，而不是以檔數"
+            "的平均值為 0。同時作用於保持曝光中性的強度和用 EXIF 初始化曝光。"
+            "曝光差異很大時，這會讓潑濺保持在照片的平均亮度，而不是更暗。"),
+    KO("사진별 노출 보정을, 스톱 단위 값의 평균이 0이 되도록이 아니라 밝기 배율"
+       "의 평균이 1이 되도록 맞춥니다. 노출을 중립으로 유지하는 강도와 EXIF로 노"
+       "출 초기화에 모두 적용됩니다. 노출 차이가 클 때 스플랫이 더 어두워지지 않"
+       "고 사진의 평균 밝기에 맞춰집니다."),
+    DE("Die Belichtungskorrekturen pro Foto so zentrieren, dass ihre "
+       "Helligkeitsfaktoren im Mittel 1 ergeben, statt dass ihre Werte in "
+       "Blendenstufen im Mittel 0 ergeben. Gilt für die Strafe für nicht neutrale "
+       "Belichtung und den Belichtungsstart aus EXIF. Bei stark schwankender "
+       "Belichtung bleiben die Splats so bei der mittleren Helligkeit der Fotos "
+       "statt dunkler."),
+    FR("Centrer les corrections d'exposition par photo pour que leurs facteurs de "
+       "luminosité aient une moyenne de 1, plutôt que leurs valeurs en stops une "
+       "moyenne de 0. S'applique à la pénalité d'exposition non neutre et à "
+       "l'exposition initiale depuis l'EXIF. Quand l'exposition varie fortement, "
+       "les splats restent ainsi à la luminosité moyenne des photos au lieu "
+       "d'être plus sombres."),
+    ES("Centrar las correcciones de exposición por foto para que sus factores de "
+       "brillo promedien 1, en lugar de que sus valores en pasos promedien 0. Se "
+       "aplica a la penalización de exposición no neutra y a la exposición inicial "
+       "desde EXIF. Cuando la exposición varía mucho, así los splats quedan con el "
+       "brillo medio de las fotos en vez de más oscuros."),
+    PT("Centralizar as correções de exposição por foto para que seus fatores de "
+       "brilho tenham média 1, em vez de seus valores em stops terem média 0. Vale "
+       "para a penalidade de exposição não neutra e para a exposição inicial do "
+       "EXIF. Quando a exposição varia muito, os splats ficam assim no brilho "
+       "médio das fotos em vez de mais escuros."),
+    IT("Centrare le correzioni di esposizione di ogni foto in modo che i loro "
+       "fattori di luminosità abbiano media 1, invece che i loro valori in stop "
+       "abbiano media 0. Vale per la penalità di esposizione non neutra e per "
+       "l'esposizione iniziale da EXIF. Quando l'esposizione varia molto, gli "
+       "splat restano così alla luminosità media delle foto invece che più scuri."),
+    NL("De belichtingscorrecties per foto zo centreren dat hun helderheidsfactoren "
+       "gemiddeld 1 zijn, in plaats van dat hun waarden in stops gemiddeld 0 zijn. "
+       "Geldt voor de straf voor niet-neutrale belichting en voor het starten van "
+       "de belichting vanuit EXIF. Bij sterk wisselende belichting blijven de "
+       "splats zo op de gemiddelde helderheid van de foto's in plaats van donkerder."),
+    RU("Центрировать коррекции экспозиции каждого фото так, чтобы в среднем 1 "
+       "давали их множители яркости, а не 0 — их значения в ступенях. Действует и "
+       "на штраф за смещение экспозиции, и на начальную экспозицию из EXIF. При "
+       "сильно различающейся экспозиции сплаты так остаются на средней яркости "
+       "фотографий, а не темнее."),
+    TR("Fotoğraf başına pozlama düzeltmelerini, durak cinsinden değerlerinin "
+       "ortalaması 0 olacak şekilde değil, parlaklık çarpanlarının ortalaması 1 "
+       "olacak şekilde ortalar. Hem nötr olmayan pozlama cezasına hem de EXIF'ten "
+       "pozlama başlangıcına uygulanır. Pozlama çok değiştiğinde splat'lar böylece "
+       "daha karanlık kalmak yerine fotoğrafların ortalama parlaklığında kalır."));
+
 SS_MSG(apply_ppisp_before_bilagrid,
     EN("Camera correction first"), JA("カメラ補正を先に適用"),
     ZH_HANS("先做相机校正"), ZH_HANT("先做相機校正"),

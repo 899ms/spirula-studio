@@ -461,6 +461,7 @@ struct PpispState {
     bool enabled            = false;
     bool optim_initialized  = false;
     bool use_adagrad        = false;
+    bool exposure_arithmetic_mean = false;
     // Per-iteration mirror of the PpispStepConfig order flags, stashed by the
     // forward path so the backward hooks in EngineLoss.cpp can invert the
     // order they picked. Reset each step.

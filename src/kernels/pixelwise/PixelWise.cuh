@@ -595,6 +595,7 @@ void compute_ppsip_regularization_forward(
     TorchTensorView ppisp_params,       // [B, PPISP_NUM_PARAMS]
     const std::array<float, (int)PPISPRegLossIndex::length> loss_weights_0,
     std::string param_type,
+    bool exposure_arithmetic_mean,      // log2(mean gain) = 0, else mean(log2 gain) = 0
     TorchTensorView losses,             // [PPISPRegLossIndex::length] (must be pre-zeroed)
     TorchTensorView raw_losses          // [B+1, RawPPISPRegLossIndex::length] (must be pre-zeroed)
 );
@@ -606,5 +607,6 @@ void compute_ppsip_regularization_backward(
     TorchTensorView raw_losses,         // [B+1, RawPPISPRegLossIndex::length]
     TorchTensorView v_losses,           // [PPISPRegLossIndex::length]
     std::string param_type,
+    bool exposure_arithmetic_mean,
     TorchTensorView v_ppisp_params      // [B, PPISP_NUM_PARAMS] (must be pre-zeroed)
 );
