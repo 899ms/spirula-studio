@@ -470,41 +470,52 @@ SS_MSG(trk_keep_prompted,
        "oluşturma hattının istediği budur"));
 
 SS_MSG(mask_dilate,
-    EN("grow every detection by this share of its own size before it joins the "
-       "mask, covering the rim of colour a tight outline leaves behind. 0 turns "
-       "the margin off"),
-    JA("マスクに加える前に、検出ごとに自身の大きさのこの割合だけ膨らませます。"
-       "輪郭がきつすぎて残る色の縁を覆うためです。0 で余白なし"),
-    ZH_HANS("在并入蒙版之前，把每个检测按自身尺寸的这个比例向外扩张，"
-            "用来盖住紧贴轮廓留下的一圈残色。填 0 关闭"),
-    ZH_HANT("在併入遮罩之前，把每個偵測按自身尺寸的這個比例向外擴張，"
-            "用來蓋住緊貼輪廓留下的一圈殘色。填 0 關閉"),
-    KO("마스크에 합치기 전에 각 검출을 자기 크기의 이 비율만큼 넓힙니다. 윤곽선이 "
-       "너무 딱 맞아 남는 테두리 색을 덮기 위해서입니다. 0이면 여백 없음"),
-    DE("jede Erkennung vor dem Zusammenfassen um diesen Anteil ihrer eigenen "
-       "Größe wachsen lassen, was den Farbsaum abdeckt, den eine zu enge Kontur "
-       "zurücklässt. 0 schaltet den Rand ab"),
-    FR("élargir chaque détection de cette fraction de sa propre taille avant de "
-       "la fondre dans le masque, ce qui couvre le liseré que laisse un contour "
-       "trop serré. 0 supprime la marge"),
-    ES("agrandar cada detección en esta fracción de su propio tamaño antes de "
-       "unirla a la máscara, lo que tapa el borde que deja un contorno "
-       "demasiado ceñido. 0 quita el margen"),
-    PT("aumentar cada detecção nesta fração do seu próprio tamanho antes de a "
-       "juntar à máscara, o que tapa a orla que um contorno demasiado justo "
-       "deixa. 0 desliga a margem"),
-    IT("ingrandire ogni rilevamento di questa frazione della propria dimensione "
-       "prima di unirlo alla maschera, il che copre il bordo che un contorno "
-       "troppo aderente lascia. 0 toglie il margine"),
-    NL("elke detectie met dit deel van haar eigen grootte laten groeien voordat "
-       "ze in het masker opgaat, wat de kleurrand dekt die een te strakke "
-       "omtrek achterlaat. 0 zet de marge uit"),
-    RU("увеличить каждое обнаружение на эту долю его собственного размера перед "
-       "объединением в маску: это закрывает кайму, которую оставляет слишком "
-       "плотный контур. 0 отключает поле"),
-    TR("her algılamayı maskeye katılmadan önce kendi boyutunun bu oranı kadar "
-       "büyütür; böylece fazla dar bir sınırın bıraktığı renk kenarı kapanır. "
-       "0 payı kapatır"));
+    EN("move every detection's outline by this share of its own size before it "
+       "joins the mask. Positive grows it, covering the rim of colour a tight "
+       "outline leaves behind; negative trims it back inside. 0 turns the "
+       "margin off"),
+    JA("マスクに加える前に、検出ごとに輪郭を自身の大きさのこの割合だけ動かします。"
+       "正なら外側へ広げて、輪郭がきつすぎて残る色の縁を覆います。負なら内側へ"
+       "削ります。0 で余白なし"),
+    ZH_HANS("在并入蒙版之前，把每个检测的轮廓按自身尺寸的这个比例移动。正值向外"
+            "扩张，用来盖住紧贴轮廓留下的一圈残色；负值向内收进去。填 0 关闭"),
+    ZH_HANT("在併入遮罩之前，把每個偵測的輪廓按自身尺寸的這個比例移動。正值向外"
+            "擴張，用來蓋住緊貼輪廓留下的一圈殘色；負值向內收進去。填 0 關閉"),
+    KO("마스크에 합치기 전에 각 검출의 윤곽선을 자기 크기의 이 비율만큼 옮깁니다. "
+       "양수면 바깥으로 넓혀 윤곽선이 너무 딱 맞아 남는 테두리 색을 덮고, 음수면 "
+       "안쪽으로 깎습니다. 0이면 여백 없음"),
+    DE("die Kontur jeder Erkennung vor dem Zusammenfassen um diesen Anteil "
+       "ihrer eigenen Größe verschieben. Positiv lässt sie wachsen und deckt "
+       "den Farbsaum ab, den eine zu enge Kontur zurücklässt; negativ trägt sie "
+       "nach innen ab. 0 schaltet den Rand ab"),
+    FR("déplacer le contour de chaque détection de cette fraction de sa propre "
+       "taille avant de la fondre dans le masque. Positif l'élargit et couvre "
+       "le liseré que laisse un contour trop serré ; négatif le rentre. 0 "
+       "supprime la marge"),
+    ES("mover el contorno de cada detección en esta fracción de su propio "
+       "tamaño antes de unirla a la máscara. En positivo lo agranda y tapa el "
+       "borde que deja un contorno demasiado ceñido; en negativo lo mete hacia "
+       "dentro. 0 quita el margen"),
+    PT("mover o contorno de cada detecção nesta fração do seu próprio tamanho "
+       "antes de a juntar à máscara. Positivo aumenta-o e tapa a orla que um "
+       "contorno demasiado justo deixa; negativo puxa-o para dentro. 0 desliga "
+       "a margem"),
+    IT("spostare il contorno di ogni rilevamento di questa frazione della "
+       "propria dimensione prima di unirlo alla maschera. Positivo lo ingrandisce "
+       "e copre il bordo che un contorno troppo aderente lascia; negativo lo "
+       "ritira all'interno. 0 toglie il margine"),
+    NL("de omtrek van elke detectie met dit deel van haar eigen grootte "
+       "verplaatsen voordat ze in het masker opgaat. Positief laat hem groeien "
+       "en dekt de kleurrand die een te strakke omtrek achterlaat; negatief "
+       "trekt hem naar binnen. 0 zet de marge uit"),
+    RU("сместить контур каждого обнаружения на эту долю его собственного "
+       "размера перед объединением в маску. Положительное расширяет его и "
+       "закрывает кайму, которую оставляет слишком плотный контур; "
+       "отрицательное втягивает внутрь. 0 отключает поле"),
+    TR("her algılamanın dış çizgisini maskeye katılmadan önce kendi boyutunun "
+       "bu oranı kadar kaydırır. Artı değer büyütür ve fazla dar bir sınırın "
+       "bıraktığı renk kenarını kapatır; eksi değer içeri çeker. 0 payı "
+       "kapatır"));
 
 SS_MSG(trk_overlay,
     EN("write a colour overlay instead"),

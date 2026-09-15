@@ -454,6 +454,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("use_found_masks", cfg_str(_use_found_masks));
     line("flip_found_masks", cfg_str(_flip_found_masks));
     line("masking_enabled", cfg_str(_mask_enable));
+    line("mask_features", cfg_str(_mask_features));
     line("mask_detect_every", std::to_string(_mask_detect_every));
 
     section(i18n::format(msg::runlog_section_recon, {"SfM"}));
@@ -1136,9 +1137,15 @@ void GuiApp::handle_drop(const std::vector<std::string>& paths) {
         request_open_splat(paths[0]);
         return;
     }
+    // ... except on the dataset screen, where a finished dataset is an input
+    // like any other: that is how one gets masks, depth and normals added to
+    // it without its cameras being solved a second time.
     if (paths.size() == 1 && fs::is_directory(paths[0], ec) &&
         folder_looks_like_dataset(paths[0])) {
-        request_open_dataset(paths[0]);
+        if (_screen == Screen::NewDataset && !dataset_busy())
+            add_existing_dataset(paths[0]);
+        else
+            request_open_dataset(paths[0]);
         return;
     }
     if (paths.size() == 1 && fs::is_regular_file(paths[0], ec) &&
@@ -1488,6 +1495,9 @@ void GuiApp::add_sources(const std::vector<std::string>& paths, bool replace) {
     if (replace && !inputs.empty()) {
         _sources.clear();
         _mask_preview_input = 0;
+        // apply_source_presets() is about to move settings the stamp is made
+        // of, so it no longer describes anything this panel built.
+        _built_workspace.clear();
         // A different capture is a different job, and the geometry options
         // are remembered nowhere: a run must never quietly cost an hour of
         // inference nobody asked for. (Not mid-run: that would disable it.)
@@ -1524,6 +1534,24 @@ void GuiApp::add_sources(const std::vector<std::string>& paths, bool replace) {
     if (_mask_preview_input >= (int)_sources.size()) _mask_preview_input = 0;
     adopt_exr_color_space();
     refresh_sources();
+}
+
+void GuiApp::add_existing_dataset(const std::string& dir) {
+    if (dir.empty()) return;
+    // The ordinary route already lands on the right pair for the usual
+    // layout: resolve_photo_folder picks images/ out of the folder and
+    // refresh_sources makes its parent -- this folder -- the output.
+    add_sources({dir}, /*replace=*/true);
+    if (_sources.empty()) return;
+    std::error_code ec;
+    if (!folder_looks_like_dataset(dir) ||
+        !fs::equivalent(_sources[0].path, dir, ec))
+        return;
+    // A dataset whose photographs sit at its root rather than under images/.
+    // They are read where they are: gathering them into an images/ beside the
+    // model would leave the folder holding the capture twice.
+    _photo_import = PhotoImport::InPlace;
+    _workspace = _workspace_auto = fs::absolute(dir, ec).string();
 }
 
 // The engine-wide settings the list itself decides. A video is a capture in
@@ -1648,6 +1676,7 @@ const char* GuiApp::dir_key(PickAction a, FileDialog::Mode m) {
     switch (a) {
         case PickAction::OpenDataset:
         case PickAction::BatchDataset:
+        case PickAction::SourceDataset:
         case PickAction::MeshPhotos:        return "dataset";
         case PickAction::SourceImages:      return "photos";
         case PickAction::SourceVideo:       return "video";
@@ -1700,6 +1729,10 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
         case PickAction::SourceImages:
         case PickAction::SourceVideo:
             add_sources(paths, /*replace=*/_screen != Screen::NewDataset);
+            _screen = Screen::NewDataset;
+            break;
+        case PickAction::SourceDataset:
+            add_existing_dataset(path);
             _screen = Screen::NewDataset;
             break;
         case PickAction::SourceReplace:
@@ -2321,7 +2354,7 @@ void GuiApp::sync_dataset_jobs() {
     prep.mask_negative_prompt = _mask.negative_prompt;
     prep.mask_keep_subject = _mask.keep_subject;
     prep.mask_max_image_size = _mask.max_image_size;
-    prep.mask_dilate_ratio = _mask.dilate_ratio;
+    prep.mask_dilate_ratio = _mask.boundary_ratio();
     prep.mask_threshold = _mask.threshold;
     prep.mask_nms = _mask.nms;
     prep.mask_memory = _mask_memory;
@@ -2365,6 +2398,9 @@ void GuiApp::sync_dataset_jobs() {
     _sfm_job.prep.redo_frames = _colmap_job.redo_frames = _redo_frames;
     _sfm_job.prep.redo_masks = _colmap_job.redo_masks = _redo_masks;
     _sfm_job.redo_model = _colmap_job.redo_model = _redo_model;
+    _sfm_job.mask_features = _colmap_job.mask_features = _mask_features;
+    _sfm_job.settings_built_model = _colmap_job.settings_built_model =
+        !_workspace.empty() && _workspace == _built_workspace;
     // The same step either way: `spirula geometry` over the finished dataset.
     _sfm_job.geometry = _colmap_job.geometry = _geometry;
     _sfm_job.geometry.overwrite = _colmap_job.geometry.overwrite =
@@ -2392,8 +2428,36 @@ void GuiApp::update_dataset_job() {
     else                                           _colmap.update(_colmap_job);
 }
 
+// Masks the reconstruction being kept has never seen, with the panel asking
+// for masked feature points: the run can add them for training alone or spend
+// the reconstruction again on them, and only the user knows which.
+bool GuiApp::masks_miss_kept_model() {
+    if (!_mask_enable || !_mask_features || _redo_model) return false;
+    if (!workspace_state().model) return false;
+    // A model this panel built is one these settings built, masks included --
+    // and if they have moved since, the run replaces it anyway.
+    if (_workspace == _built_workspace) return false;
+    // An input that arrived with its own masks is not segmented, so the
+    // dataset gains nothing the model could have missed.
+    for (const PrepInput& s : _sources)
+        if (s.mask_dir.empty()) return true;
+    return false;
+}
+
 void GuiApp::start_dataset_job() {
+    if (masks_miss_kept_model()) {
+        _mask_recon_open = true;
+        return;
+    }
+    launch_dataset_job();
+}
+
+void GuiApp::launch_dataset_job() {
     app::set_crash_note("building dataset " + _workspace);
+    // The stamp this run leaves behind describes the settings on the screen
+    // only when the run actually reconstructs; after one that keeps the model
+    // it goes on describing whoever built it.
+    if (_redo_model || !workspace_state().model) _built_workspace = _workspace;
     sync_dataset_jobs();
     const std::string stamp = run_log_stamp();
     const fs::path prep_log_file =
@@ -2568,6 +2632,13 @@ void GuiApp::draw_dataset_source() {
         ImGui::SameLine();
         ui::TextDisabled(dmsg::no_input_yet);
     }
+    // A row of its own: a finished dataset is not raw input, and three button
+    // labels in a row run off the edge of a narrow panel in several languages.
+    if (ui::Button(dmsg::add_dataset)) {
+        open_pick(PickAction::SourceDataset, msg::pick_existing_dataset.get(),
+                  FileDialog::Mode::Folder);
+    }
+    ui::help_on_hover(dmsg::add_dataset_help);
 
     // Masks that came WITH the photos are adopted automatically, which is
     // right for a prepared capture and wrong for a folder whose masks/ happens
@@ -2702,12 +2773,13 @@ bool colmap_lens_combo(const char* id, int* idx) {
 void GuiApp::draw_dataset_basics() {
     const bool builtin = effective_engine() == Engine::BuiltIn;
 
-    // A model already in the output folder is reused, so these settings reach
-    // it only through a rebuild -- which a stamp mismatch forces
-    // (ReconStamp.h), and which a model that arrived without one never gets.
+    // A model in the output folder is reused, so these settings reach it only
+    // through a rebuild -- which a mismatch against the stamp THIS panel wrote
+    // forces (ReconStamp.h). One it did not build is kept regardless.
     const WorkspaceState& prior = workspace_state();
     const bool reusing = !dataset_busy() && prior.model && !_redo_model;
-    const bool inert = reusing && !prior.recon_stamp;
+    const bool inert =
+        reusing && !(prior.recon_stamp && _workspace == _built_workspace);
     if (reusing)
         ui::TextColoredWrapped(inert ? kWarn : kDim,
                                inert ? dmsg::recon_reuse_locked
@@ -3137,6 +3209,14 @@ void GuiApp::draw_masking_options() {
             if (in.stencil.empty()) in.stencil.detect_border = true;
     }
     ui::help_on_hover(dmsg::mask_border_enable_help);
+
+    // Asked wherever the dataset ends up with masks at all, including ones
+    // that arrived with the photographs: what it decides is the reconstruction,
+    // not whether they are written.
+    if (_mask_enable || _border_enable || with_masks > 0) {
+        ui::Checkbox(dmsg::mask_for_features, &_mask_features);
+        ui::help_on_hover(dmsg::mask_for_features_help);
+    }
     if (!_mask_enable && !_border_enable) return;
 
     ImGui::Indent();
@@ -3288,12 +3368,14 @@ void GuiApp::draw_masking_options() {
             _mask.max_image_size = std::max(0, _mask.max_image_size);
         ui::help_on_hover(dmsg::mask_max_size_help);
         ImGui::SetNextItemWidth(px(220.0f));
-        float margin_pct = _mask.dilate_ratio * 100.0f;
+        float& ratio = keep_subject ? _mask.shrink_ratio : _mask.dilate_ratio;
+        float margin_pct = ratio * 100.0f;
         if (ui::SliderFloat(keep_subject ? dmsg::mask_dilate_keep
                                          : dmsg::mask_dilate_remove,
                             &margin_pct, 0.0f, 50.0f, "%.0f%%"))
-            _mask.dilate_ratio = margin_pct / 100.0f;
-        ui::help_on_hover(dmsg::mask_dilate_help);
+            ratio = margin_pct / 100.0f;
+        ui::help_on_hover(keep_subject ? dmsg::mask_shrink_help
+                                       : dmsg::mask_dilate_help);
 
         // The rest is the memory bank, which photos never get.
         bool any_video = false;
@@ -3962,6 +4044,51 @@ void GuiApp::draw_drop_intermediate_modal() {
     ImGui::EndPopup();
 }
 
+// Masks the reconstruction being kept has never seen. Adding them is minutes
+// and rebuilding with the masked feature points is the whole hour again; both
+// are what somebody means by the button, so it asks rather than choosing.
+void GuiApp::draw_mask_recon_modal() {
+    if (_mask_recon_open) {
+        ui::OpenPopup(dmsg::mask_recon_title);
+        _mask_recon_open = false;
+        _mask_recon_shown = true;
+    }
+    if (!_mask_recon_shown) return;
+    if (!ui::BeginPopupModal(dmsg::mask_recon_title, nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+        _mask_recon_shown = false;
+        return;
+    }
+    ImGui::PushTextWrapPos(px(460.0f));
+    ui::Text(dmsg::mask_recon_confirm, {_workspace});
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+
+    bool go = false;
+    if (ui::Button(dmsg::mask_recon_rebuild, ImVec2(px(220.0f), 0))) {
+        _redo_model = go = true;
+    }
+    ImGui::SameLine();
+    if (ui::Button(dmsg::mask_recon_masks_only, ImVec2(px(220.0f), 0))) {
+        // Answered for good rather than per run: the checkbox now shows what
+        // was decided here, and the question does not come back.
+        _mask_features = false;
+        go = true;
+    }
+    ui::help_on_hover(dmsg::mask_recon_masks_only_help);
+    ImGui::SameLine();
+    if (ui::Button(dmsg::cancel, ImVec2(px(120.0f), 0))) {
+        _mask_recon_shown = false;
+        ImGui::CloseCurrentPopup();
+    }
+    if (go) {
+        _mask_recon_shown = false;
+        ImGui::CloseCurrentPopup();
+        launch_dataset_job();
+    }
+    ImGui::EndPopup();
+}
+
 // ---------------------------------------------------------------------------
 // Advanced: the photographs' colour space
 // ---------------------------------------------------------------------------
@@ -4586,6 +4713,7 @@ void GuiApp::draw_new_dataset() {
     if (_geometry_panel.is_open()) _geometry_panel.draw(_geometry);
     draw_clear_project_modal();
     draw_drop_intermediate_modal();
+    draw_mask_recon_modal();
     draw_license_modal();
 }
 

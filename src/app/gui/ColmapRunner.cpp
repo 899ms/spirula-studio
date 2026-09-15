@@ -446,7 +446,7 @@ static std::vector<std::string> colmap_recon_args(const ColmapJob& job) {
         "--merge-models", flag(job.merge_models),
         "--final-ba", flag(job.final_bundle_adjust),
         "--vocab-tree", job.vocab_tree_path,
-        "--masks", flag(job.mask_enable),
+        "--masks", flag(job.mask_enable && job.mask_features),
         "--mask-prompt", job.mask_enable ? job.mask_prompt : std::string(),
     };
 }
@@ -467,16 +467,17 @@ void ColmapRunner::run(ColmapJob job) {
         // input's own images are not leftovers (see SfmRunner).
         const WorkspaceState prior = probe_workspace(ws.string(), job.inputs);
         // The model, as the settings that make it, against the ones the model
-        // already there was made with. A model with no stamp came from
-        // somewhere else and is reused whatever the panel says.
+        // already there was made with -- which only answers anything for a
+        // stamp these settings wrote (SfmJob::settings_built_model).
         ReconStamp now;
         now.present = true;
         now.engine = "colmap";
         now.args = colmap_recon_args(job);
         const std::string changed =
             recon_stamp_change(read_recon_stamp(ws.string()), now);
-        const bool reuse_model = prior.model && !job.redo_model && changed.empty();
-        if (prior.model && !job.redo_model && !changed.empty())
+        const bool rebuild_for_settings = job.settings_built_model && !changed.empty();
+        const bool reuse_model = prior.model && !job.redo_model && !rebuild_for_settings;
+        if (prior.model && !job.redo_model && rebuild_for_settings)
             log(spirula::i18n::format(lmsg::sfm_settings_changed, {changed}));
         if (prior.resumable() && !job.resume)
             return fail("the workspace already contains an unfinished run "
@@ -633,7 +634,7 @@ void ColmapRunner::run(ColmapJob job) {
                 shared.push_back("--SiftExtraction.estimate_affine_shape");
                 shared.push_back("1");
             }
-            if (have_masks) {
+            if (have_masks && job.mask_features) {
                 shared.push_back("--ImageReader.mask_path");
                 shared.push_back(prep.mask_dir);
             }
@@ -825,7 +826,7 @@ void ColmapRunner::run(ColmapJob job) {
             // one is from a FINISHED run -- reuse it. An interrupted mapper
             // leaves nothing and simply reruns.
             std::vector<std::pair<int64_t, fs::path>> models;
-            if (job.resume && !job.redo_model && changed.empty() &&
+            if (job.resume && !job.redo_model && !rebuild_for_settings &&
                 !(models = enumerate_models()).empty()) {
                 log("Resume: " + std::to_string(models.size()) +
                     " existing model(s) under sparse/; skipping the mapper "

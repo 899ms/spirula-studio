@@ -72,7 +72,8 @@ public:
 private:
     enum class Screen { Home, NewDataset, Train, Viewer, Batch, Mesh };
     enum class PickAction {
-        None, OpenDataset, SourceImages, SourceVideo, SourceReplace, Workspace,
+        None, OpenDataset, SourceImages, SourceVideo, SourceDataset,
+        SourceReplace, Workspace,
         OutputPrefix, VocabTree, MaskModelFile, SplatFile,
         PresetFile, PresetSaveFolder, BatchDataset, BatchOutput, BatchPresetFile,
         MeshSource, MeshPhotos, MeshOutput, AddSplatFile
@@ -272,6 +273,19 @@ private:
     // Turning "keep intermediate files" OFF is the one option here that
     // destroys work: it is what makes a cancelled run resumable.
     void draw_drop_intermediate_modal();
+    // Masks that the kept reconstruction was not built with: the one question
+    // "Update dataset" cannot answer by itself (see masks_miss_kept_model).
+    void draw_mask_recon_modal();
+    // Is this run about to write masks the reconstruction it is keeping has
+    // never seen, with the panel asking for masked feature points? Then
+    // pressing the button means one of two runs, and it has to be asked which.
+    bool masks_miss_kept_model();
+    // Everything start_dataset_job does once that question is settled.
+    void launch_dataset_job();
+    // An existing dataset as an input: its images/ become the source and the
+    // folder itself the output, so the run adds to it instead of building a
+    // copy beside it.
+    void add_existing_dataset(const std::string& dir);
     // Every option back to what a freshly picked input would have given it.
     // The inputs, the output folder and the mask prompt are not options.
     void reset_recon_options();
@@ -510,8 +524,15 @@ private:
     // The output folder this screen derived from the inputs. Kept so a folder
     // the user typed is never overwritten when the input list changes.
     std::string _workspace_auto;
+    // The output folder this panel has reconstructed into, so its stamp
+    // describes the settings still on the screen (SfmJob::settings_built_model).
+    // Cleared when the input list is replaced, which resets settings of its own.
+    std::string _built_workspace;
     bool _resume = true;
     bool _mask_enable = false;
+    // Hide what the masks cover from feature detection too, not only from
+    // training (SfmJob::mask_features).
+    bool _mask_features = true;
     // PrepJob::mask_memory. Off by default: a prompt that matches a crowd pays
     // one model pass per object per frame for it. The two below only apply
     // with it on, and are kept here rather than in MaskSettings because the
@@ -652,6 +673,7 @@ private:
     bool _clear_open = false, _clear_shown = false;
     std::vector<std::string> _clear_targets;
     bool _drop_intermediate_open = false, _drop_intermediate_shown = false;
+    bool _mask_recon_open = false, _mask_recon_shown = false;
 
     // workspace_state()'s cache: what it was asked about and when.
     WorkspaceState _ws_state;

@@ -2034,7 +2034,15 @@ std::string parse_auto_args(const std::vector<std::string>& args, AutoRequest& o
             out.progress_dir = args[(size_t)++i];
             continue;
         }
-        if (a == "--no-masks") { cfg.mask_dir.clear(); maskdir_explicit = true; continue; }
+        // Claimed, not merely cleared: manifest_apply fills in anything the
+        // command line did not claim, and a manifest naming a mask_dir would
+        // otherwise hand the masks back to a run that just refused them.
+        if (a == "--no-masks") {
+            cfg.mask_dir.clear();
+            maskdir_explicit = true;
+            seen.insert("masks");
+            continue;
+        }
         if (a == "--no-manage") {
             cfg.manager.do_merge = cfg.manager.do_grow = cfg.manager.do_reseed = false;
             cfg.manager.do_audit = cfg.manager.do_split = cfg.manager.do_duplicate_split = false;

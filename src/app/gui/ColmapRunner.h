@@ -77,6 +77,8 @@ struct ColmapJob {
     bool redo_masks = false;
     bool redo_model = false;             // reconstruct again over existing
                                          // frames, masks and features
+    bool settings_built_model = false;   // see SfmJob
+    bool mask_features = true;           // ... and so is this
     PhotoImport photo_import = PhotoImport::ConvertJpeg;  // see PrepJob
 
     // Cameras

@@ -241,6 +241,21 @@ SS_MSG(pick_photo_folder,
     RU("Выбор папки с фотографиями"),
     TR("Fotoğraf klasörü seç"));
 
+SS_MSG(pick_existing_dataset,
+    EN("Select Dataset Folder"),
+    JA("データセットフォルダを選択"),
+    ZH_HANS("选择数据集文件夹"),
+    ZH_HANT("選擇資料集資料夾"),
+    KO("데이터셋 폴더 선택"),
+    DE("Datensatzordner wählen"),
+    FR("Choisir un dossier de jeu de données"),
+    ES("Seleccionar una carpeta de conjunto de datos"),
+    PT("Selecionar uma pasta de conjunto de dados"),
+    IT("Seleziona una cartella di set di dati"),
+    NL("Datasetmap kiezen"),
+    RU("Выбор папки набора данных"),
+    TR("Veri kümesi klasörü seç"));
+
 SS_MSG(pick_videos,
     EN("Select Videos"),
     JA("動画を選択"),

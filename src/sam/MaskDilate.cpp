@@ -1,4 +1,5 @@
-// Growing a detection before it joins the mask -- see MaskOptions::dilate_ratio.
+// Moving a detection's boundary before it joins the mask -- outward or inward,
+// see MaskOptions::dilate_ratio.
 //
 // Separate from Masking.cpp because none of it needs a model, a device or a
 // session: it is geometry over one binary mask, and a test binary can run it
@@ -10,6 +11,7 @@
 #include "nn/core/Parallel.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace sam {
@@ -30,16 +32,17 @@ void or_into(const Mask& m, std::vector<uint8_t>& hit) {
 }  // namespace
 
 int dilate_radius_px(const Box& box, float dilate_ratio) {
-    if (!(dilate_ratio > 0.0f)) return 0;
+    if (dilate_ratio == 0.0f) return 0;
     const float bw = std::max(1.0f, box.x1 - box.x0);
     const float bh = std::max(1.0f, box.y1 - box.y0);
-    // The odd kernel SIZE first, then the radius as half of it: growing by r on
-    // each side widens the box by 2r, so the box gains exactly `dilate_ratio`
-    // of its own mean side. Floor of 3 keeps a tiny detection growing at all.
-    int k = (int)(dilate_ratio * 0.5f * (bw + bh));
+    // The odd kernel SIZE first, then the radius as half of it: moving the
+    // boundary by r changes the box by 2r, so it gains or loses exactly
+    // `dilate_ratio` of its mean side. Floor of 3 keeps a tiny detection moving.
+    int k = (int)(std::fabs(dilate_ratio) * 0.5f * (bw + bh));
     if (k < 3) k = 3;
     k |= 1;
-    return (k - 1) / 2;
+    const int r = (k - 1) / 2;
+    return dilate_ratio > 0.0f ? r : -r;
 }
 
 void accumulate_dilated(const Mask& m, int radius, std::vector<uint8_t>& hit) {
@@ -47,7 +50,7 @@ void accumulate_dilated(const Mask& m, int radius, std::vector<uint8_t>& hit) {
     // A mask whose dimensions do not describe its bytes cannot be cropped, and
     // the union is still well defined; take it flat rather than drop it.
     const bool shaped = (size_t)m.width * (size_t)m.height == m.data.size();
-    if (radius <= 0 || !shaped) {
+    if (radius == 0 || !shaped) {
         or_into(m, hit);
         return;
     }
@@ -66,26 +69,34 @@ void accumulate_dilated(const Mask& m, int radius, std::vector<uint8_t>& hit) {
     }
     if (x1 < 0) return;
 
-    // The transform runs on the bounding box plus the margin and nothing else:
-    // every pixel it can reach is within `radius` of a set pixel, so the crop
-    // holds the whole answer, and clipping it to the frame IS the border rule.
-    const int cx0 = std::max(0, x0 - radius), cy0 = std::max(0, y0 - radius);
-    const int cx1 = std::min(m.width - 1, x1 + radius);
-    const int cy1 = std::min(m.height - 1, y1 + radius);
+    // The bounding box plus the offset holds the whole answer. Outward, the
+    // clip to the frame IS the border rule; inward the crop runs past it and
+    // repeats the border pixel, so a subject the frame cuts off keeps that edge.
+    const int pad = radius < 0 ? -radius : radius;
+    const int cx0 = radius > 0 ? std::max(0, x0 - pad) : x0 - pad;
+    const int cy0 = radius > 0 ? std::max(0, y0 - pad) : y0 - pad;
+    const int cx1 = radius > 0 ? std::min(m.width - 1, x1 + pad) : x1 + pad;
+    const int cy1 = radius > 0 ? std::min(m.height - 1, y1 + pad) : y1 + pad;
     const int cw = cx1 - cx0 + 1, ch = cy1 - cy0 + 1;
 
     std::vector<uint8_t> crop((size_t)cw * ch);
     for (int y = 0; y < ch; ++y) {
-        const uint8_t* src = m.data.data() + (size_t)(cy0 + y) * m.width + cx0;
+        const int sy = std::clamp(cy0 + y, 0, m.height - 1);
+        const uint8_t* src = m.data.data() + (size_t)sy * m.width;
         uint8_t* dst = crop.data() + (size_t)y * cw;
-        for (int x = 0; x < cw; ++x) dst[x] = src[x] > 127 ? 1 : 0;
+        for (int x = 0; x < cw; ++x)
+            dst[x] = src[std::clamp(cx0 + x, 0, m.width - 1)] > 127 ? 1 : 0;
     }
     edt::apply_mask_boundary_offset_in_place(crop.data(), ch, cw, (float)radius);
     for (int y = 0; y < ch; ++y) {
+        const int dy = cy0 + y;
+        if (dy < 0 || dy >= m.height) continue;
         const uint8_t* src = crop.data() + (size_t)y * cw;
-        uint8_t* dst = hit.data() + (size_t)(cy0 + y) * m.width + cx0;
-        for (int x = 0; x < cw; ++x)
-            if (src[x]) dst[x] = 1;
+        uint8_t* dst = hit.data() + (size_t)dy * m.width;
+        for (int x = 0; x < cw; ++x) {
+            const int dx = cx0 + x;
+            if (dx >= 0 && dx < m.width && src[x]) dst[dx] = 1;
+        }
     }
 }
 

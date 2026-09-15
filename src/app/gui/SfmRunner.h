@@ -88,6 +88,14 @@ struct SfmJob {
     // Replace the model in the output folder. A run left to itself REUSES one,
     // which is how a finished dataset gets masks and geometry without a rebuild.
     bool redo_model = false;
+    // Did these settings write the stamp beside that model (ReconStamp.h)?
+    // Only then does a difference from it mean the user asked for a different
+    // model; a panel pointed at a dataset it did not build is at its defaults.
+    bool settings_built_model = false;
+    // Keep feature detection out of the masked areas too, not only training.
+    // Off still writes the masks -- worth it where what they cover holds still
+    // and carries the finer detail the cameras converge on.
+    bool mask_features = true;
     int quality = 2;                  // 0 low, 1 medium, 2 high, 3 extreme
     int data_type = 0;                // 0 individual photos, 1 video, 2 internet
     std::string camera_model = "opencv";

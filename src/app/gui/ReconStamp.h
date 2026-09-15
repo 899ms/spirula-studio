@@ -3,11 +3,12 @@
 // The flags a reconstruction was built with, left in the workspace beside the
 // model they produced. Both runners keep a finished model rather than spending
 // an hour rebuilding one -- which is how a dataset somebody else reconstructed
-// gets masks and geometry -- and without this they kept one whose camera
-// model, quality or masking no longer had anything to do with the panel.
+// gets masks and geometry -- and this is how they notice that the panel has
+// since been asked for a different model.
 //
-// A model with no stamp came from somewhere else and is reused whatever the
-// panel says; only the flags say otherwise.
+// It only answers that question for the settings that WROTE it: a panel
+// pointed at a dataset it did not build is at its defaults, which describe no
+// model at all (SfmJob::settings_built_model).
 
 #include <string>
 #include <vector>

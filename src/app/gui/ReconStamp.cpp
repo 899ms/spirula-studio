@@ -1,8 +1,8 @@
 #include "app/gui/ReconStamp.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <filesystem>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -18,43 +18,59 @@ std::string flag_at(const std::vector<std::string>& args, size_t i) {
     return i < args.size() ? args[i] : std::string();
 }
 
+// The file is one token per line and a value can hold newlines -- the manifest
+// travels as its own text. Dropping such a line would shift every token after
+// it, so the stamp could never match the run that wrote it again.
+std::string escape(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\\')      out += "\\\\";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else                out += c;
+    }
+    return out;
+}
+
+std::string unescape(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] != '\\' || i + 1 >= s.size()) { out += s[i]; continue; }
+        const char c = s[++i];
+        out += c == 'n' ? '\n' : c == 'r' ? '\r' : c;
+    }
+    return out;
+}
+
 }  // namespace
 
 ReconStamp read_recon_stamp(const std::string& workspace) {
     ReconStamp st;
     if (workspace.empty()) return st;
-    FILE* f = std::fopen((fs::path(workspace) / kReconStampFile).string().c_str(), "r");
+    std::ifstream f(fs::path(workspace) / kReconStampFile, std::ios::binary);
     if (!f) return st;
-    char line[4096];
+    std::string s;
     bool first = true;
-    while (std::fgets(line, sizeof line, f)) {
-        std::string s = line;
+    while (std::getline(f, s)) {
         while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
         if (first) {
-            st.engine = s;
+            st.engine = unescape(s);
             first = false;
             continue;
         }
-        st.args.push_back(std::move(s));
+        st.args.push_back(unescape(s));
     }
-    std::fclose(f);
     st.present = !first;
     return st;
 }
 
 void write_recon_stamp(const std::string& workspace, const ReconStamp& st) {
     if (workspace.empty()) return;
-    FILE* f = std::fopen((fs::path(workspace) / kReconStampFile).string().c_str(), "w");
+    std::ofstream f(fs::path(workspace) / kReconStampFile,
+                    std::ios::binary | std::ios::trunc);
     if (!f) return;
-    std::fprintf(f, "%s\n", st.engine.c_str());
-    for (const std::string& a : st.args) {
-        // A newline inside a value would read back as two flags. None of the
-        // callers can produce one, and a stamp that fails to match only costs
-        // a rebuild, so drop the line rather than escape it.
-        if (a.find('\n') != std::string::npos) continue;
-        std::fprintf(f, "%s\n", a.c_str());
-    }
-    std::fclose(f);
+    f << escape(st.engine) << '\n';
+    for (const std::string& a : st.args) f << escape(a) << '\n';
 }
 
 std::string recon_stamp_change(const ReconStamp& prior, const ReconStamp& now) {

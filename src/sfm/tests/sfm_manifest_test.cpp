@@ -11,6 +11,7 @@
 #include <string>
 
 #include "data/Yaml.h"
+#include "sfm/Pipeline.h"
 #include "sfm/core/Manifest.h"
 #include "sfm/core/Rig.h"
 #include "sfm/tests/TestMain.h"
@@ -197,6 +198,32 @@ static int cmdManifestTest(int, char**) {
     check(cfg2.mask_dir == "given", "a --masks flag beats the file");
     check(image_dir2 == "given/images", "a positional image directory beats the file");
     check(cfg2.camera_mode != "single", "a --camera-mode flag beats the file");
+
+    // --no-masks against a manifest that names a mask_dir. The flag has to
+    // CLAIM the field, not merely clear it: the file fills in afterwards, and
+    // a run told to keep features out of the masks got them back this way.
+    {
+        write_file(dir + "/masked.yaml",
+                   "image_dir: images\nmask_dir: masks\n");
+        AutoRequest req;
+        const std::string err = parse_auto_args(
+            {dir + "/images", "-o", dir + "/out", "--manifest",
+             dir + "/masked.yaml", "--no-masks"},
+            req);
+        check(err.empty(), "--no-masks with a manifest parses");
+        check(req.cfg.mask_dir.empty(), "--no-masks beats a manifest's mask_dir");
+        check(req.in.mask_dir_explicit,
+              "and no sibling masks/ is looked for either");
+
+        AutoRequest req2;
+        check(parse_auto_args({dir + "/images", "-o", dir + "/out", "--manifest",
+                               dir + "/masked.yaml"},
+                              req2)
+                  .empty(),
+              "the same manifest without the flag parses");
+        check(!req2.cfg.mask_dir.empty(),
+              "and then the manifest's mask_dir is what is used");
+    }
 
     // An unknown lens is caught where it is written, not 40 minutes in.
     write_file(dir + "/bad.yaml", "cameras:\n  - prefix: cam0\n    model: banana\n");

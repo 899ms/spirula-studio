@@ -331,3 +331,13 @@ foreach(test_src ${SS_CORE_TESTS})
     add_executable(${test_name} ${test_src})
     ss_configure_app(${test_name})
 endforeach()
+
+# The one GUI file with no GUI in it: the stamp that decides whether a
+# finished reconstruction is kept or built again. Named rather than globbed --
+# a second such test would name its own source too.
+if(SS_BUILD_GUI)
+    add_executable(recon_stamp_test
+        ${SS_SRC}/app/gui/tests/recon_stamp_test.cpp
+        ${SS_SRC}/app/gui/ReconStamp.cpp)
+    ss_configure_app(recon_stamp_test)
+endif()

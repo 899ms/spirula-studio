@@ -52,9 +52,9 @@ struct MaskOptions {
 
     bool  video = true;           // track across frames vs. segment each alone
     bool  keep_prompted = false;  // white = the prompted objects
-    // Grow every detection by this share of its own bounding-box mean side
-    // before the union: SAM's outlines hug the object and leave a halo of its
-    // colour behind. It grows the detected region, either side of keep_prompted.
+    // Move every detection's boundary by this share of its own bounding-box
+    // mean side before the union. SIGNED: positive grows the region, covering
+    // the halo a tight outline leaves; negative trims inside the outline.
     float dilate_ratio = 0.05f;
     float threshold = 0.5f, nms = 0.1f;
     int   detect_every = 1;
@@ -74,17 +74,17 @@ std::vector<std::string> split_phrases(const std::string& s);
 // Longest-side cap. Returns `src` unchanged when it already fits.
 nn::Image downscale_to_fit(const nn::Image& src, int max_size);
 
-// Euclidean pixels a detection of `box` grows by at `dilate_ratio`. A fraction
-// of the object's own size, so it is the same fraction whatever resolution the
-// box is measured in, and a distant object gets a smaller margin than a close one.
+// Euclidean pixels a detection of `box` moves by at `dilate_ratio`, signed as
+// the ratio is. A fraction of the object's own size, so it is the same fraction
+// whatever resolution the box is measured in, and a distant object moves less.
 int dilate_radius_px(const Box& box, float dilate_ratio);
 
-// ORs one detection's mask into `hit` (1 = covered), first grown by `radius`
-// Euclidean pixels. Growth stops at the frame border rather than wrapping: the
-// rest of the pipeline reads a mask as a plain image, seam or no seam.
+// ORs one detection's mask into `hit` (1 = covered), its boundary first moved
+// by `radius` Euclidean pixels: outward for a positive one, stopping at the
+// frame border rather than wrapping, and inward for a negative one.
 void accumulate_dilated(const Mask& mask, int radius, std::vector<uint8_t>& hit);
 
-// The union of `positive`, each detection grown by `dilate_ratio`, minus every
+// The union of `positive`, each detection moved by `dilate_ratio`, minus every
 // pixel `negative` covers. The order is load-bearing and is why this is one
 // function: a negative phrase is an explicit keep and must beat the margin.
 void compose_hit(const Result& positive, const Result& negative,

@@ -1334,6 +1334,73 @@ SS_MSG(add_photos_help,
        "başka bir girdiyle birlikteyse görüntüleri veri kümesine bağlanır, "
        "çünkü yeniden oluşturma tek bir klasör ağacı okur."));
 
+SS_MSG(add_dataset,
+    EN("Add dataset..."), JA("データセットを追加…"), ZH_HANS("添加数据集…"),
+    ZH_HANT("新增資料集…"), KO("데이터셋 추가…"),
+    DE("Datensatz hinzufügen …"), FR("Ajouter un jeu de données…"),
+    ES("Añadir un conjunto de datos…"), PT("Adicionar um conjunto de dados…"),
+    IT("Aggiungi un set di dati…"), NL("Dataset toevoegen…"),
+    RU("Добавить набор данных…"), TR("Veri kümesi ekle…"));
+
+SS_MSG(add_dataset_help,
+    EN("Add a folder that already holds a reconstruction -- this program's, or "
+       "COLMAP's, Nerfstudio's or Metashape's. Its images become the input and "
+       "the folder itself the output, so pressing the button adds masks, depth "
+       "and normals to it instead of solving the cameras again."),
+    JA("すでに再構成結果があるフォルダを追加します。このソフトが作ったもので"
+       "も、COLMAP や Nerfstudio、Metashape が作ったものでもかまいません。その"
+       "画像が入力になり、そのフォルダが出力フォルダになるので、ボタンを押すと"
+       "カメラを求め直すのではなく、マスクや深度・法線を足すだけになります。"),
+    ZH_HANS("添加一个已经重建好的文件夹——这里做的，或者 COLMAP、Nerfstudio、"
+            "Metashape 做的。它的图像是输入，这个文件夹是输出，所以按下按钮只是"
+            "给它补上蒙版和深度、法线，不会重新求解相机。"),
+    ZH_HANT("新增一個已經重建好的資料夾——這裡做的，或者 COLMAP、Nerfstudio、"
+            "Metashape 做的。它的影像是輸入，這個資料夾是輸出，所以按下按鈕只是"
+            "給它補上遮罩和深度、法線，不會重新求解相機。"),
+    KO("이미 재구성 결과가 있는 폴더를 추가합니다. 이 프로그램이 만든 것이든 "
+       "COLMAP, Nerfstudio, Metashape 이 만든 것이든 상관없습니다. 그 이미지가 "
+       "입력이 되고 폴더 자체가 출력이 되므로, 단추를 누르면 카메라를 다시 "
+       "구하지 않고 마스크와 깊이·법선만 더합니다."),
+    DE("Einen Ordner hinzufügen, in dem schon eine Rekonstruktion liegt -- eine "
+       "von diesem Programm oder von COLMAP, Nerfstudio oder Metashape. Seine "
+       "Bilder werden die Eingabe und der Ordner selbst die Ausgabe, der Knopf "
+       "fügt also Masken, Tiefe und Normalen hinzu, statt die Kameras erneut "
+       "zu bestimmen."),
+    FR("Ajouter un dossier qui contient déjà une reconstruction -- de ce "
+       "programme, ou de COLMAP, Nerfstudio ou Metashape. Ses images "
+       "deviennent l'entrée et le dossier lui-même la sortie : le bouton y "
+       "ajoute donc masques, profondeur et normales au lieu de recalculer les "
+       "caméras."),
+    ES("Añadir una carpeta que ya contiene una reconstrucción: de este "
+       "programa, o de COLMAP, Nerfstudio o Metashape. Sus imágenes son la "
+       "entrada y la carpeta misma la salida, así que el botón le añade "
+       "máscaras, profundidad y normales en vez de volver a resolver las "
+       "cámaras."),
+    PT("Adicionar uma pasta que já contém uma reconstrução -- deste programa, "
+       "ou do COLMAP, do Nerfstudio ou do Metashape. As imagens dela viram a "
+       "entrada e a própria pasta a saída, então o botão lhe acrescenta "
+       "máscaras, profundidade e normais em vez de resolver as câmeras de "
+       "novo."),
+    IT("Aggiunge una cartella che contiene già una ricostruzione: di questo "
+       "programma, oppure di COLMAP, Nerfstudio o Metashape. Le sue immagini "
+       "diventano l'ingresso e la cartella stessa l'uscita, quindi il pulsante "
+       "vi aggiunge maschere, profondità e normali invece di risolvere di "
+       "nuovo le fotocamere."),
+    NL("Een map toevoegen waarin al een reconstructie staat -- van dit "
+       "programma, of van COLMAP, Nerfstudio of Metashape. De beelden worden "
+       "de invoer en de map zelf de uitvoer, dus de knop voegt er maskers, "
+       "diepte en normalen aan toe in plaats van de camera's opnieuw op te "
+       "lossen."),
+    RU("Добавить папку, в которой уже есть реконструкция, — этой программы "
+       "или COLMAP, Nerfstudio, Metashape. Её снимки становятся входом, а сама "
+       "папка — выходом, так что кнопка добавит к ней маски, глубину и "
+       "нормали, а не будет заново решать камеры."),
+    TR("İçinde zaten bir yeniden kurma bulunan bir klasör ekleyin -- bu "
+       "programın ya da COLMAP, Nerfstudio veya Metashape'in yaptığı. "
+       "Görüntüleri girdi, klasörün kendisi çıktı olur; düğme böylece "
+       "kameraları yeniden çözmek yerine ona maske, derinlik ve normal "
+       "ekler."));
+
 SS_MSG(no_input_yet,
     EN("no input picked yet"),
     JA("入力がまだ選ばれていません"),
@@ -3512,19 +3579,124 @@ SS_MSG(mask_dilate_remove,
     TR("Kaldırılanın çevresinde ek pay"));
 
 SS_MSG(mask_dilate_keep,
-    EN("Extra margin around what's kept"),
-    JA("残すものの周りの余白"),
-    ZH_HANS("保留对象周围的额外边距"),
-    ZH_HANT("保留對象周圍的額外邊距"),
-    KO("남길 대상 주변 여백"),
-    DE("Zusätzlicher Rand um das Behaltene"),
-    FR("Marge autour de ce qui est gardé"),
-    ES("Margen alrededor de lo que se conserva"),
-    PT("Margem à volta do que é mantido"),
-    IT("Margine attorno a ciò che viene mantenuto"),
-    NL("Extra marge rond wat wordt behouden"),
-    RU("Отступ вокруг сохраняемого"),
-    TR("Korunanın çevresinde ek pay"));
+    EN("Trim in from the edge of what's kept"),
+    JA("残すものの縁を内側へ削る"),
+    ZH_HANS("从保留对象的边缘向内收"),
+    ZH_HANT("從保留對象的邊緣向內收"),
+    KO("남길 대상의 가장자리를 안쪽으로 깎기"),
+    DE("Vom Rand des Behaltenen nach innen abtragen"),
+    FR("Rogner vers l'intérieur du bord de ce qui est gardé"),
+    ES("Recortar hacia dentro desde el borde de lo que se conserva"),
+    PT("Aparar para dentro a partir da borda do que é mantido"),
+    IT("Rifilare verso l'interno dal bordo di ciò che viene mantenuto"),
+    NL("Vanaf de rand van wat behouden blijft naar binnen bijsnijden"),
+    RU("Срезать внутрь от края сохраняемого"),
+    TR("Korunanın kenarından içeri doğru kırp"));
+
+SS_MSG(mask_shrink_help,
+    EN("Pulls the outline of every detected object inward before the mask is "
+       "written, by this share of the object's own size -- an object 400 "
+       "pixels across loses about 20 pixels at 5%. 0%, the default, writes the "
+       "outline exactly as the model drew it, which is usually where the "
+       "subject ends; raise it when a rim of background is coming through with "
+       "the subject. Because it is a share and not a number of pixels, "
+       "something far away is trimmed proportionally less than something "
+       "close. Where the subject runs off the edge of the frame nothing is "
+       "trimmed: that edge is the picture ending, not the subject."),
+    JA("マスクを書き出す前に、検出した対象の輪郭をそれぞれ自身の大きさのこの割合"
+       "だけ内側へ引き込みます。差し渡し400ピクセルの対象なら5%で約20ピクセル"
+       "です。既定の0%はモデルが引いた輪郭のまま書き出します。通常はそこが被写体"
+       "の端です。背景の縁が被写体と一緒に残る場合に上げてください。ピクセル数"
+       "ではなく割合なので、遠くのものほど削る量も小さくなります。被写体が画面の"
+       "外へ続いている縁では削りません。そこは画像の端であって被写体の端では"
+       "ないからです。"),
+    ZH_HANS("在写出蒙版之前，把每个检测到的对象的轮廓按自身尺寸的这个比例向内收："
+            "一个 400 像素宽的对象，在 5% 时约收进 20 像素。默认的 0% 就按模型画"
+            "的轮廓原样写出，那通常就是被摄物的边界；如果有一圈背景跟着被摄物一起"
+            "留下来，再往上调。因为是比例而不是固定像素数，远处的东西收得也按比例"
+            "更少。被摄物延伸到画面之外的那一边不收：那里是画面的边，不是被摄物"
+            "的边。"),
+    ZH_HANT("在寫出遮罩之前，把每個偵測到的對象的輪廓按自身尺寸的這個比例向內收："
+            "一個 400 像素寬的對象，在 5% 時約收進 20 像素。預設的 0% 就按模型畫"
+            "的輪廓原樣寫出，那通常就是被攝物的邊界；如果有一圈背景跟著被攝物一起"
+            "留下來，再往上調。因為是比例而不是固定像素數，遠處的東西收得也按比例"
+            "更少。被攝物延伸到畫面之外的那一邊不收：那裡是畫面的邊，不是被攝物"
+            "的邊。"),
+    KO("마스크를 쓰기 전에 검출된 대상의 윤곽선을 각각 자기 크기의 이 비율만큼 "
+       "안쪽으로 당깁니다. 너비가 400픽셀인 대상이라면 5%에서 약 20픽셀입니다. "
+       "기본값 0%는 모델이 그린 윤곽선 그대로 쓰며, 보통 거기가 피사체의 끝입니다. "
+       "배경의 테두리가 피사체와 함께 남을 때 올리세요. 픽셀 수가 아니라 비율이므로 "
+       "멀리 있는 것은 그만큼 적게 깎입니다. 피사체가 화면 밖으로 이어지는 쪽은 "
+       "깎지 않습니다. 거기는 그림이 끝나는 자리이지 피사체가 끝나는 자리가 "
+       "아닙니다."),
+    DE("Zieht die Kontur jedes erkannten Objekts nach innen, bevor die Maske "
+       "geschrieben wird, um diesen Anteil seiner eigenen Größe -- ein 400 "
+       "Pixel breites Objekt verliert bei 5% etwa 20 Pixel. 0%, die Vorgabe, "
+       "schreibt die Kontur genau so, wie das Modell sie gezogen hat; dort "
+       "endet das Motiv meist. Erhöhen Sie sie, wenn ein Saum Hintergrund mit "
+       "dem Motiv durchkommt. Weil es ein Anteil ist und keine Pixelzahl, wird "
+       "etwas Fernes entsprechend weniger abgetragen als etwas Nahes. Wo das "
+       "Motiv aus dem Bild läuft, wird nichts abgetragen: dort endet das Bild, "
+       "nicht das Motiv."),
+    FR("Rentre le contour de chaque objet détecté avant que le masque ne soit "
+       "écrit, de cette fraction de sa propre taille : un objet large de 400 "
+       "pixels en perd environ 20 à 5%. 0%, la valeur par défaut, écrit le "
+       "contour exactement comme le modèle l'a tracé, là où le sujet s'arrête "
+       "en général ; augmentez-la si un liseré de fond passe avec le sujet. "
+       "Comme c'est une fraction et non un nombre de pixels, un objet lointain "
+       "est rogné proportionnellement moins qu'un objet proche. Là où le sujet "
+       "sort du cadre, rien n'est rogné : c'est l'image qui s'arrête, pas le "
+       "sujet."),
+    ES("Mete hacia dentro el contorno de cada objeto detectado antes de "
+       "escribir la máscara, en esta fracción de su propio tamaño: un objeto "
+       "de 400 píxeles de ancho pierde unos 20 al 5%. El 0% por defecto "
+       "escribe el contorno tal como lo dibujó el modelo, que suele ser donde "
+       "acaba el motivo; súbelo si se cuela un ribete de fondo con el motivo. "
+       "Como es una fracción y no un número de píxeles, algo lejano se recorta "
+       "proporcionalmente menos que algo cercano. Donde el motivo se sale del "
+       "encuadre no se recorta nada: ahí acaba la imagen, no el motivo."),
+    PT("Puxa para dentro o contorno de cada objeto detectado antes de a "
+       "máscara ser escrita, nesta fração do seu próprio tamanho: um objeto "
+       "com 400 pixels de largura perde cerca de 20 a 5%. Os 0% predefinidos "
+       "escrevem o contorno tal como o modelo o desenhou, que é onde o objeto "
+       "costuma acabar; aumente quando uma orla de fundo vem junto com ele. "
+       "Por ser uma fração e não um número de pixels, algo distante é aparado "
+       "proporcionalmente menos do que algo próximo. Onde o objeto sai do "
+       "quadro não se apara nada: ali acaba a imagem, não o objeto."),
+    IT("Ritira verso l'interno il contorno di ogni oggetto rilevato prima che "
+       "la maschera venga scritta, di questa frazione della sua stessa "
+       "dimensione: un oggetto largo 400 pixel ne perde circa 20 al 5%. Lo 0% "
+       "predefinito scrive il contorno esattamente come l'ha tracciato il "
+       "modello, che di solito è dove il soggetto finisce; lo alzi quando un "
+       "orlo di sfondo passa insieme al soggetto. Essendo una frazione e non "
+       "un numero di pixel, una cosa lontana viene rifilata proporzionalmente "
+       "meno di una vicina. Dove il soggetto esce dall'inquadratura non si "
+       "rifila nulla: lì finisce l'immagine, non il soggetto."),
+    NL("Trekt de omtrek van elk gevonden object naar binnen voordat het masker "
+       "wordt geschreven, met dit aandeel van zijn eigen grootte: een object "
+       "van 400 pixels breed verliest er bij 5% ongeveer 20. De standaard 0% "
+       "schrijft de omtrek precies zoals het model die tekende, en daar houdt "
+       "het onderwerp meestal op; zet hem hoger als er een randje achtergrond "
+       "met het onderwerp meekomt. Omdat het een aandeel is en geen aantal "
+       "pixels, wordt iets ver weg naar verhouding minder bijgesneden dan iets "
+       "dichtbij. Waar het onderwerp buiten beeld loopt wordt niets "
+       "bijgesneden: daar houdt de foto op, niet het onderwerp."),
+    RU("Втягивает контур каждого найденного объекта внутрь перед записью "
+       "маски, на эту долю его собственного размера: объект шириной 400 "
+       "пикселей теряет около 20 при 5%. По умолчанию 0% — контур пишется "
+       "ровно так, как его провела модель, а это обычно и есть край предмета; "
+       "поднимите, если вместе с предметом проходит каёмка фона. Это доля, а "
+       "не число пикселей, поэтому у далёкого срезается пропорционально "
+       "меньше, чем у близкого. Там, где предмет уходит за край кадра, не "
+       "срезается ничего: там кончается снимок, а не предмет."),
+    TR("Maske yazılmadan önce her bulunan nesnenin dış çizgisini kendi "
+       "boyutunun bu oranı kadar içeri çeker: 400 piksel genişliğindeki bir "
+       "nesne %5'te yaklaşık 20 piksel kaybeder. Varsayılan %0, dış çizgiyi "
+       "modelin çizdiği gibi yazar; özne genelde orada biter. Özneyle birlikte "
+       "bir şerit arka plan geçiyorsa yükseltin. Piksel sayısı değil oran "
+       "olduğu için uzaktaki bir şey yakındakine göre orantılı olarak daha az "
+       "kırpılır. Öznenin kare dışına taştığı yerde hiçbir şey kırpılmaz: "
+       "orada biten resimdir, özne değil."));
 
 SS_MSG(mask_dilate_help,
     EN("Grows every detected object outward before the mask is written, by this "
@@ -5653,6 +5825,219 @@ SS_MSG(mask_border_enable_help,
     TR("Balıkgözünün siyah kenarı, bir filigran, kameranın takılı olduğu çubuk "
        "-- her çekimde aynı yerde duran ne varsa. \"Maskeyi dene\" içinden "
        "ayarlanır; model de indirme de gerekmez."));
+
+SS_MSG(mask_for_features,
+    EN("Hide masked areas from the reconstruction too"),
+    JA("マスクした部分を再構成からも隠す"),
+    ZH_HANS("重建时也避开被蒙住的区域"),
+    ZH_HANT("重建時也避開被遮住的區域"),
+    KO("가린 부분을 재구성에서도 빼기"),
+    DE("Maskierte Bereiche auch vor der Rekonstruktion verbergen"),
+    FR("Cacher aussi les zones masquées à la reconstruction"),
+    ES("Ocultar también a la reconstrucción las zonas enmascaradas"),
+    PT("Esconder as áreas mascaradas também da reconstrução"),
+    IT("Nascondere le zone mascherate anche alla ricostruzione"),
+    NL("Gemaskeerde gebieden ook voor de reconstructie verbergen"),
+    RU("Скрывать закрытые маской участки и от реконструкции"),
+    TR("Maskelenen alanları yeniden kurmadan da gizle"));
+
+SS_MSG(mask_for_features_help,
+    EN("On, no feature point is taken from a masked area, so a passer-by or a "
+       "reflection cannot pull the cameras about. Off, the masks are written "
+       "and handed to training all the same while the reconstruction sees the "
+       "whole frame -- worth it when what they cover holds still and carries "
+       "finer detail than the subject, since that is what the cameras "
+       "converge on."),
+    JA("オンにすると、マスクした部分から特徴点を取らないので、通行人や映り込み"
+       "がカメラを引っぱることがありません。オフでもマスクは書き出され学習には"
+       "渡りますが、再構成は画面全体を見ます。マスクした側が止まっていて、"
+       "被写体より細かい模様を持つ場合に有効です。カメラはそれを頼りに"
+       "収束します。"),
+    ZH_HANS("打开时，被蒙住的区域里不取特征点，路人或反光就拉不动相机。关掉时"
+            "蒙版照样写出来、照样交给训练，只是重建会看整幅画面——如果被蒙住的"
+            "部分是不动的，而且纹理比被摄物更细，那就值得，因为相机正是靠它"
+            "收敛的。"),
+    ZH_HANT("打開時，被遮住的區域裡不取特徵點，路人或反光就拉不動相機。關掉時"
+            "遮罩照樣寫出來、照樣交給訓練，只是重建會看整幅畫面——如果被遮住的"
+            "部分是不動的，而且紋理比被攝物更細，那就值得，因為相機正是靠它"
+            "收斂的。"),
+    KO("켜면 가린 부분에서 특징점을 뽑지 않아 지나가는 사람이나 비친 상이 "
+       "카메라를 끌고 다니지 못합니다. 꺼도 마스크는 그대로 쓰여 학습에 "
+       "넘어가고, 재구성만 화면 전체를 봅니다. 가린 쪽이 가만히 있고 피사체보다 "
+       "무늬가 고울 때 쓸모가 있습니다. 카메라는 바로 그것을 근거로 수렴합니다."),
+    DE("An wird aus maskierten Bereichen kein Merkmalspunkt genommen, ein "
+       "Passant oder eine Spiegelung kann die Kameras also nicht verziehen. "
+       "Aus werden die Masken trotzdem geschrieben und ans Training gegeben, "
+       "während die Rekonstruktion das ganze Bild sieht -- lohnend, wenn das "
+       "Verdeckte stillsteht und feinere Struktur trägt als das Motiv, denn "
+       "darauf konvergieren die Kameras."),
+    FR("Activé, aucun point d'intérêt n'est pris dans une zone masquée : un "
+       "passant ou un reflet ne peut donc pas tirer les caméras. Désactivé, "
+       "les masques sont quand même écrits et transmis à l'entraînement "
+       "tandis que la reconstruction voit toute l'image -- utile quand ce "
+       "qu'ils couvrent reste immobile et porte un détail plus fin que le "
+       "sujet, car c'est là-dessus que les caméras convergent."),
+    ES("Activado, no se toma ningún punto característico de una zona "
+       "enmascarada, así que un transeúnte o un reflejo no pueden arrastrar "
+       "las cámaras. Desactivado, las máscaras se escriben y se entregan al "
+       "entrenamiento igualmente mientras la reconstrucción ve el fotograma "
+       "entero: conviene cuando lo que tapan está quieto y tiene un detalle "
+       "más fino que el motivo, porque es ahí donde convergen las cámaras."),
+    PT("Ligado, nenhum ponto de característica sai de uma área mascarada, "
+       "então um transeunte ou um reflexo não consegue puxar as câmeras. "
+       "Desligado, as máscaras são escritas e entregues ao treino do mesmo "
+       "jeito enquanto a reconstrução vê o quadro inteiro -- vale a pena "
+       "quando o que elas cobrem fica parado e tem um detalhe mais fino que o "
+       "objeto, pois é nisso que as câmeras convergem."),
+    IT("Acceso, nessun punto caratteristico viene preso da una zona "
+       "mascherata, così un passante o un riflesso non possono tirare le "
+       "fotocamere. Spento, le maschere vengono scritte e passate "
+       "all'addestramento lo stesso mentre la ricostruzione vede tutto il "
+       "fotogramma: conviene quando ciò che coprono sta fermo e porta un "
+       "dettaglio più fine del soggetto, perché è lì che le fotocamere "
+       "convergono."),
+    NL("Aan wordt uit een gemaskeerd gebied geen kenmerkpunt genomen, dus een "
+       "voorbijganger of een weerspiegeling kan de camera's niet meetrekken. "
+       "Uit worden de maskers toch geschreven en aan de training gegeven "
+       "terwijl de reconstructie het hele beeld ziet -- de moeite waard "
+       "wanneer wat ze afdekken stilstaat en fijner detail draagt dan het "
+       "onderwerp, want daarop convergeren de camera's."),
+    RU("Включено — из закрытой маской области не берётся ни одна особая точка, "
+       "так что прохожий или отражение не утянут камеры. Выключено — маски всё "
+       "равно записываются и передаются обучению, а реконструкция видит кадр "
+       "целиком: это выгодно, когда закрытое маской неподвижно и держит более "
+       "мелкие детали, чем сам объект, ведь именно на них сходятся камеры."),
+    TR("Açıkken maskelenen alandan hiç öznitelik noktası alınmaz, yani bir "
+       "yoldan geçen ya da bir yansıma kameraları çekiştiremez. Kapalıyken "
+       "maskeler yine yazılır ve eğitime verilir, yeniden kurma ise karenin "
+       "tamamını görür -- maskelenen şey yerinde duruyorsa ve özneden daha "
+       "ince ayrıntı taşıyorsa buna değer, çünkü kameralar ona yakınsar."));
+
+SS_MSG(mask_recon_title,
+    EN("Masks for a reconstruction that is already here"),
+    JA("すでにある再構成結果とマスク"),
+    ZH_HANS("蒙版与已经在这里的重建结果"),
+    ZH_HANT("遮罩與已經在這裡的重建結果"),
+    KO("이미 있는 재구성 결과와 마스크"),
+    DE("Masken für eine schon vorhandene Rekonstruktion"),
+    FR("Des masques pour une reconstruction déjà présente"),
+    ES("Máscaras para una reconstrucción que ya está aquí"),
+    PT("Máscaras para uma reconstrução que já está aqui"),
+    IT("Maschere per una ricostruzione già presente"),
+    NL("Maskers voor een reconstructie die er al is"),
+    RU("Маски для уже готовой реконструкции"),
+    TR("Zaten burada olan bir yeniden kurma için maskeler"));
+
+// {0} is the output folder.
+SS_MSG(mask_recon_confirm,
+    EN("The reconstruction in {0} is kept, and it was built without these "
+       "masks. Building it again with the masked areas left out of feature "
+       "detection costs the whole reconstruction; adding the masks only is a "
+       "few minutes and they still reach training."),
+    JA("{0} の再構成結果はそのまま残りますが、これらのマスクなしで作られたもの"
+       "です。マスクした部分を特徴点から外して作り直すと、再構成をまるごとやり"
+       "直すことになります。マスクを足すだけなら数分で済み、学習にはどちらでも"
+       "渡ります。"),
+    ZH_HANS("{0} 里的重建结果会保留，而它是在没有这些蒙版的情况下做出来的。"
+            "把被蒙住的区域从特征点里去掉再做一遍，等于重做整个重建；只补蒙版"
+            "只要几分钟，而且它们照样会交给训练。"),
+    ZH_HANT("{0} 裡的重建結果會保留，而它是在沒有這些遮罩的情況下做出來的。"
+            "把被遮住的區域從特徵點裡去掉再做一遍，等於重做整個重建；只補遮罩"
+            "只要幾分鐘，而且它們照樣會交給訓練。"),
+    KO("{0} 의 재구성 결과는 그대로 두는데, 이 마스크 없이 만든 것입니다. 가린 "
+       "부분을 특징점에서 빼고 다시 만들면 재구성 전체를 다시 하는 셈이고, "
+       "마스크만 더하면 몇 분이면 되며 어느 쪽이든 학습에는 넘어갑니다."),
+    DE("Die Rekonstruktion in {0} bleibt erhalten, und sie wurde ohne diese "
+       "Masken gebaut. Sie mit den maskierten Bereichen aus der "
+       "Merkmalssuche noch einmal zu bauen kostet die ganze Rekonstruktion; "
+       "nur die Masken hinzuzufügen dauert Minuten, und ans Training kommen "
+       "sie so wie so."),
+    FR("La reconstruction de {0} est conservée, et elle a été construite sans "
+       "ces masques. La refaire en excluant les zones masquées de la détection "
+       "de points coûte toute la reconstruction ; n'ajouter que les masques "
+       "prend quelques minutes, et ils vont à l'entraînement dans les deux "
+       "cas."),
+    ES("La reconstrucción de {0} se conserva, y se construyó sin estas "
+       "máscaras. Rehacerla dejando las zonas enmascaradas fuera de la "
+       "detección de puntos cuesta toda la reconstrucción; añadir solo las "
+       "máscaras son unos minutos, y al entrenamiento llegan igual."),
+    PT("A reconstrução em {0} fica como está, e foi construída sem estas "
+       "máscaras. Refazê-la deixando as áreas mascaradas fora da detecção de "
+       "pontos custa a reconstrução inteira; acrescentar só as máscaras leva "
+       "minutos, e elas chegam ao treino de qualquer jeito."),
+    IT("La ricostruzione in {0} viene mantenuta ed è stata costruita senza "
+       "queste maschere. Rifarla escludendo le zone mascherate dalla ricerca "
+       "dei punti costa l'intera ricostruzione; aggiungere solo le maschere "
+       "sono pochi minuti, e all'addestramento arrivano comunque."),
+    NL("De reconstructie in {0} blijft behouden, en is zonder deze maskers "
+       "gebouwd. Hem opnieuw bouwen met de gemaskeerde gebieden buiten de "
+       "kenmerkdetectie kost de hele reconstructie; alleen de maskers "
+       "toevoegen duurt minuten, en bij de training komen ze hoe dan ook."),
+    RU("Реконструкция в {0} остаётся, а построена она была без этих масок. "
+       "Построить её заново, убрав закрытые маской участки из поиска точек, "
+       "стоит всей реконструкции; добавить одни маски — несколько минут, и до "
+       "обучения они доходят в обоих случаях."),
+    TR("{0} içindeki yeniden kurma korunur ve bu maskeler olmadan yapılmıştı. "
+       "Maskelenen alanları öznitelik aramasının dışında bırakarak yeniden "
+       "yapmak bütün yeniden kurmaya mal olur; yalnızca maskeleri eklemek "
+       "birkaç dakika sürer ve eğitime iki durumda da ulaşırlar."));
+
+SS_MSG(mask_recon_rebuild,
+    EN("Reconstruct again with them"),
+    JA("マスクを使って作り直す"),
+    ZH_HANS("用蒙版重新重建"),
+    ZH_HANT("用遮罩重新重建"),
+    KO("마스크를 써서 다시 재구성"),
+    DE("Damit neu rekonstruieren"),
+    FR("Reconstruire à nouveau avec eux"),
+    ES("Reconstruir de nuevo con ellas"),
+    PT("Reconstruir de novo com elas"),
+    IT("Ricostruire di nuovo con esse"),
+    NL("Opnieuw reconstrueren met de maskers"),
+    RU("Реконструировать заново с ними"),
+    TR("Onlarla yeniden kur"));
+
+SS_MSG(mask_recon_masks_only,
+    EN("Add the masks only"),
+    JA("マスクだけ足す"),
+    ZH_HANS("只补蒙版"),
+    ZH_HANT("只補遮罩"),
+    KO("마스크만 더하기"),
+    DE("Nur die Masken hinzufügen"),
+    FR("N'ajouter que les masques"),
+    ES("Añadir solo las máscaras"),
+    PT("Acrescentar só as máscaras"),
+    IT("Aggiungere solo le maschere"),
+    NL("Alleen de maskers toevoegen"),
+    RU("Добавить только маски"),
+    TR("Yalnızca maskeleri ekle"));
+
+SS_MSG(mask_recon_masks_only_help,
+    EN("Turns \"Hide masked areas from the reconstruction too\" off, so this "
+       "question is settled rather than asked again on the next run."),
+    JA("「マスクした部分を再構成からも隠す」をオフにします。次の実行でまた"
+       "聞かれることはありません。"),
+    ZH_HANS("会把“重建时也避开被蒙住的区域”关掉，这样下次运行不会再问。"),
+    ZH_HANT("會把「重建時也避開被遮住的區域」關掉，這樣下次執行不會再問。"),
+    KO("'가린 부분을 재구성에서도 빼기'를 끕니다. 다음 실행에서 다시 묻지 "
+       "않습니다."),
+    DE("Schaltet „Maskierte Bereiche auch vor der Rekonstruktion verbergen“ "
+       "aus, damit die Frage beim nächsten Lauf nicht wiederkommt."),
+    FR("Désactive « Cacher aussi les zones masquées à la reconstruction », "
+       "pour que la question ne revienne pas au prochain lancement."),
+    ES("Desactiva «Ocultar también a la reconstrucción las zonas "
+       "enmascaradas», para que la pregunta no vuelva en la próxima "
+       "ejecución."),
+    PT("Desliga \"Esconder as áreas mascaradas também da reconstrução\", para "
+       "que a pergunta não volte na próxima execução."),
+    IT("Spegne \"Nascondere le zone mascherate anche alla ricostruzione\", "
+       "così la domanda non torna alla prossima esecuzione."),
+    NL("Zet \"Gemaskeerde gebieden ook voor de reconstructie verbergen\" uit, "
+       "zodat de vraag bij de volgende run niet terugkomt."),
+    RU("Выключает «Скрывать закрытые маской участки и от реконструкции», чтобы "
+       "вопрос не повторился при следующем запуске."),
+    TR("\"Maskelenen alanları yeniden kurmadan da gizle\" seçeneğini kapatır, "
+       "böylece bu soru bir sonraki çalıştırmada yeniden sorulmaz."));
 
 // {0} is the object number under the cursor.
 SS_MSG(click_tooltip,
