@@ -603,6 +603,12 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   destructor) releases it; anything that keys a pool slot per instance must
   namespace the key per owner, as `Tracker`'s memory bank does -- two trackers
   numbering slots from zero write over each other.
+- **A saved preset's field table is hand-written, so a new setting is silent
+  until it is added.** `DatasetPreset.cpp` and `MeshPreset.cpp` each carry one
+  `X(key, member)` row per setting; a field added to `SfmJob`, `ColmapJob` or
+  `MeshJob` and not added there saves, loads, and quietly runs at its default.
+  `build/preset_roundtrip_test` is the guard: it moves every field the table
+  names off its default and compares after a round trip.
 - **A GUI worker that clears a `busy` flag at the end of its function will
   strand it.** Every early `return set_error(...)` skips the line, and the next
   request is refused forever. Use a scope guard (`SegmentPanel::start_job`).

@@ -63,6 +63,10 @@ public:
     // shutdown() asks to stop too, and must not undo the user's answer.
     void request_stop(bool save = true);
     void shutdown();              // stop + join (app exit / new session)
+    // ... and give the engine's VRAM back with it. The session goes too, so
+    // the trainer screen has nothing left to render: call it only when
+    // something else needs the device -- a reconstruction, a meshing child.
+    void release_engine();
 
     Phase phase() const { return _phase.load(); }
     // Did the finished run write a final checkpoint? False only after a stop

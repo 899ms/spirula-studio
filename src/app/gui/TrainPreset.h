@@ -1,42 +1,18 @@
 #pragma once
 
 // A saved training preset: the whole training config, under a name the user
-// chose, in one JSON file.
+// chose. PresetFile.h owns the file's header and its folder; this kind adds
+// "base_preset" (the built-in it started from), "touched", and "config" --
+// the same flat flag table a run's config.json carries.
 //
-// The built-in presets (kTrainPresets, config/TrainConfig.h) are code -- a
-// handful of curated starting points that ship with the program. This is the
-// other half: once someone has tuned the options for their own captures, the
-// tuning is worth keeping, sharing, and pointing a batch run at.
+// A run's own config.json loads as one too: the same table, naming its
+// built-in under "preset" instead. Reusing the settings of a run that came
+// out well is the most likely reason anybody wants this at all.
 //
-// The file:
-//
-//   {
-//     "spirula_preset": 1,        // format marker
-//     "name": "Indoor handheld",
-//     "description": "...",       // may be absent
-//     "base_preset": "3dgs",      // the built-in it started from
-//     "touched": ["quality", ...],// flags set by hand; see below
-//     "config": { <one key per flag, as a run's config.json> }
-//   }
-//
-// Reading is forgiving in the way a settings file has to be: a key that is
-// missing keeps the field's default, and a key that is not a training flag is
-// ignored. So a preset written by an older build still loads into a newer one
-// (new flags come up at their defaults), and a preset from a newer build loads
-// into an older one (its unknown flags are dropped).
-//
-// A run's own config.json loads as a preset too. That file is the same flat
-// table under a "preset" key instead of "base_preset", and reusing the
-// settings of a run that came out well is the single most likely reason
-// anybody wants this feature at all.
-//
-// `touched` is what stops the macro options from undoing the tuning. --quality
-// and friends write the flags they stand for unless the user set those flags
-// by hand (train_resolve_macros), and "by hand" is a GUI-session fact that
-// would otherwise be lost the moment the preset is saved. A config.json has no
-// such list, so one is derived: every flag that differs from the base preset
-// counts as deliberate.
+// `touched` is what stops the macro options undoing hand tuning
+// (train_resolve_macros); a file without one derives it by diffing the base.
 
+#include "app/gui/PresetFile.h"
 #include "config/TrainConfig.h"
 
 #include <set>
@@ -62,16 +38,6 @@ struct TrainPreset {
     std::set<std::string> touched;
 };
 
-// Where presets live by default, created on first call:
-// <config_dir>/presets. The picker lists what is in here; Save offers it as
-// the default location but any path is allowed.
-std::string preset_dir();
-
-// A file name for `name` -- lowercased, spaces and separators folded to '-',
-// always ending in ".json". Never empty (an unnameable name becomes
-// "preset.json"), and never a path: the caller decides the folder.
-std::string preset_file_name(const std::string& name);
-
 // Write. Throws std::runtime_error if the file cannot be created. The context
 // fields above are dropped here rather than at the call site, so no caller can
 // forget and bake a dataset path into a shared preset.
@@ -90,8 +56,7 @@ bool is_preset_file(const std::string& path);
 // hands over) or when the filesystem refuses.
 void delete_preset(const std::string& path);
 
-// Every readable *.json in preset_dir(), sorted by name. Files that fail to
-// parse are skipped rather than reported: this runs to fill a dropdown.
+// Every readable *.json in preset_dir(PresetKind::Train), sorted by name.
 std::vector<TrainPreset> list_presets();
 
 }  // namespace gui

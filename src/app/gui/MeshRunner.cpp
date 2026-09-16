@@ -92,6 +92,19 @@ std::string MeshJob::preview_path() const {
     return {};
 }
 
+// A file becomes <name>_mesh, NEVER <name> -- meshing `splat.ply` to base
+// `splat` writes `splat.ply`, i.e. over the model being meshed.
+std::string default_mesh_output(const std::string& checkpoint) {
+    if (checkpoint.empty()) return {};
+    std::error_code ec;
+    fs::path base(checkpoint);
+    if (fs::is_regular_file(base, ec))
+        base.replace_filename(base.stem().string() + "_mesh");
+    else
+        base /= "mesh";
+    return base.string();
+}
+
 MeshRunner::~MeshRunner() {
     _cancel = true;
     if (_worker.joinable()) _worker.join();

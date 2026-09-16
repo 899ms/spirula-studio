@@ -2,6 +2,7 @@
 
 #include "app/gui/TrainRunner.h"
 
+#include "engine/Engine.h"
 #include "i18n/catalog/Log.h"
 
 #include <algorithm>
@@ -85,6 +86,13 @@ void TrainRunner::shutdown() {
     request_stop();
     join_worker();
     if (_web_viewer) { _web_viewer->stop(); _web_viewer.reset(); }
+}
+
+void TrainRunner::release_engine() {
+    shutdown();
+    _engine_ready = false;
+    _session.reset();
+    engine_reset();
 }
 
 void TrainRunner::load_dataset(const TrainConfig& cfg, const std::string& preset) {

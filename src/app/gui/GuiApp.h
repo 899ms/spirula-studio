@@ -6,7 +6,7 @@
 
 #include "backend/api/BackendRuntime.h"
 #include "config/TrainConfig.h"
-#include "app/gui/BatchTrain.h"
+#include "app/gui/BatchProcess.h"
 #include "app/gui/ColmapRunner.h"
 #include "app/gui/CompareView.h"
 #include "app/gui/Fonts.h"
@@ -24,6 +24,7 @@
 #include "app/gui/ModelCache.h"
 #include "app/gui/SegmentPanel.h"
 #include "app/gui/SfmRunner.h"
+#include "app/gui/SourceList.h"
 #include "app/gui/TelemetryProbe.h"
 #include "app/gui/TrainPreset.h"
 #include "app/gui/TrainRunner.h"
@@ -37,6 +38,20 @@
 #include <vector>
 
 namespace gui {
+
+// One kind of saved preset as the screen sees it: what is on disk, which one
+// is in use, and what the last save or load said. `file` is "" while the
+// built-in (or stock) settings are selected.
+template <class T>
+struct PresetPicker {
+    std::vector<T> items;
+    double scanned_at = -1.0;
+    std::string file;
+    std::string display;
+    std::string desc;
+    std::string msg;          // already formatted
+    bool msg_err = false;
+};
 
 class GuiApp {
 public:
@@ -75,7 +90,9 @@ private:
         None, OpenDataset, SourceImages, SourceVideo, SourceDataset,
         SourceReplace, Workspace,
         OutputPrefix, VocabTree, MaskModelFile, SplatFile,
-        PresetFile, PresetSaveFolder, BatchDataset, BatchOutput, BatchPresetFile,
+        PresetFile, DatasetPresetFile, MeshPresetFile, PresetSaveFolder,
+        BatchDataset, BatchOutput, BatchPresetFile, BatchDatasetPresetFile,
+        BatchMeshPresetFile, BatchSourceImages, BatchSourceVideo, BatchModel,
         MeshSource, MeshPhotos, MeshOutput, AddSplatFile
     };
     // Which reconstruction back end the New Dataset screen runs.
@@ -151,8 +168,28 @@ private:
     // the log rather than throwing; refuses while training, because applying
     // one re-parses the dataset and would take the running session down.
     void load_preset_file(const std::string& path);
-    // Re-scan preset_dir(), rate-limited: this runs while a dropdown is open.
+    // Re-scan each kind's preset folder, rate-limited: these run while a
+    // dropdown is open.
     void refresh_presets();
+    void refresh_dataset_presets();
+    void refresh_mesh_presets();
+
+    // ---- dataset and meshing presets ----
+    // The New Dataset screen's settings as a preset carries them, and back.
+    // Applying one never touches the inputs or the output folder.
+    DatasetSettings capture_dataset_settings() const;
+    void apply_dataset_settings(const DatasetSettings& s);
+    void apply_dataset_preset(const DatasetPreset& p);
+    void load_dataset_preset_file(const std::string& path);
+    // Meshing, the same way: the model, its photographs and the output path
+    // are what the preset is applied TO.
+    void apply_mesh_preset(const MeshPreset& p);
+    void load_mesh_preset_file(const std::string& path);
+    // The picker a screen draws above its options: combo, save, load, delete.
+    void draw_dataset_preset_picker();
+    void draw_mesh_preset_picker();
+    // Arm the shared save dialog for `kind`, seeded from what is on screen.
+    void open_preset_save(PresetKind kind);
     void start_training();
     // Everything that renders from the training session, released together.
     // Every path that replaces or destroys the session goes through this.
@@ -165,30 +202,44 @@ private:
     bool training_busy() const;   // Preparing or Training
 
     // ---- batch ----
-    // Append a row for this dataset, seeded with the preset the trainer
-    // screen is on. Shared by the picker, the recents menu and the drop
-    // handler.
+    // Append a row that trains this dataset, seeded with the preset the
+    // trainer screen is on. Shared by the picker, recents and the drop handler.
     void add_batch_row(const std::string& dataset);
+    // ... and one that builds a dataset from these inputs, or meshes a model.
+    void add_batch_source_row(const std::vector<std::string>& sources);
+    void add_batch_mesh_row(const std::string& model);
+    void batch_edited();                    // persist, and re-check
     void check_batch();                     // pre-flight every row
+    BatchCapabilities batch_capabilities() const;
     void request_start_batch(bool skip_invalid);
     void start_batch(bool skip_invalid);
-    // Called once per frame while a batch is live: records the row that just
+    // Called once per frame while a batch is live: records the task that just
     // finished and launches the next one.
     void advance_batch();
+    // Is the runner that owns this stage still working?
+    bool batch_stage_busy(BatchStage stage) const;
+    // Record the finished task, and skip what depended on it.
+    void record_batch_task();
+    bool launch_batch_task(BatchTask& task);
+    bool launch_batch_dataset(BatchTask& task, const BatchRow& row);
+    bool launch_batch_train(BatchTask& task, const BatchRow& row);
+    bool launch_batch_mesh(BatchTask& task, const BatchRow& row);
+    // The dataset / model a task reads, from what its row has produced so far.
+    const BatchTask* batch_task_of(int row, BatchStage stage, int variant) const;
+    void fail_batch_task(BatchTask& task, const std::string& error);
     void finish_batch();
-    // Give up on the queue without waiting for the current row (the stop
+    // Give up on the queue without waiting for the current task (the stop
     // confirmation took the session away).
     void cancel_batch();
+    // Show the screen the running stage belongs to, unless the user has
+    // walked off to look at something else.
+    void follow_batch_screen(BatchStage stage);
 
     // ---- dataset creation ----
     // Which engines this build and this machine can actually offer.
     bool builtin_sfm_available() const;
     bool colmap_available() const;
     Engine effective_engine() const;
-    // Does any input carry the 360 packing, and what the plan does to the lens.
-    bool any_pano360() const;
-    void apply_pano_lens();
-    void reset_pano_size();
     void draw_pano360_options();
     void draw_pano360_size();
     bool dataset_busy() const;
@@ -289,16 +340,6 @@ private:
     // Every option back to what a freshly picked input would have given it.
     // The inputs, the output folder and the mask prompt are not options.
     void reset_recon_options();
-    // The settings an input implies -- what a video wants, what a dual-lens
-    // 360 file wants. Asked when the list changes, and again by the reset.
-    void apply_source_presets();
-    // The single "Camera / lens" control speaks for the whole capture, so it
-    // writes to every input rather than only the first.
-    void apply_lens_to_sources(const std::string& model);
-    // Put the per-input lens list back in its canonical shape: a real model on
-    // the first row, "same as above" (an empty model) on every row that only
-    // repeats the row before it.
-    void normalize_source_lenses();
     // What one input's images are fitted with, resolved down the row list.
     void source_lens(size_t input, std::string& model, float& focal) const;
     // What the output folder holds, at 1 Hz rather than per frame: the answer
@@ -336,10 +377,25 @@ private:
     void open_mesh_preview();
     void close_mesh_preview();
     void draw_batch();
-    void draw_batch_table();
-    void draw_batch_preset_combo(BatchJob& job, int row);
+    void draw_batch_rows();
+    void draw_batch_row(BatchRow& row, int index, int& remove, int& move);
+    void draw_batch_row_dataset(BatchRow& row, int index);
+    void draw_batch_row_train(BatchRow& row, int index);
+    void draw_batch_row_mesh(BatchRow& row, int index);
+    // The dataset folder: written by the Dataset stage, read by the Train
+    // stage, so one field serves both and they cannot disagree.
+    void draw_batch_row_common_dataset(BatchRow& row, int index);
+    // The one-line summary on a collapsed row: what it does, to what.
+    std::string batch_row_summary(const BatchRow& row) const;
+    // The built-in / saved picker one stage of one row uses. True when the
+    // choice moved.
+    bool draw_batch_train_preset(BatchPreset& p, const char* id, int row, int slot);
+    bool draw_batch_dataset_preset(BatchPreset& p, int row);
+    bool draw_batch_mesh_preset(BatchPreset& p, int row);
     void draw_batch_issues();
-    void draw_batch_progress();      // the running-job block on the trainer screen
+    void draw_batch_plan();          // the tasks a start would run, in order
+    void draw_batch_progress();      // the running-task block on a work screen
+    const spirula::i18n::Msg& batch_stage_name(BatchStage s) const;
     void draw_train_settings();      // left panel
     void draw_preset_picker();       // built-in + saved presets, save / load
     void draw_preset_save_modal();
@@ -414,17 +470,13 @@ private:
     std::string _preset = "3dgs";
     ConfigUIState _cfg_ui;
 
-    // Saved presets. `_preset_file` is "" while a built-in preset is selected;
-    // otherwise it is the file in use and names the row shown in the picker.
-    std::vector<TrainPreset> _presets;
-    double _presets_scanned_at = -1.0;
-    std::string _preset_file;
-    std::string _preset_display;
-    std::string _preset_desc;
-    // The last save / load outcome, already formatted, and whether it failed.
-    std::string _preset_msg;
-    bool _preset_msg_err = false;
-    // The save dialog.
+    // Saved presets, one picker per kind.
+    PresetPicker<TrainPreset> _train_presets;
+    PresetPicker<DatasetPreset> _ds_presets;
+    PresetPicker<MeshPreset> _mesh_presets;
+    // The save dialog, which the three kinds share -- it asks the same three
+    // questions whatever is being saved.
+    PresetKind _preset_save_kind = PresetKind::Train;
     bool _preset_save_open = false;    // arm the modal
     bool _preset_save_shown = false;
     // The modal stepped aside for the file dialog and wants to come back.
@@ -434,7 +486,8 @@ private:
     std::string _preset_save_path;
     // The path field follows the name until the user edits it by hand.
     bool _preset_path_edited = false;
-    // The delete confirmation, which always targets _preset_file.
+    // The delete confirmation, which always targets the picker's own file.
+    PresetKind _preset_delete_kind = PresetKind::Train;
     bool _preset_delete_open = false;
     bool _preset_delete_shown = false;
 
@@ -577,17 +630,25 @@ private:
     std::string _license_prompt;      // family whose modal is open
     bool _license_tick = false;
 
-    // Batch training. The queue is data; the driver is advance_batch(), so a
-    // running batch is an ordinary training session the trainer screen shows
-    // exactly as it shows a hand-started one.
-    std::vector<BatchJob> _batch;
+    // Batch processing. The queue is data; the driver is advance_batch(), so a
+    // running task is an ordinary dataset / training / meshing job, shown by
+    // the same screen that shows a hand-started one.
+    std::vector<BatchRow> _batch;
+    // The rows expanded into the units of work they will run as, built by
+    // start_batch() and by the plan preview. Only the running copy carries
+    // results, so the preview may be rebuilt whenever the list changes.
+    std::vector<BatchTask> _batch_tasks;
     bool _batch_dirty = false;        // edited -> persist once the widget is idle
     bool _batch_checked = false;      // a pre-flight has run since the last edit
     bool _batch_active = false;
-    bool _batch_launched = false;     // a row's session is in flight
-    int  _batch_current = -1;         // which row that is
-    bool _batch_stop_after = false;   // finish this row, then stop
+    bool _batch_launched = false;     // a task is in flight
+    int  _batch_current = -1;         // which task that is
+    bool _batch_stop_after = false;   // finish this task, then stop
     bool _batch_stop_now = false;     // ... and record it as stopped, not done
+    // Which row is open in the list, so an unattended queue is not a wall of
+    // expanded forms. -1 = none.
+    int  _batch_open_row = -1;
+    bool _batch_show_plan = false;
     std::string _batch_msg;           // already formatted; "" when there is none
     bool _batch_msg_err = false;
 
@@ -597,6 +658,9 @@ private:
     int _pick_source = -1;            // which input PickAction::SourceReplace edits
     // Which batch row the pending pick edits; -1 appends a new row.
     int _pick_row = -1;
+    // ... and which of that row's training runs, for a pick made in one of
+    // their preset combos.
+    int _pick_slot = -1;
 
     // Settings (persisted).
     std::vector<std::string> _recents;

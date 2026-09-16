@@ -332,12 +332,20 @@ foreach(test_src ${SS_CORE_TESTS})
     ss_configure_app(${test_name})
 endforeach()
 
-# The one GUI file with no GUI in it: the stamp that decides whether a
-# finished reconstruction is kept or built again. Named rather than globbed --
-# a second such test would name its own source too.
+# The GUI files with no GUI in them: the stamp that decides whether a finished
+# reconstruction is kept or built again, and the preset serializers. Named
+# rather than globbed -- each such test names its own sources.
 if(SS_BUILD_GUI)
     add_executable(recon_stamp_test
         ${SS_SRC}/app/gui/tests/recon_stamp_test.cpp
         ${SS_SRC}/app/gui/ReconStamp.cpp)
     ss_configure_app(recon_stamp_test)
+
+    add_executable(preset_roundtrip_test
+        ${SS_SRC}/app/gui/tests/preset_roundtrip_test.cpp
+        ${SS_SRC}/app/gui/DatasetPreset.cpp
+        ${SS_SRC}/app/gui/MeshPreset.cpp
+        ${SS_SRC}/app/gui/PresetFile.cpp
+        ${SS_SRC}/app/AppPaths.cpp)
+    ss_configure_app(preset_roundtrip_test)
 endif()

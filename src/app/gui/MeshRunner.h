@@ -65,6 +65,10 @@ struct MeshJob {
     std::string preview_path() const;
 };
 
+// The output base a model implies, which is what the picker and a batch row
+// both start from: <run>/mesh for a folder, <name>_mesh for a file.
+std::string default_mesh_output(const std::string& checkpoint);
+
 class MeshRunner {
 public:
     enum class State { Idle, Running, Done, Failed, Cancelled };
