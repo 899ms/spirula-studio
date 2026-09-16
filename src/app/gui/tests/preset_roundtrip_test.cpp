@@ -269,7 +269,8 @@ static void test_mesh_preset() {
     p.name = "Textured";
     p.description = "glb with an atlas";
     p.job.use_data = false;
-    p.job.color = 2;
+    p.job.colors[1] = false;
+    p.job.colors[2] = true;
     p.job.formats[0] = false;
     p.job.formats[3] = true;
     p.job.max_cameras = 40;
@@ -294,7 +295,8 @@ static void test_mesh_preset() {
     CHECK_EQ(back.name, p.name);
     CHECK_EQ(back.description, p.description);
     CHECK_EQ(back.job.use_data, p.job.use_data);
-    CHECK_EQ(back.job.color, p.job.color);
+    for (int i = 0; i < gui::kNumMeshColorModes; i++)
+        CHECK_EQ(back.job.colors[i], p.job.colors[i]);
     for (int i = 0; i < gui::kNumMeshFormats; i++)
         CHECK_EQ(back.job.formats[i], p.job.formats[i]);
     CHECK_EQ(back.job.max_cameras, p.job.max_cameras);
@@ -333,16 +335,29 @@ static void test_sanitize() {
     CHECK(s.colmap.matcher >= 1);
     CHECK_EQ(s.colmap.camera_model, std::string("OPENCV"));
 
-    // The colour mode and the formats have to agree, or the child refuses.
+    // The colours and the formats have to have a pair between them, or the
+    // run writes nothing at all.
     gui::MeshJob job;
-    job.color = 2;
+    for (int i = 0; i < gui::kNumMeshColorModes; i++) job.colors[i] = false;
+    job.colors[2] = true;
     for (int i = 0; i < gui::kNumMeshFormats; i++) job.formats[i] = false;
     job.formats[0] = true;      // PLY cannot carry a texture
     gui::sanitize_mesh_job(job);
-    CHECK(!job.formats[0]);
-    bool any = false;
-    for (int i = 0; i < gui::kNumMeshFormats; i++) any = any || job.formats[i];
-    CHECK(any);
+    CHECK(!gui::mesh_job_writes_nothing(job));
+
+    // A run asking for two colours writes each at its own base path, and one
+    // asking for a single colour writes where it always has.
+    gui::MeshJob two;
+    two.output = "C:/runs/one/mesh";
+    two.colors[0] = true;       // none + vertex
+    two.formats[0] = true;      // ply
+    const std::vector<std::string> outs = gui::mesh_job_outputs(two);
+    CHECK_EQ(outs.size(), (size_t)2);
+    CHECK_EQ(outs[0], std::string("C:/runs/one/mesh_vertexcolor.ply"));
+    CHECK_EQ(outs[1], std::string("C:/runs/one/mesh_nocolor.ply"));
+    two.colors[0] = false;
+    CHECK_EQ(gui::mesh_job_outputs(two).size(), (size_t)1);
+    CHECK_EQ(gui::mesh_job_outputs(two)[0], std::string("C:/runs/one/mesh.ply"));
 }
 
 // A preset of one kind must not load as another, whatever its name is.

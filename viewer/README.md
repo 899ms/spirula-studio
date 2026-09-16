@@ -53,7 +53,7 @@ plain C++17 with no CUDA dependency (see `csrc/CameraModel.h`).
   - GPU-friendly: attributes live in `TEXTURE_2D_ARRAY`s laid out so arbitrarily
     large models render **even under a small `MAX_TEXTURE_SIZE`** (tiles into
     array layers).
-- **Meshes** (`.ply`, `.obj`, `.gltf`, `.glb`) as produced by the meshing code:
+- **Meshes** (`.ply`, `.obj`, `.gltf`, `.glb`, `.stl`) as produced by the meshing code:
   vertex colors or a base-color texture atlas, shading toggles (shaded /
   unshaded, flat / interpolated normals, color on/off) with a view-following
   headlight so the surface reads from every angle. GLTF/GLB are parsed in JS;

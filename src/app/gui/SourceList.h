@@ -16,11 +16,6 @@
 
 namespace gui {
 
-// The Insta360 X5 focal length: fx = fy ~ 0.269 * image width on every X5
-// dataset measured. A known focal makes fisheye initialization reliable, and a
-// fisheye started from the generic guess often does not initialize at all.
-inline constexpr float kInsta360FocalFactor = 0.269f;
-
 // Every input carries a concrete lens, so a list holding a 360 camera and a
 // phone cannot end up applying one of them to the other. An Insta360 .insv
 // splits into one folder per fisheye track, which the thin-prism model fits.
@@ -53,6 +48,18 @@ bool any_pano360(const std::vector<PrepInput>& sources);
 void reset_pano_size(const std::vector<PrepInput>& sources,
                      app::Pano360Options& pano);
 
+// The pixel size of an input's frames: the video's own, or the first photo in
+// the folder. False when nothing could be measured -- a path being typed, a
+// folder with no readable image, ffmpeg missing.
+bool source_pixel_size(const PrepInput& s, const std::string& ffmpeg_exe,
+                       int& w, int& h);
+
+// True when every input measures 2:1, which is what an equirectangular
+// panorama is and nothing else is. False when even one cannot be measured:
+// a guessed lens is the one mistake that reconstructs into nothing.
+bool sources_look_equirect(const std::vector<PrepInput>& sources,
+                           const std::string& ffmpeg_exe);
+
 // What keeps "same as above" (an empty per-input model) honest: the first row
 // always holds a real model, a row repeating the one above is emptied, and
 // `camera_model` comes back as the first row's -- the dataset-wide one.
@@ -74,6 +81,13 @@ void apply_pano_lens(std::vector<PrepInput>& sources, SfmJob& sfm,
 // when the list changes, before any preset is applied over it.
 void apply_capture_defaults(std::vector<PrepInput>& sources, SfmJob& sfm,
                             ColmapJob& colmap);
+
+// What a built-in dataset preset has to ask the capture itself: a 360 camera
+// writes either two fisheye circles or a 2:1 panorama, and only its frames
+// say which -- so it lives here, with the other answers that need a probe.
+void dataset_adapt_preset(const std::string& preset,
+                          std::vector<PrepInput>& sources, SfmJob& sfm,
+                          ColmapJob& colmap, const std::string& ffmpeg_exe);
 
 // ... and the part that must survive a preset applied afterwards: the lens a
 // capture is KNOWN to need wins over the one a preset carries, because a

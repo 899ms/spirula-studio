@@ -348,7 +348,7 @@ async function loadSingleModel(entries) {
   // external resources (.bin/.mtl/images) when a .gltf/.obj needs siblings —
   // never thousands of unrelated dataset images.
   const needsSiblings = entries.some(e => /\.(gltf|obj)$/i.test(e.path));
-  let wanted = entries.filter(e => /\.(ply|obj|gltf|glb)$/i.test(e.path) ||
+  let wanted = entries.filter(e => /\.(ply|obj|gltf|glb|stl)$/i.test(e.path) ||
     (needsSiblings && /\.(bin|mtl|png|jpg|jpeg|webp)$/i.test(e.path)));
   if (!wanted.length) wanted = entries;
   const files = await Promise.all(wanted.map(e => e.getFile()));
@@ -387,7 +387,7 @@ async function loadSingleModel(entries) {
   histCache.clear();
   updateHistParams();
   $('drop-hint').style.display = 'none';
-  const name = files.find(f=>/\.(ply|obj|gltf|glb)$/i.test(f.name))?.name || '';
+  const name = files.find(f=>/\.(ply|obj|gltf|glb|stl)$/i.test(f.name))?.name || '';
   $('st-file').textContent = name.length>22 ? '…'+name.slice(-21) : name;
   setStatus(model.type==='splat' ? 'Splat model loaded' : 'Mesh loaded', 'ok');
   dirty = true;

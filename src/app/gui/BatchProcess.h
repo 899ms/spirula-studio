@@ -46,17 +46,42 @@ struct BatchIssue {
 std::string batch_issue_line(const BatchIssue& issue);
 bool batch_has_error(const std::vector<BatchIssue>& issues);
 
-// A preset a stage points at. An empty path means the built-in named below,
-// which only training has; for the other two it means "the stock settings".
+// A preset a stage points at: a saved file, or -- with no path -- the built-in
+// of that name (kTrainPresets, kDatasetPresets). Meshing has no built-ins, so
+// there an empty name is the stock settings.
 struct BatchPreset {
     std::string path;
-    std::string name = "3dgs";
+    std::string name;
+};
+
+// One training run of a row: which preset, and the three numbers changed often
+// enough that a preset per combination would be the wrong shape of work.
+struct BatchRun {
+    BatchPreset preset{"", "3dgs"};
+    // "" is "whatever the preset says". TEXT, because 0 is a legal
+    // --sh-degree and so is "unset", and those are different answers.
+    std::string cap_max;
+    std::string sh_degree;
+    std::string iterations;
+    // Does the row's Mesh stage cover this run? Off for the big appearance
+    // run that would run out of memory meshing, on for the cheap one trained
+    // beside it for exactly that purpose.
+    bool mesh = true;
+};
+
+// What the Mesh stage writes, over whatever its preset says. Both sets are
+// empty for "whatever the preset says"; otherwise they are the colors and the
+// formats themselves, as bits over kMeshColorModes / kMeshFormats.
+struct BatchMeshOptions {
+    BatchPreset preset{"", ""};
+    int colors = 0;
+    int formats = 0;
 };
 
 struct BatchRow {
     // ---- what it builds a dataset from ----
     std::vector<std::string> sources;   // videos and folders of photos
-    BatchPreset dataset_preset{"", ""};
+    BatchPreset dataset_preset{"", "general"};
 
     // Where the Dataset stage writes and what the Train stage reads. Left
     // empty on a row that creates one, it is derived from the sources and
@@ -66,21 +91,14 @@ struct BatchRow {
     // ---- training ----
     // One run each; empty means one run on the built-in default, so a row that
     // just says "train this" needs nothing filled in.
-    std::vector<BatchPreset> train_presets;
+    std::vector<BatchRun> runs;
     std::string output_dir;             // "" = <dataset>/outputs
-
-    // Per-run overrides of the three flags changed often enough that a preset
-    // per combination is the wrong shape of work; "" is "whatever the preset
-    // says". TEXT because 0 is a legal --sh-degree and so is "unset".
-    std::string cap_max_override;
-    std::string sh_degree_override;
-    std::string iterations_override;
 
     // ---- meshing ----
     // The model to mesh. Empty means the runs this row trained, which is what
     // lets a mesh be asked for before the model exists.
     std::string model;
-    BatchPreset mesh_preset{"", ""};
+    BatchMeshOptions mesh;
 
     bool stages[kNumBatchStages] = {false, true, false};
     bool enabled = true;      // kept on the list, left out of this run
@@ -109,15 +127,32 @@ struct BatchTask {
     std::string image_dir, mask_dir;
     bool mask_flipped = false;
     int steps = 0;
+    // Wall clock, for the progress block: when it was launched, and how long
+    // it took once it is over.
+    double started_at = 0.0;
     double seconds = 0.0;
 };
 
 // The tasks the rows expand into, in the order they will run.
 std::vector<BatchTask> batch_plan(const std::vector<BatchRow>& rows);
 
-// How many training runs a row asks for: one per preset, and one when it names
-// none at all.
+// How many training runs a row asks for: one per entry, and one when it names
+// none at all. batch_run_of() is that implicit run made explicit.
 int batch_num_runs(const BatchRow& row);
+BatchRun batch_run_of(const BatchRow& row, int variant);
+// How many of those runs the Mesh stage covers.
+int batch_num_meshes(const BatchRow& row);
+
+// What the queue has taken and what is left. `frac` is how far through the
+// running task its own runner says it is (<0 when it cannot say), and
+// `elapsed` how long that task has been going.
+struct BatchProgress {
+    int done = 0, total = 0, running = 0;
+    double task_remaining = -1.0;   // the running task, seconds; -1 unknown
+    double remaining = -1.0;        // the whole queue, seconds; -1 unknown
+};
+BatchProgress batch_progress(const std::vector<BatchTask>& tasks, int current,
+                             double frac, double elapsed);
 
 // What this build and this machine can do, asked once and handed to every
 // row's check so that no two rows can get different answers.

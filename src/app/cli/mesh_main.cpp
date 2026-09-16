@@ -1,17 +1,16 @@
 // mesh_main.cpp -- standalone mesh-extraction CLI.
 //
 //     spirula-mesh <checkpoint> [--data <dir>] [--format ply,glb]
-//                 [--color none|vertex|texture] [--flag value ...]
+//                 [--color none,vertex,texture] [--flag value ...]
 //
 // <checkpoint> is a run directory (containing config.json and a step-*.ckpt/
 // folder), a *.ckpt directory, or a splat.ply file directly. The dataset
 // (for camera-based occupancy + colors) defaults to config.json's `data`;
 // pass --no-data to mesh from Gaussian densities only.
 //
-// It loads the raw
-// (un-activated) Gaussians from the checkpoint PLY, parses the dataset with
-// the same C++ parsers the CLI trainer uses, and calls meshing::generate_mesh
-// (Meshing.h) for the heavy lifting.
+// It loads the un-activated Gaussians from the checkpoint PLY, parses the
+// dataset with the same C++ parsers the CLI trainer uses, and calls
+// meshing::generate_mesh (Meshing.h) for the heavy lifting.
 
 #include "app/Tools.h"
 
@@ -141,7 +140,7 @@ struct Options {
     bool no_data = false;
     std::string output;                 // base path (extension optional)
     std::string format = "ply";
-    std::string color = "vertex";       // none | vertex | texture
+    std::string color = "vertex";       // a list of none/vertex/texture
     std::string data_format;            // "" = config/auto
     std::optional<float> iso;           // default depends on cameras
     meshing::MeshingConfig m;           // remaining knobs live here
@@ -190,7 +189,7 @@ void print_help(const char* argv0) {
     help_row("--data-format <fmt>", mmsg::help_data_format);
     help_row("--output <path>", mmsg::help_output);
     help_row("--format <list>", mmsg::help_format, {d.format});
-    help_row("--color <mode>", mmsg::help_color, {d.color});
+    help_row("--color <list>", mmsg::help_color, {d.color});
     help_row("--texture-size <n>", mmsg::help_texture_size, {d.m.texture_size});
     help_row("--tex-gutter-px <n>", mmsg::help_tex_gutter, {d.m.tex_gutter_px});
     help_row("--chart-angle-deg <a>", mmsg::help_chart_angle,
@@ -295,24 +294,18 @@ int spirula_mesh_main(int argc, char** argv) {
     try {
         Options o = parse_args(argc, argv);
 
-        // ---- resolve color mode + formats, and validate BEFORE any work ----
-        meshing::MeshColorMode mode;
-        if      (o.color == "none")    mode = meshing::MeshColorMode::None;
-        else if (o.color == "vertex")  mode = meshing::MeshColorMode::Vertex;
-        else if (o.color == "texture") mode = meshing::MeshColorMode::Texture;
-        else throw std::runtime_error("--color: expected none/vertex/texture, got '"
-                                      + o.color + "'");
-        o.m.color_mode = mode;
+        // ---- resolve color modes + formats, and validate BEFORE any work ----
+        std::vector<meshing::MeshColorMode> modes =
+            meshing::parse_mesh_colors(o.color);
+        if (modes.empty())
+            throw std::runtime_error("--color: no color mode given");
         std::vector<meshing::MeshFormatSpec> specs =
             meshing::parse_mesh_formats(o.format);
         if (specs.empty())
             throw std::runtime_error("--format: no valid format given");
+        o.m.colors = modes;
         o.m.formats.clear();
-        for (const auto& spec : specs) {
-            std::string err = meshing::check_export_support(spec, mode);
-            if (!err.empty()) throw std::runtime_error(err);
-            o.m.formats.push_back(spec.token());
-        }
+        for (const auto& spec : specs) o.m.formats.push_back(spec.token());
 
         // ---- checkpoint ----
         auto [splat_ply_s, run_dir_s] = spirula::find_splat_ply(o.checkpoint);
@@ -325,12 +318,19 @@ int spirula_mesh_main(int argc, char** argv) {
         // is usually the only copy of itself. Checked before a single byte is
         // read, so the refusal costs nothing and can never come after the
         // pipeline has already earned the right to destroy it.
-        std::string out_base = o.output;
+        std::string out_base = meshing::mesh_output_strip_ext(o.output);
         if (out_base.empty())
             out_base = (splat_ply.parent_path() / "mesh").string();
         {
+            std::vector<std::string> dropped;
+            const std::vector<meshing::MeshOutputRequest> outputs =
+                meshing::plan_mesh_outputs(specs, modes, out_base, &dropped);
+            if (outputs.empty())
+                throw std::runtime_error(dropped.empty()
+                                             ? std::string("nothing to write")
+                                             : dropped.front());
             std::string err = meshing::check_mesh_outputs_safe(
-                specs, mode, out_base, {splat_ply.string()});
+                outputs, {splat_ply.string()});
             if (!err.empty()) throw std::runtime_error(err);
         }
         // Meshing reads geometry and DC colour only; skipping f_rest

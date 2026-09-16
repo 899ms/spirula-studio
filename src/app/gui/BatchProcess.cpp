@@ -6,6 +6,7 @@
 #include "app/TrainerCore.h"
 #include "app/gui/SourceList.h"
 #include "app/gui/TrainPreset.h"
+#include "checkpoint/SplatPly.h"
 #include "data/Json.h"
 #include "data/JsonWrite.h"
 #include "i18n/catalog/Gui.h"
@@ -77,6 +78,46 @@ bool is_set(const std::string& text) {
     return text.find_first_not_of(" \t") != std::string::npos;
 }
 
+// Which built-in a row's Dataset stage runs on. A row written before there
+// were any names none, and the base one is what it always had.
+std::string builtin_dataset_name(const BatchRow& row) {
+    return row.dataset_preset.name.empty() ? std::string("general")
+                                           : row.dataset_preset.name;
+}
+
+// Does this model carry its own dataset? The same resolution the mesh child
+// does: `data` out of the run's config.json, relative to the run folder. A
+// path that is not a checkpoint at all simply has none.
+bool model_records_dataset(const std::string& model) {
+    if (model.empty()) return false;
+    std::error_code ec;
+    try {
+        auto [ply, run_dir] = spirula::find_splat_ply(model);
+        (void)ply;
+        const fs::path cfg = fs::path(run_dir) / "config.json";
+        if (!fs::is_regular_file(cfg, ec)) return false;
+        const JsonValue run_cfg = json_parse_file(cfg.string());
+        const JsonValue* d = run_cfg.find("data");
+        if (!d || d->is_null()) return false;
+        fs::path cand = d->as_string();
+        if (cand.is_relative()) cand = fs::path(run_dir) / cand;
+        return fs::exists(cand, ec);
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// The row's own colours and formats over whatever the preset said. An empty
+// set is not a choice to write nothing; it is "leave the preset alone".
+void apply_mesh_overrides(const BatchMeshOptions& opt, MeshJob& job) {
+    if (opt.colors)
+        for (int i = 0; i < kNumMeshColorModes; i++)
+            job.colors[i] = (opt.colors & (1 << i)) != 0;
+    if (opt.formats)
+        for (int i = 0; i < kNumMeshFormats; i++)
+            job.formats[i] = (opt.formats & (1 << i)) != 0;
+}
+
 // The three overrides, in one place so the check and the builder cannot
 // disagree about what a legal value is.
 struct OverrideSpec {
@@ -85,10 +126,10 @@ struct OverrideSpec {
     const char* flag;
     int TrainConfig::* field;
 };
-std::vector<OverrideSpec> overrides_of(const BatchRow& row) {
-    return {{row.cap_max_override, 1, 1000000000, "cap_max", &TrainConfig::cap_max},
-            {row.sh_degree_override, 0, 4, "sh_degree", &TrainConfig::sh_degree},
-            {row.iterations_override, 1, 1000000000, "num_iterations",
+std::vector<OverrideSpec> overrides_of(const BatchRun& run) {
+    return {{run.cap_max, 1, 1000000000, "cap_max", &TrainConfig::cap_max},
+            {run.sh_degree, 0, 4, "sh_degree", &TrainConfig::sh_degree},
+            {run.iterations, 1, 1000000000, "num_iterations",
              &TrainConfig::num_iterations}};
 }
 
@@ -122,19 +163,18 @@ bool config_of(const BatchPreset& p, TrainConfig& cfg,
 // Two rows do the same work when they train the same dataset with the same
 // settings. The same dataset twice is ordinary -- comparing two presets on one
 // capture is exactly what a batch is for.
+bool same_run(const BatchRun& a, const BatchRun& b) {
+    if (a.preset.path != b.preset.path) return false;
+    if (a.preset.path.empty() && a.preset.name != b.preset.name) return false;
+    return a.cap_max == b.cap_max && a.sh_degree == b.sh_degree &&
+           a.iterations == b.iterations;
+}
+
 bool same_train_work(const BatchRow& a, const BatchRow& b) {
     if (a.dataset != b.dataset || a.dataset.empty()) return false;
-    if (a.cap_max_override != b.cap_max_override ||
-        a.sh_degree_override != b.sh_degree_override ||
-        a.iterations_override != b.iterations_override)
-        return false;
-    if (a.train_presets.size() != b.train_presets.size()) return false;
-    for (size_t i = 0; i < a.train_presets.size(); i++) {
-        if (a.train_presets[i].path != b.train_presets[i].path) return false;
-        if (a.train_presets[i].path.empty() &&
-            a.train_presets[i].name != b.train_presets[i].name)
-            return false;
-    }
+    if (a.runs.size() != b.runs.size()) return false;
+    for (size_t i = 0; i < a.runs.size(); i++)
+        if (!same_run(a.runs[i], b.runs[i])) return false;
     return true;
 }
 
@@ -155,6 +195,27 @@ BatchPreset read_preset(const JsonValue* v) {
     return p;
 }
 
+// The two override sets, as the tokens the mesher spells rather than as bits:
+// a queue file is meant to be readable, and a bit that shifted would quietly
+// mean a different format.
+void write_mask(JsonWriter& w, const char* key, int mask,
+                const char* const* names, int n) {
+    if (!mask) return;
+    w.key(key).array();
+    for (int i = 0; i < n; i++)
+        if (mask & (1 << i)) w.value(names[i]);
+    w.end();
+}
+
+int read_mask(const JsonValue* v, const char* const* names, int n) {
+    int mask = 0;
+    if (!v || !v->is_array()) return 0;
+    for (const JsonValue& e : v->arr)
+        for (int i = 0; i < n; i++)
+            if (e.as_string() == names[i]) mask |= 1 << i;
+    return mask;
+}
+
 }  // namespace
 
 
@@ -173,7 +234,23 @@ bool batch_has_error(const std::vector<BatchIssue>& issues) {
 
 
 int batch_num_runs(const BatchRow& row) {
-    return row.train_presets.empty() ? 1 : (int)row.train_presets.size();
+    return row.runs.empty() ? 1 : (int)row.runs.size();
+}
+
+
+BatchRun batch_run_of(const BatchRow& row, int variant) {
+    if (variant >= 0 && variant < (int)row.runs.size())
+        return row.runs[(size_t)variant];
+    return BatchRun{};
+}
+
+
+int batch_num_meshes(const BatchRow& row) {
+    if (!row.does(BatchStage::Train)) return 1;   // the model it was given
+    int n = 0;
+    for (int k = 0; k < batch_num_runs(row); k++)
+        n += batch_run_of(row, k).mesh ? 1 : 0;
+    return n;
 }
 
 
@@ -184,14 +261,74 @@ std::vector<BatchTask> batch_plan(const std::vector<BatchRow>& rows) {
         if (!r.enabled) continue;
         if (r.does(BatchStage::Dataset))
             out.push_back({i, BatchStage::Dataset, 0});
-        const int runs = r.does(BatchStage::Train) ? batch_num_runs(r) : 0;
+        const bool trains = r.does(BatchStage::Train);
+        const int runs = trains ? batch_num_runs(r) : 0;
         for (int k = 0; k < runs; k++)
             out.push_back({i, BatchStage::Train, k});
-        if (r.does(BatchStage::Mesh))
-            for (int k = 0; k < std::max(runs, 1); k++)
-                out.push_back({i, BatchStage::Mesh, k});
+        // One mesh per run the row marked for it -- the big appearance run and
+        // the cheap one trained beside it are not both worth meshing -- and
+        // one for a row that was handed a model instead.
+        if (r.does(BatchStage::Mesh)) {
+            if (!trains) {
+                out.push_back({i, BatchStage::Mesh, 0});
+            } else {
+                for (int k = 0; k < runs; k++)
+                    if (batch_run_of(r, k).mesh)
+                        out.push_back({i, BatchStage::Mesh, k});
+            }
+        }
     }
     return out;
+}
+
+
+BatchProgress batch_progress(const std::vector<BatchTask>& tasks, int current,
+                             double frac, double elapsed) {
+    BatchProgress p;
+    p.total = (int)tasks.size();
+    // What a finished task of each stage took, which is the only honest thing
+    // to estimate an unstarted one of the same stage with.
+    double stage_sum[kNumBatchStages] = {0, 0, 0}, all_sum = 0;
+    int stage_n[kNumBatchStages] = {0, 0, 0}, all_n = 0;
+    for (const BatchTask& t : tasks) {
+        if (t.status == BatchStatus::Running) p.running++;
+        if (t.status != BatchStatus::Pending &&
+            t.status != BatchStatus::Running)
+            p.done++;
+        if (t.status != BatchStatus::Done || t.seconds <= 0.0) continue;
+        stage_sum[(int)t.stage] += t.seconds;
+        stage_n[(int)t.stage]++;
+        all_sum += t.seconds;
+        all_n++;
+    }
+    auto guess = [&](BatchStage s) -> double {
+        if (stage_n[(int)s] > 0) return stage_sum[(int)s] / stage_n[(int)s];
+        return all_n > 0 ? all_sum / all_n : -1.0;
+    };
+
+    double total = 0.0;
+    bool known = true;
+    for (int i = 0; i < (int)tasks.size(); i++) {
+        const BatchTask& t = tasks[(size_t)i];
+        if (i == current) {
+            // Its own runner knows best; a stage average is the fallback, and
+            // a task cannot be estimated to finish before now.
+            double rem = -1.0;
+            if (frac > 0.02 && frac < 1.0) rem = elapsed * (1.0 - frac) / frac;
+            else if (const double g = guess(t.stage); g > 0.0)
+                rem = std::max(g - elapsed, 0.0);
+            p.task_remaining = rem;
+            if (rem < 0.0) known = false;
+            else total += rem;
+            continue;
+        }
+        if (t.status != BatchStatus::Pending) continue;
+        const double g = guess(t.stage);
+        if (g <= 0.0) known = false;
+        else total += g;
+    }
+    p.remaining = known ? total : -1.0;
+    return p;
 }
 
 
@@ -249,6 +386,10 @@ void check_dataset_stage(const BatchRow& row, const BatchCapabilities& caps,
             out.push_back(raw);
             return;
         }
+    } else if (!dataset_apply_preset(s, builtin_dataset_name(row))) {
+        out.push_back(issue_of(msg::chk_preset_unknown, kSt, true,
+                               row.dataset_preset.name));
+        return;
     }
 
     const bool have_engine = s.colmap_engine ? caps.colmap : caps.builtin_sfm;
@@ -326,19 +467,18 @@ void check_train_stage(const BatchRow& row, const BatchCapabilities& caps,
             out.push_back(issue_of(msg::chk_dataset_unreadable, kSt, true, row.dataset));
     }
 
-    int scratch = 0;
     const spirula::i18n::Msg* bad[] = {&msg::chk_bad_max_splats,
                                        &msg::chk_bad_sh_degree,
                                        &msg::chk_bad_steps};
-    const std::vector<OverrideSpec> specs = overrides_of(row);
-    for (size_t i = 0; i < specs.size(); i++)
-        if (!parse_override(specs[i].text, specs[i].lo, specs[i].hi, &scratch))
-            out.push_back(issue_of(*bad[i], kSt, true, specs[i].text));
+    for (int k = 0; k < batch_num_runs(row); k++) {
+        const BatchRun run = batch_run_of(row, k);
+        int scratch = 0;
+        const std::vector<OverrideSpec> specs = overrides_of(run);
+        for (size_t i = 0; i < specs.size(); i++)
+            if (!parse_override(specs[i].text, specs[i].lo, specs[i].hi, &scratch))
+                out.push_back(issue_of(*bad[i], kSt, true, specs[i].text));
 
-    const std::vector<BatchPreset> one{BatchPreset{}};
-    const std::vector<BatchPreset>& presets =
-        row.train_presets.empty() ? one : row.train_presets;
-    for (const BatchPreset& p : presets) {
+        const BatchPreset& p = run.preset;
         TrainConfig cfg;
         std::set<std::string> touched;
         std::string base, error;
@@ -387,19 +527,24 @@ void check_mesh_stage(const BatchRow& row, std::vector<BatchIssue>& out) {
     } else if (!row.model.empty() && !fs::exists(row.model, ec)) {
         out.push_back(issue_of(msg::chk_mesh_model_missing, kSt, true, row.model));
     }
+    // Meshing is on, and every run was unticked for it: the stage would run
+    // over nothing at all.
+    if (row.model.empty() && row.does(BatchStage::Train) &&
+        batch_num_meshes(row) == 0)
+        out.push_back(issue_of(msg::chk_mesh_no_runs, kSt, false));
 
     MeshJob job;
-    if (!row.mesh_preset.path.empty()) {
-        if (!fs::is_regular_file(row.mesh_preset.path, ec)) {
+    if (!row.mesh.preset.path.empty()) {
+        if (!fs::is_regular_file(row.mesh.preset.path, ec)) {
             out.push_back(issue_of(msg::chk_preset_missing, kSt, true,
-                                   row.mesh_preset.path));
+                                   row.mesh.preset.path));
             return;
         }
         try {
-            job = load_mesh_preset(row.mesh_preset.path).job;
+            job = load_mesh_preset(row.mesh.preset.path).job;
         } catch (const std::exception& e) {
             out.push_back(issue_of(msg::chk_preset_unreadable, kSt, true,
-                                   row.mesh_preset.path));
+                                   row.mesh.preset.path));
             BatchIssue raw;
             raw.raw = e.what();
             raw.fatal = true;
@@ -408,10 +553,16 @@ void check_mesh_stage(const BatchRow& row, std::vector<BatchIssue>& out) {
             return;
         }
     }
+    // A colour and a format that cannot travel together, chosen on the row
+    // rather than in the preset: the run would write nothing at all.
+    apply_mesh_overrides(row.mesh, job);
+    if (mesh_job_writes_nothing(job))
+        out.push_back(issue_of(msg::chk_mesh_no_output, kSt, true));
     // Meshing without cameras is a much rougher mesh, and a row that neither
-    // names a dataset nor builds one gets exactly that.
+    // names a dataset nor builds one gets exactly that -- unless the model it
+    // was handed records one itself, which is what a run folder does.
     if (job.use_data && row.dataset.empty() && !row.does(BatchStage::Dataset) &&
-        !row.does(BatchStage::Train))
+        !row.does(BatchStage::Train) && !model_records_dataset(row.model))
         out.push_back(issue_of(msg::chk_mesh_no_dataset, kSt, false));
 }
 
@@ -485,7 +636,8 @@ bool batch_build_dataset_job(const BatchRow& row, const std::string& ffmpeg_exe,
                              std::string& error) {
     sources.clear();
     settings = DatasetSettings{};
-    if (!row.dataset_preset.path.empty()) {
+    const bool from_file = !row.dataset_preset.path.empty();
+    if (from_file) {
         try {
             settings = load_dataset_preset(row.dataset_preset.path).s;
         } catch (const std::exception& e) {
@@ -497,8 +649,18 @@ bool batch_build_dataset_job(const BatchRow& row, const std::string& ffmpeg_exe,
         sources.push_back(make_source(p, settings.use_found_masks));
     probe_sources(sources, ffmpeg_exe);
 
-    if (row.dataset_preset.path.empty()) {
+    if (!from_file) {
+        // The capture's own answers first and the built-in over them, so a
+        // preset decides the "how" and the capture keeps the parts only it
+        // knows -- then the built-in gets to ask the frames themselves.
+        const std::string name = builtin_dataset_name(row);
         apply_capture_defaults(sources, settings.sfm, settings.colmap);
+        if (!dataset_apply_preset(settings, name)) {
+            error = "unknown dataset preset: " + name;
+            return false;
+        }
+        dataset_adapt_preset(name, sources, settings.sfm, settings.colmap,
+                             ffmpeg_exe);
     } else {
         // A preset decides everything the capture does not, and what the
         // capture does decide is the sphere to warp and the lens of its
@@ -536,12 +698,10 @@ bool batch_build_train_config(const BatchRow& row, int variant,
                               const std::string& mask_dir, bool mask_flipped,
                               TrainConfig& cfg, std::string& preset_base,
                               std::string& error) {
-    BatchPreset p;
-    if (variant >= 0 && variant < (int)row.train_presets.size())
-        p = row.train_presets[(size_t)variant];
+    const BatchRun run = batch_run_of(row, variant);
 
     std::set<std::string> touched;
-    if (!config_of(p, cfg, touched, preset_base, error)) return false;
+    if (!config_of(run.preset, cfg, touched, preset_base, error)) return false;
 
     cfg.data = dataset;
     if (!image_dir.empty()) cfg.image_dir = image_dir;
@@ -558,10 +718,10 @@ bool batch_build_train_config(const BatchRow& row, int variant,
     // does not go through the web viewer, so a run is still watchable.
     cfg.disable_viewer = true;
 
-    // The row's own overrides go on top of the preset, and count as set by
+    // The run's own overrides go on top of the preset, and count as set by
     // hand: --quality moves cap_max and num_iterations, and a number typed
     // into the row is not something a macro gets to overwrite.
-    for (const OverrideSpec& o : overrides_of(row)) {
+    for (const OverrideSpec& o : overrides_of(run)) {
         int v = 0;
         if (!parse_override(o.text, o.lo, o.hi, &v)) {
             error = spirula::i18n::format(
@@ -584,14 +744,15 @@ bool batch_build_mesh_job(const BatchRow& row, const std::string& model,
                           const std::string& dataset, MeshJob& job,
                           std::string& error) {
     job = MeshJob{};
-    if (!row.mesh_preset.path.empty()) {
+    if (!row.mesh.preset.path.empty()) {
         try {
-            job = load_mesh_preset(row.mesh_preset.path).job;
+            job = load_mesh_preset(row.mesh.preset.path).job;
         } catch (const std::exception& e) {
             error = e.what();
             return false;
         }
     }
+    apply_mesh_overrides(row.mesh, job);
     if (model.empty()) {
         error = "no model to mesh";
         return false;
@@ -610,37 +771,74 @@ bool batch_build_mesh_job(const BatchRow& row, const std::string& model,
 // The list on disk
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// The three overrides, wherever a file spells them. They sat on the row
+// before they sat on the run, and a queue written then still loads.
+void read_overrides(const JsonValue& j, BatchRun& run) {
+    if (const JsonValue* v = j.find("cap_max")) run.cap_max = v->as_string();
+    if (const JsonValue* v = j.find("sh_degree")) run.sh_degree = v->as_string();
+    if (const JsonValue* v = j.find("num_iterations"))
+        run.iterations = v->as_string();
+}
+
+BatchRow read_row(const JsonValue& j) {
+    BatchRow r;
+    if (const JsonValue* v = j.find("sources"); v && v->is_array())
+        for (const JsonValue& e : v->arr)
+            if (!e.as_string().empty()) r.sources.push_back(e.as_string());
+    if (const JsonValue* v = j.find("dataset")) r.dataset = v->as_string();
+    if (const JsonValue* v = j.find("model")) r.model = v->as_string();
+    if (const JsonValue* v = j.find("output_dir")) r.output_dir = v->as_string();
+    r.dataset_preset = read_preset(j.find("dataset_preset"));
+    if (r.dataset_preset.path.empty() && r.dataset_preset.name.empty())
+        r.dataset_preset.name = "general";
+
+    if (const JsonValue* m = j.find("mesh"); m && m->is_object()) {
+        r.mesh.preset = read_preset(m->find("preset"));
+        r.mesh.colors = read_mask(m->find("colors"), kMeshColorModes,
+                                  kNumMeshColorModes);
+        r.mesh.formats = read_mask(m->find("formats"), kMeshFormats,
+                                   kNumMeshFormats);
+    } else {
+        r.mesh.preset = read_preset(j.find("mesh_preset"));
+    }
+
+    // A row whose runs were a list of presets with one set of overrides
+    // between them: every run keeps the numbers the row used to carry.
+    BatchRun shared;
+    read_overrides(j, shared);
+    if (const JsonValue* v = j.find("runs"); v && v->is_array()) {
+        for (const JsonValue& e : v->arr) {
+            BatchRun run;
+            run.preset = read_preset(e.find("preset"));
+            read_overrides(e, run);
+            if (const JsonValue* b = e.find("mesh")) run.mesh = b->as_bool(true);
+            r.runs.push_back(std::move(run));
+        }
+    } else if (const JsonValue* v = j.find("train_presets"); v && v->is_array()) {
+        for (const JsonValue& e : v->arr) {
+            BatchRun run = shared;
+            run.preset = read_preset(&e);
+            r.runs.push_back(std::move(run));
+        }
+    }
+    if (const JsonValue* v = j.find("stages"); v && v->is_array())
+        for (int i = 0; i < kNumBatchStages && i < (int)v->arr.size(); i++)
+            r.stages[i] = v->arr[(size_t)i].as_bool();
+    if (const JsonValue* v = j.find("enabled")) r.enabled = v->as_bool(true);
+    return r;
+}
+
+}  // namespace
+
+
 std::vector<BatchRow> load_batch_list() {
     std::vector<BatchRow> out;
     try {
         const JsonValue root = json_parse_file(batch_list_path());
         if (const JsonValue* rows = root.find("rows"); rows && rows->is_array()) {
-            for (const JsonValue& j : rows->arr) {
-                BatchRow r;
-                if (const JsonValue* v = j.find("sources"); v && v->is_array())
-                    for (const JsonValue& e : v->arr)
-                        if (!e.as_string().empty()) r.sources.push_back(e.as_string());
-                if (const JsonValue* v = j.find("dataset")) r.dataset = v->as_string();
-                if (const JsonValue* v = j.find("model")) r.model = v->as_string();
-                if (const JsonValue* v = j.find("output_dir"))
-                    r.output_dir = v->as_string();
-                if (const JsonValue* v = j.find("cap_max"))
-                    r.cap_max_override = v->as_string();
-                if (const JsonValue* v = j.find("sh_degree"))
-                    r.sh_degree_override = v->as_string();
-                if (const JsonValue* v = j.find("num_iterations"))
-                    r.iterations_override = v->as_string();
-                r.dataset_preset = read_preset(j.find("dataset_preset"));
-                r.mesh_preset = read_preset(j.find("mesh_preset"));
-                if (const JsonValue* v = j.find("train_presets"); v && v->is_array())
-                    for (const JsonValue& e : v->arr)
-                        r.train_presets.push_back(read_preset(&e));
-                if (const JsonValue* v = j.find("stages"); v && v->is_array())
-                    for (int i = 0; i < kNumBatchStages && i < (int)v->arr.size(); i++)
-                        r.stages[i] = v->arr[(size_t)i].as_bool();
-                if (const JsonValue* v = j.find("enabled")) r.enabled = v->as_bool(true);
-                out.push_back(std::move(r));
-            }
+            for (const JsonValue& j : rows->arr) out.push_back(read_row(j));
             return out;
         }
         // A queue written before rows could do more than train.
@@ -651,17 +849,14 @@ std::vector<BatchRow> load_batch_list() {
                 if (const JsonValue* v = j.find("dataset")) r.dataset = v->as_string();
                 if (const JsonValue* v = j.find("output_dir"))
                     r.output_dir = v->as_string();
-                if (const JsonValue* v = j.find("cap_max"))
-                    r.cap_max_override = v->as_string();
-                if (const JsonValue* v = j.find("sh_degree"))
-                    r.sh_degree_override = v->as_string();
-                if (const JsonValue* v = j.find("num_iterations"))
-                    r.iterations_override = v->as_string();
-                BatchPreset p;
-                if (const JsonValue* v = j.find("preset_path")) p.path = v->as_string();
-                if (const JsonValue* v = j.find("preset_name")) p.name = v->as_string();
-                if (p.name.empty()) p.name = "3dgs";
-                r.train_presets.push_back(p);
+                BatchRun run;
+                read_overrides(j, run);
+                if (const JsonValue* v = j.find("preset_path"))
+                    run.preset.path = v->as_string();
+                if (const JsonValue* v = j.find("preset_name"))
+                    run.preset.name = v->as_string();
+                if (run.preset.name.empty()) run.preset.name = "3dgs";
+                r.runs.push_back(std::move(run));
                 out.push_back(std::move(r));
             }
         }
@@ -685,16 +880,21 @@ void save_batch_list(const std::vector<BatchRow>& rows) {
         w.field("dataset", r.dataset);
         w.field("model", r.model);
         w.field("output_dir", r.output_dir);
-        w.field("cap_max", r.cap_max_override);
-        w.field("sh_degree", r.sh_degree_override);
-        w.field("num_iterations", r.iterations_override);
         write_preset(w, "dataset_preset", r.dataset_preset);
-        write_preset(w, "mesh_preset", r.mesh_preset);
-        w.key("train_presets").array();
-        for (const BatchPreset& p : r.train_presets) {
+        w.key("mesh").object();
+        write_preset(w, "preset", r.mesh.preset);
+        write_mask(w, "colors", r.mesh.colors, kMeshColorModes,
+                   kNumMeshColorModes);
+        write_mask(w, "formats", r.mesh.formats, kMeshFormats, kNumMeshFormats);
+        w.end();
+        w.key("runs").array();
+        for (const BatchRun& run : r.runs) {
             w.object();
-            w.field("path", p.path);
-            w.field("name", p.name);
+            write_preset(w, "preset", run.preset);
+            w.field("cap_max", run.cap_max);
+            w.field("sh_degree", run.sh_degree);
+            w.field("num_iterations", run.iterations);
+            w.field("mesh", run.mesh);
             w.end();
         }
         w.end();

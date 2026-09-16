@@ -38,6 +38,24 @@ struct DatasetPreset {
     DatasetSettings s;
 };
 
+// The built-in presets, by the name the picker and a batch row spell.
+// "general" applies nothing, which is what makes it the row a capture starts
+// on. Their labels are in i18n/catalog/Dataset.h (see config/TrainConfig.h).
+struct DatasetPresetInfo { const char* name; };
+inline constexpr DatasetPresetInfo kDatasetPresets[] = {
+    {"general"},
+    {"360-camera"},
+    {"internet-photos"},
+};
+inline constexpr int kNumDatasetPresets =
+    (int)(sizeof(kDatasetPresets) / sizeof(kDatasetPresets[0]));
+
+bool is_dataset_preset_name(const std::string& name);
+
+// Apply one over whatever `s` already holds. False for an unknown name, which
+// leaves `s` alone.
+bool dataset_apply_preset(DatasetSettings& s, const std::string& name);
+
 // Throws std::runtime_error when the file cannot be written / read.
 void save_dataset_preset(const DatasetPreset& p, const std::string& path);
 DatasetPreset load_dataset_preset(const std::string& path);

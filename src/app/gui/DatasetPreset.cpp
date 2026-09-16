@@ -136,6 +136,61 @@ void clamp_choice(std::string& v, const char* const* options, int n) {
 }  // namespace
 
 
+// ---------------------------------------------------------------------------
+// The built-in presets
+// ---------------------------------------------------------------------------
+
+bool is_dataset_preset_name(const std::string& name) {
+    for (const DatasetPresetInfo& p : kDatasetPresets)
+        if (name == p.name) return true;
+    return false;
+}
+
+
+bool dataset_apply_preset(DatasetSettings& s, const std::string& name) {
+    if (name == "general") {
+        // The base settings, so that picking it is a reset rather than a
+        // change: what a freshly opened capture would have had.
+        return true;
+    }
+    if (name == "360-camera") {
+        // Two fisheye circles per frame is what a consumer 360 camera writes;
+        // dataset_adapt_preset() takes it back to the panorama model for a
+        // capture whose own frames measure 2:1.
+        s.sfm.camera_model = "thin-prism-fisheye";
+        s.colmap.camera_model = "THIN_PRISM_FISHEYE";
+        // Whoever holds a 360 camera is in every frame of it, and so is
+        // whatever they carry.
+        s.sfm.prep.mask_enable = true;
+        s.mask.prompt = "person; hand; backpack";
+        s.sfm.mask_features = true;
+        s.border_enable = true;
+        return true;
+    }
+    if (name == "internet-photos") {
+        // Photographs from everywhere: no two share a lens, so no two share a
+        // camera, and the wide baselines are what the learned frontend is for.
+        s.sfm.data_type = 2;
+        s.sfm.camera_mode = 2;
+        s.colmap.camera_mode = 2;
+        s.sfm.features = 2;              // ALIKED-n32
+        s.sfm.matcher = 1;               // LightGlue
+        s.colmap.feature_type = 1;
+        s.colmap.lightglue = true;
+        // Distortion fitted per image over a handful of photographs each is
+        // free to drift; hold it until the one pass that has every camera.
+        s.sfm.distortion_refine = 1;
+        s.colmap.mapper_extra_params = 2;
+        // Priors are what carries a scene the photographs only half cover.
+        s.sfm.geometry.enable = true;
+        s.sfm.geometry.want_normal = true;
+        s.sfm.geometry.want_depth = true;
+        return true;
+    }
+    return false;
+}
+
+
 void sanitize_dataset_settings(DatasetSettings& s) {
     PrepJob& p = s.sfm.prep;
     clamp_enum(p.photo_import, 0, kNumPhotoImports - 1);

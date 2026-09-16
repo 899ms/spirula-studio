@@ -15,6 +15,9 @@
 
 #include "i18n/BeginCatalog.h"
 
+#include <cstddef>
+#include <cstring>
+
 namespace spirula {
 namespace i18n {
 namespace msg {
@@ -11690,6 +11693,188 @@ SS_MSG(geom_view_depth,
     KO("깊이"),            DE("Tiefe"),        FR("Profondeur"),   ES("Profundidad"),
     PT("Profundidade"),   IT("Profondità"),   NL("Diepte"),       RU("Глубина"),
     TR("Derinlik"));
+
+SS_MSG(preset_ds_general,
+    EN("General"),
+    JA("汎用"),
+    ZH_HANS("通用"),
+    ZH_HANT("通用"),
+    KO("일반"),
+    DE("Allgemein"),
+    FR("Général"),
+    ES("General"),
+    PT("Geral"),
+    IT("Generale"),
+    NL("Algemeen"),
+    RU("Общий"),
+    TR("Genel"));
+
+SS_MSG(preset_ds_general_help,
+    EN("The settings a capture starts on. The reconstruction reads the inputs "
+       "and decides the rest for itself."),
+    JA("撮影を読み込んだときの既定の設定です。残りは入力を見て再構成が自分で決めます。"),
+    ZH_HANS("载入一次拍摄时的默认设置。其余的由重建读取输入后自行决定。"),
+    ZH_HANT("載入一次拍攝時的預設設定。其餘由重建讀取輸入後自行決定。"),
+    KO("촬영을 불러왔을 때의 기본 설정입니다. 나머지는 재구성이 입력을 보고 스스로 정합니다."),
+    DE("Die Einstellungen, mit denen eine Aufnahme startet. Den Rest "
+       "entscheidet die Rekonstruktion anhand der Eingaben selbst."),
+    FR("Les réglages avec lesquels une prise de vue démarre. La reconstruction "
+       "lit les entrées et décide du reste elle-même."),
+    ES("Los ajustes con los que empieza una captura. La reconstrucción lee las "
+       "entradas y decide el resto por sí misma."),
+    PT("As definições com que uma captura começa. A reconstrução lê as "
+       "entradas e decide o resto sozinha."),
+    IT("Le impostazioni con cui parte un'acquisizione. La ricostruzione legge "
+       "gli input e decide il resto da sé."),
+    NL("De instellingen waarmee een opname begint. De reconstructie leest de "
+       "invoer en bepaalt de rest zelf."),
+    RU("Настройки, с которых начинается съёмка. Остальное реконструкция решает "
+       "сама, посмотрев на входные данные."),
+    TR("Bir çekimin başladığı ayarlar. Gerisini yeniden oluşturma, girdilere "
+       "bakarak kendisi belirler."));
+
+SS_MSG(preset_ds_360,
+    EN("360 camera"),
+    JA("360 度カメラ"),
+    ZH_HANS("360 相机"),
+    ZH_HANT("360 相機"),
+    KO("360 카메라"),
+    DE("360-Kamera"),
+    FR("Caméra 360"),
+    ES("Cámara 360"),
+    PT("Câmara 360"),
+    IT("Fotocamera 360"),
+    NL("360-camera"),
+    RU("Камера 360"),
+    TR("360 kamera"));
+
+SS_MSG(preset_ds_360_help,
+    EN("For a consumer 360 camera: the fisheye lens those write, or the "
+       "panorama model when the frames measure 2:1, with people and bags "
+       "masked out -- whoever holds the camera is in every frame of it."),
+    JA("市販の 360 度カメラ向けです。そうしたカメラが書き出す魚眼レンズ、フレームが 2:1 "
+       "ならパノラマのモデルを使い、人と荷物をマスクします。カメラを持つ人はすべてのフレームに写るためです。"),
+    ZH_HANS("面向消费级 360 相机：用这类相机写出的鱼眼镜头，画面为 2:1 时改用全景模型，并把人和背包遮掉，因为拿相机的人出现在每一帧里。"),
+    ZH_HANT("面向消費級 360 相機：用這類相機寫出的魚眼鏡頭，畫面為 2:1 時改用全景模型，並把人和背包遮掉，因為拿相機的人出現在每一格裡。"),
+    KO("일반 소비자용 360 카메라를 위한 설정입니다. 그런 카메라가 쓰는 어안 렌즈, 프레임이 2:1이면 파노라마 모델을 쓰고 "
+       "사람과 가방을 가립니다. 카메라를 든 사람은 모든 프레임에 찍히기 때문입니다."),
+    DE("Für eine 360-Kamera aus dem Handel: das Fischauge, das solche Kameras "
+       "schreiben, oder das Panoramamodell bei Bildern im Verhältnis 2:1, mit "
+       "maskierten Personen und Taschen -- wer die Kamera hält, ist in jedem "
+       "ihrer Bilder."),
+    FR("Pour une caméra 360 grand public : l'objectif fisheye que ces caméras "
+       "écrivent, ou le modèle panoramique quand les images sont en 2:1, avec "
+       "les personnes et les sacs masqués -- qui tient la caméra est sur "
+       "toutes ses images."),
+    ES("Para una cámara 360 de consumo: el objetivo ojo de pez que estas "
+       "escriben, o el modelo panorámico cuando las imágenes son 2:1, con "
+       "personas y bolsas enmascaradas: quien sostiene la cámara sale en todos "
+       "sus fotogramas."),
+    PT("Para uma câmara 360 de consumo: a lente olho de peixe que estas "
+       "escrevem, ou o modelo panorâmico quando as imagens são 2:1, com "
+       "pessoas e sacos mascarados -- quem segura a câmara aparece em todos os "
+       "seus fotogramas."),
+    IT("Per una fotocamera 360 di consumo: l'obiettivo fisheye che queste "
+       "scrivono, o il modello panoramico quando i fotogrammi sono 2:1, con "
+       "persone e borse mascherate: chi tiene la fotocamera è in ogni suo "
+       "fotogramma."),
+    NL("Voor een consumenten-360-camera: de fisheyelens die deze schrijven, of "
+       "het panoramamodel als de beelden 2:1 zijn, met personen en tassen "
+       "gemaskeerd -- wie de camera vasthoudt, staat op elk beeld."),
+    RU("Для бытовой камеры 360: объектив рыбий глаз, который такие камеры "
+       "пишут, или панорамная модель, если кадр 2:1, с маскированием людей и "
+       "сумок — тот, кто держит камеру, попадает в каждый кадр."),
+    TR("Tüketici 360 kamerası için: bu kameraların yazdığı balıkgözü objektif, "
+       "kareler 2:1 ise panorama modeli, insanlar ve çantalar maskelenmiş "
+       "olarak -- kamerayı tutan kişi her karesinde vardır."));
+
+SS_MSG(preset_ds_internet,
+    EN("Photos from everywhere"),
+    JA("いろいろな出所の写真"),
+    ZH_HANS("来源各异的照片"),
+    ZH_HANT("來源各異的照片"),
+    KO("여기저기서 모은 사진"),
+    DE("Fotos aus aller Herkunft"),
+    FR("Photos d'origines diverses"),
+    ES("Fotos de procedencias diversas"),
+    PT("Fotos de origens diversas"),
+    IT("Foto di provenienze diverse"),
+    NL("Foto's van overal"),
+    RU("Фотографии из разных источников"),
+    TR("Çeşitli kaynaklardan fotoğraflar"));
+
+SS_MSG(preset_ds_internet_help,
+    EN("For photographs that share no camera: one lens per image, learned "
+       "features and matching for the wide baselines, distortion held until "
+       "the final pass, and depth and normal maps for what the photographs "
+       "only half cover."),
+    JA("同じカメラを共有しない写真向けです。画像ごとに 1 "
+       "つのレンズ、視点が大きく離れた組に効く学習ベースの特徴と照合、歪みは最終パスまで固定、そして写真が半分しか覆わない部分のための深度と法線のマップ。"),
+    ZH_HANS("面向不共用同一台相机的照片：每张图一个镜头，用学习到的特征与匹配来对付大基线，畸变留到最后一遍才拟合，并生成深度图和法线图来补照片只覆盖到一半的地方。"),
+    ZH_HANT("面向不共用同一台相機的照片：每張圖一個鏡頭，用學習到的特徵與比對來處理大基線，畸變留到最後一輪才擬合，並產生深度圖與法線圖補上照片只覆蓋一半的地方。"),
+    KO("같은 카메라를 공유하지 않는 사진용입니다. 이미지마다 렌즈 하나, 시점 차가 큰 짝을 위한 학습 기반 특징과 정합, 왜곡은 "
+       "마지막 패스까지 고정, 그리고 사진이 절반만 덮는 곳을 위한 깊이와 법선 맵."),
+    DE("Für Fotos ohne gemeinsame Kamera: ein Objektiv je Bild, gelernte "
+       "Merkmale und Zuordnung für die weiten Basislinien, Verzeichnung bis "
+       "zum letzten Durchgang festgehalten, dazu Tiefen- und Normalenkarten "
+       "für das, was die Fotos nur halb abdecken."),
+    FR("Pour des photos qui ne partagent aucun appareil : un objectif par "
+       "image, des caractéristiques et un appariement appris pour les grandes "
+       "bases, la distorsion maintenue jusqu'à la passe finale, et des cartes "
+       "de profondeur et de normales pour ce que les photos ne couvrent qu'à "
+       "moitié."),
+    ES("Para fotos que no comparten cámara: un objetivo por imagen, "
+       "características y emparejamiento aprendidos para las bases amplias, la "
+       "distorsión retenida hasta la pasada final, y mapas de profundidad y "
+       "normales para lo que las fotos solo cubren a medias."),
+    PT("Para fotos que não partilham câmara: uma lente por imagem, "
+       "características e correspondência aprendidas para as bases largas, a "
+       "distorção retida até à passagem final, e mapas de profundidade e "
+       "normais para o que as fotos só cobrem pela metade."),
+    IT("Per foto che non condividono una fotocamera: un obiettivo per "
+       "immagine, caratteristiche e corrispondenze apprese per le basi ampie, "
+       "la distorsione trattenuta fino alla passata finale, e mappe di "
+       "profondità e normali per ciò che le foto coprono solo a metà."),
+    NL("Voor foto's zonder gedeelde camera: één lens per beeld, geleerde "
+       "kenmerken en matching voor de brede basislijnen, vertekening "
+       "vastgehouden tot de laatste ronde, en diepte- en normaalkaarten voor "
+       "wat de foto's maar half bedekken."),
+    RU("Для фотографий без общей камеры: по объективу на снимок, обученные "
+       "признаки и сопоставление для широких базисов, дисторсия удерживается "
+       "до последнего прохода, плюс карты глубины и нормалей для того, что "
+       "снимки покрывают лишь наполовину."),
+    TR("Ortak bir kamerası olmayan fotoğraflar için: görüntü başına bir "
+       "objektif, geniş taban çizgileri için öğrenilmiş öznitelikler ve "
+       "eşleme, bozulma son geçişe kadar sabit, ve fotoğrafların ancak "
+       "yarısını kapladığı yerler için derinlik ve normal haritaları."));
+
+// ---------------------------------------------------------------------------
+// name -> text, for app/gui/DatasetPreset.h's kDatasetPresets. Same shape as
+// i18n/catalog/Train.h's table, and the picker static_asserts the two lists
+// are the same length.
+// ---------------------------------------------------------------------------
+
+struct DatasetPresetText {
+    const char* name;
+    const Msg* label;
+    const Msg* help;
+};
+
+inline constexpr DatasetPresetText kDatasetPresetText[] = {
+    {"general",         &preset_ds_general,  &preset_ds_general_help},
+    {"360-camera",      &preset_ds_360,      &preset_ds_360_help},
+    {"internet-photos", &preset_ds_internet, &preset_ds_internet_help},
+};
+inline constexpr size_t kNumDatasetPresetText =
+    sizeof(kDatasetPresetText) / sizeof(kDatasetPresetText[0]);
+
+// Null for a name with no entry -- callers fall back to the name itself, so a
+// preset added to DatasetPreset.h without text here still works.
+inline const DatasetPresetText* preset_text(const char* name) {
+    for (const DatasetPresetText& p : kDatasetPresetText)
+        if (std::strcmp(p.name, name) == 0) return &p;
+    return nullptr;
+}
 
 }  // namespace dataset
 }  // namespace msg

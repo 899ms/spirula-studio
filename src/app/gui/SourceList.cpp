@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -231,6 +232,38 @@ void reset_pano_size(const std::vector<PrepInput>& sources,
 }
 
 
+bool source_pixel_size(const PrepInput& s, const std::string& ffmpeg_exe,
+                       int& w, int& h) {
+    static const std::atomic<bool> never{false};
+    w = h = 0;
+    std::error_code ec;
+    if (s.path.empty()) return false;
+    if (s.is_video) {
+        if (!fs::is_regular_file(s.path, ec)) return false;
+        VideoFacts f;
+        if (!ffmpeg_probe_video(ffmpeg_exe, s.path, f, never)) return false;
+        w = f.width;
+        h = f.height;
+    } else {
+        if (!fs::is_directory(s.path, ec)) return false;
+        if (!DatasetPrep::first_image_dims(s.path, w, h)) return false;
+    }
+    return w > 0 && h > 0;
+}
+
+
+bool sources_look_equirect(const std::vector<PrepInput>& sources,
+                           const std::string& ffmpeg_exe) {
+    if (sources.empty()) return false;
+    for (const PrepInput& s : sources) {
+        int w = 0, h = 0;
+        if (!source_pixel_size(s, ffmpeg_exe, w, h)) return false;
+        if (std::fabs((double)w / (double)h - 2.0) > 0.02) return false;
+    }
+    return true;
+}
+
+
 void normalize_source_lenses(std::vector<PrepInput>& sources,
                              std::string& camera_model) {
     const std::vector<CameraGroup> groups = camera_groups(sources);
@@ -310,7 +343,6 @@ void apply_capture_defaults(std::vector<PrepInput>& sources, SfmJob& sfm,
     colmap.seq_loop_closure = true;   // if switched to sequential
     if (fisheye) {
         colmap.camera_model = "THIN_PRISM_FISHEYE";
-        colmap.init_focal_factor = kInsta360FocalFactor;
     }
     // Several inputs are several cameras, and so is one dual-lens file.
     if (sources.size() > 1 || fisheye) {
@@ -335,6 +367,21 @@ void apply_capture_defaults(std::vector<PrepInput>& sources, SfmJob& sfm,
         reset_pano_size(sources, sfm.prep.pano);
         apply_pano_lens(sources, sfm, colmap);
     }
+}
+
+
+void dataset_adapt_preset(const std::string& preset,
+                          std::vector<PrepInput>& sources, SfmJob& sfm,
+                          ColmapJob& colmap, const std::string& ffmpeg_exe) {
+    if (preset != "360-camera" || sources.empty()) return;
+    // A packed dual-lens file (.insv/.360) is already handled: the pano plan
+    // warps it into views and decides their lens, which is not this question.
+    if (any_pano360(sources)) return;
+    if (!sources_look_equirect(sources, ffmpeg_exe)) return;
+    apply_lens_to_sources(sources, sfm, "equirectangular");
+    // COLMAP has no spherical model, so its own choice is left alone; the
+    // panel warns about the pair, and the built-in engine is the default.
+    (void)colmap;
 }
 
 

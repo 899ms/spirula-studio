@@ -1,14 +1,12 @@
 // Standalone WebGL viewer — performance-critical parsing / sorting / statistics.
 //
 // Compiled to WebAssembly (see CMakeLists.txt). Exposes a small C ABI consumed
-// by js/wasm.js. Handles:
-//   - 3DGS PLY parsing (binary LE + ascii), arbitrary property order, SH rest.
-//   - Mesh PLY parsing (binary LE + ascii), triangulating polygon faces.
-//   - Wavefront OBJ parsing (v/vt/vn, f with shared or separate indices).
-//   - Depth sorting of splats (16-bit counting sort, back-to-front).
-//   - Parameter histograms (opacities / scales / erank / rgb; mesh edge/area).
-// GLTF/GLB are parsed in JavaScript (JSON + typed-array buffer views map
-// directly), so they are intentionally absent here.
+// by js/wasm.js: 3DGS and mesh PLY (binary LE + ascii, any property order,
+// polygons triangulated), Wavefront OBJ, STL (binary + ascii), depth sorting
+// of splats (16-bit counting sort, back to front), and parameter histograms
+// (opacities / scales / erank / rgb; mesh edge/area). GLTF/GLB are parsed in
+// JavaScript (JSON + typed-array buffer views map directly), so they are
+// intentionally absent here.
 //
 // This file is deliberately dependency-free (only the C++ standard library).
 
@@ -836,14 +834,103 @@ static void splat_morton_reorder(){
 }
 
 // ---------------------------------------------------------------------------
+// STL -- binary and ASCII. Three vertices per triangle, shared with nothing,
+// and the facet normal is the only one the file has.
+// ---------------------------------------------------------------------------
+
+static void stl_face(const float v[9], const float n[3]) {
+    const uint32_t base = (uint32_t)(g_mesh.pos.size() / 3);
+    for (int i = 0; i < 3; i++) {
+        for (int c = 0; c < 3; c++) g_mesh.pos.push_back(v[i*3+c]);
+        for (int c = 0; c < 3; c++) g_mesh.normal.push_back(n[c]);
+    }
+    g_mesh.idx.push_back(base);
+    g_mesh.idx.push_back(base + 1);
+    g_mesh.idx.push_back(base + 2);
+}
+
+static bool parse_stl(const uint8_t* data, size_t len) {
+    g_mesh.clear();
+    // Binary when the header's triangle count accounts for the whole file: an
+    // ASCII STL also starts with "solid", so the size is the only test.
+    if (len >= 84) {
+        uint32_t n = 0;
+        memcpy(&n, data + 80, 4);
+        if ((uint64_t)n * 50ull + 84ull == (uint64_t)len) {
+            g_mesh.pos.reserve((size_t)n * 9);
+            g_mesh.normal.reserve((size_t)n * 9);
+            g_mesh.idx.reserve((size_t)n * 3);
+            for (uint32_t t = 0; t < n; t++) {
+                const uint8_t* p = data + 84 + (size_t)t * 50;
+                float nrm[3], v[9];
+                memcpy(nrm, p, 12);
+                memcpy(v, p + 12, 36);
+                stl_face(v, nrm);
+            }
+            g_mesh.nv = (uint32_t)(g_mesh.pos.size() / 3);
+            g_mesh.nt = (uint32_t)(g_mesh.idx.size() / 3);
+            return g_mesh.nt > 0;
+        }
+    }
+
+    const char* p = (const char*)data;
+    const char* end = p + len;
+    float nrm[3] = {0, 0, 0}, v[9];
+    int got = 0;
+    auto word = [&](const char* w) {
+        const size_t n = strlen(w);
+        if ((size_t)(end - p) < n) return false;
+        for (size_t i = 0; i < n; i++)
+            if ((p[i] | 32) != w[i]) return false;
+        p += n;
+        return true;
+    };
+    while (p < end) {
+        while (p < end && (unsigned char)*p <= ' ') p++;
+        if (p >= end) break;
+        if (word("facet")) {
+            while (p < end && (unsigned char)*p <= ' ') p++;
+            (void)word("normal");
+            for (int c = 0; c < 3; c++) {
+                while (p < end && (unsigned char)*p <= ' ') p++;
+                char* np;
+                nrm[c] = fast_strtof(p, &np);
+                p = np;
+            }
+            got = 0;
+        } else if (word("vertex")) {
+            for (int c = 0; c < 3; c++) {
+                while (p < end && (unsigned char)*p <= ' ') p++;
+                char* np;
+                const float f = fast_strtof(p, &np);
+                p = np;
+                if (got + c < 9) v[got + c] = f;
+            }
+            got += 3;
+        } else if (word("endfacet")) {
+            if (got == 9) stl_face(v, nrm);
+        } else {
+            while (p < end && (unsigned char)*p > ' ') p++;
+        }
+    }
+    g_mesh.nv = (uint32_t)(g_mesh.pos.size() / 3);
+    g_mesh.nt = (uint32_t)(g_mesh.idx.size() / 3);
+    return g_mesh.nt > 0;
+}
+
+// ---------------------------------------------------------------------------
 // Public parse entry
 // ---------------------------------------------------------------------------
-// hint: 0 auto (by content), 1 obj
+// hint: 0 auto (by content), 1 obj, 2 stl
 // returns kind: 0 error, 1 splat, 2 mesh
 KEEP int ssv_parse(uint8_t* data, uint32_t len, int hint) {
     g_last_kind = 0;
     if (hint == 1) {
         if (parse_obj(data, len)) { g_last_kind = 2; return 2; }
+        return 0;
+    }
+    if (hint == 2) {
+        if (parse_stl(data, len)) { g_last_kind = 2; return 2; }
         return 0;
     }
     // PLY?

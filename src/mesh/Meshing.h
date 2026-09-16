@@ -91,11 +91,10 @@ struct MeshingConfig {
     int   carve_k = 1;
 
     // --- export ---
-    // Output color: none, per-vertex color, or a baked texture atlas (UVs via
-    // LSCM charts, see MeshUV.h). Formats that cannot represent the chosen
-    // mode (PLY+texture, OBJ+vertex) are rejected up front.
-    MeshColorMode color_mode = MeshColorMode::Vertex;
-    std::vector<std::string> formats = {"ply"};   // any of ply obj gltf glb
+    // None, per-vertex color, or a baked texture atlas (MeshUV.h). More than
+    // one may be asked for: one extraction, written in each (MeshExport.h).
+    std::vector<MeshColorMode> colors = {MeshColorMode::Vertex};
+    std::vector<std::string> formats = {"ply"};   // any of ply obj gltf glb stl
     int   texture_size = 0;         // square texture atlas resolution;
                                     // 0 = auto from the observed-detail texel
                                     // budget (power of two in [1024, 8192])

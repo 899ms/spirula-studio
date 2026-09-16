@@ -16,7 +16,6 @@ namespace {
 // `output` are deliberately absent: they are what the preset is applied TO.
 #define SS_MESH_PRESET_FIELDS(X)                                              \
     X("use_data",          use_data)                                          \
-    X("color",             color)                                             \
     X("max_cameras",       max_cameras)                                       \
     X("texture_size",      texture_size)                                      \
     X("iso",               iso)                                               \
@@ -29,11 +28,30 @@ namespace {
     X("extra_args",        extra_args)                                        \
     /* end */
 
+// The two sets, written as arrays of the tokens the CLI spells rather than as
+// indices: a preset file is meant to be readable, and an index that shifted
+// would quietly mean something else.
+void write_tokens(JsonWriter& w, const char* key, const bool* on,
+                  const char* const* names, int n) {
+    w.key(key).array();
+    for (int i = 0; i < n; i++)
+        if (on[i]) w.value(names[i]);
+    w.end();
+}
+
+bool read_tokens(const JsonValue* v, bool* on, const char* const* names, int n) {
+    if (!v || !v->is_array()) return false;
+    for (int i = 0; i < n; i++) on[i] = false;
+    for (const JsonValue& e : v->arr)
+        for (int i = 0; i < n; i++)
+            if (e.as_string() == names[i]) on[i] = true;
+    return true;
+}
+
 }  // namespace
 
 
 void sanitize_mesh_job(MeshJob& job) {
-    job.color = std::clamp(job.color, 0, kNumMeshColorModes - 1);
     job.max_cameras = std::clamp(job.max_cameras, 0, 1000000);
     job.texture_size = std::clamp(job.texture_size, 0, 16384);
     job.bisection_iters = std::clamp(job.bisection_iters, 0, 32);
@@ -42,13 +60,17 @@ void sanitize_mesh_job(MeshJob& job) {
     job.carve_k = std::clamp(job.carve_k, 0, 64);
     job.merge_factor = std::clamp(job.merge_factor, 0.05f, 16.0f);
 
-    // PLY cannot carry a texture and OBJ has no standard place for vertex
-    // colors; the child refuses those combinations outright.
-    if (job.color == 2) job.formats[0] = false;
-    if (job.color == 1) job.formats[1] = false;
-    bool any = false;
-    for (int i = 0; i < kNumMeshFormats; i++) any = any || job.formats[i];
-    if (!any) job.formats[job.color == 2 ? 3 : 0] = true;
+    bool any_color = false, any_format = false;
+    for (int i = 0; i < kNumMeshColorModes; i++) any_color |= job.colors[i];
+    for (int i = 0; i < kNumMeshFormats; i++) any_format |= job.formats[i];
+    if (!any_color) job.colors[1] = true;
+    if (!any_format) job.formats[0] = true;
+    // Every requested colour was ruled out by every requested format (texture
+    // with PLY alone, say): add the format that carries each of them, rather
+    // than starting a run whose whole output is nothing.
+    if (!mesh_job_writes_nothing(job)) return;
+    for (int i = 0; i < kNumMeshColorModes; i++)
+        if (job.colors[i]) job.formats[i == 2 ? 3 : 0] = true;
 }
 
 
@@ -59,10 +81,8 @@ void save_mesh_preset(const MeshPreset& p, const std::string& path) {
 #define SS_MESH_EMIT(key, member) w.field_raw(key, json_field::emit(p.job.member));
     SS_MESH_PRESET_FIELDS(SS_MESH_EMIT)
 #undef SS_MESH_EMIT
-    w.key("formats").array();
-    for (int i = 0; i < kNumMeshFormats; i++)
-        if (p.job.formats[i]) w.value(kMeshFormats[i]);
-    w.end();
+    write_tokens(w, "colors", p.job.colors, kMeshColorModes, kNumMeshColorModes);
+    write_tokens(w, "formats", p.job.formats, kMeshFormats, kNumMeshFormats);
     w.end();
     w.end();
     write_preset_file(path, w.str());
@@ -86,11 +106,16 @@ MeshPreset load_mesh_preset(const std::string& path) {
     SS_MESH_PRESET_FIELDS(SS_MESH_LOAD)
 #undef SS_MESH_LOAD
 
-    if (const JsonValue* f = fields->find("formats"); f && f->is_array()) {
-        for (int i = 0; i < kNumMeshFormats; i++) p.job.formats[i] = false;
-        for (const JsonValue& e : f->arr)
-            for (int i = 0; i < kNumMeshFormats; i++)
-                if (e.as_string() == kMeshFormats[i]) p.job.formats[i] = true;
+    read_tokens(fields->find("formats"), p.job.formats, kMeshFormats,
+                kNumMeshFormats);
+    // A preset written before a run could carry more than one colour names a
+    // single index; either spelling still loads.
+    if (!read_tokens(fields->find("colors"), p.job.colors, kMeshColorModes,
+                     kNumMeshColorModes)) {
+        if (const JsonValue* v = fields->find("color")) {
+            const int one = (int)v->as_int(1);
+            for (int i = 0; i < kNumMeshColorModes; i++) p.job.colors[i] = i == one;
+        }
     }
     sanitize_mesh_job(p.job);
     if (p.name.empty()) p.name = std::filesystem::path(path).stem().string();

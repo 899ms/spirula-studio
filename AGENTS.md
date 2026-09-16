@@ -609,6 +609,19 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   `MeshJob` and not added there saves, loads, and quietly runs at its default.
   `build/preset_roundtrip_test` is the guard: it moves every field the table
   names off its default and compares after a round trip.
+- **A mesh format lives in four places and reads back in two.** `kMeshFormats`
+  (`app/gui/MeshJob.h`) is the GUI's list, `parse_one_mesh_format` and
+  `write_mesh` (`mesh/MeshExport.cpp`) are the writer, `check_export_support`
+  decides which colors it can carry, and `mesh/MeshImport.cpp` plus
+  `viewer/src/viewer.cpp` are the two readers that have to open it.
+  `build/mesh_format_roundtrip` writes every format and reads it back, which is
+  the only thing keeping the two writers' idea of a file and the two readers'
+  from drifting.
+- **One meshing run can be asked for several colors**, and the texture atlas
+  SPLITS seam vertices -- so anything written from the un-split mesh (no color,
+  vertex color) is written BEFORE the bake, not after. `generate_mesh()` is
+  ordered that way on purpose; moving a write past the atlas ships a file whose
+  colors no longer match its vertices.
 - **A GUI worker that clears a `busy` flag at the end of its function will
   strand it.** Every early `return set_error(...)` skips the line, and the next
   request is refused forever. Use a scope guard (`SegmentPanel::start_job`).

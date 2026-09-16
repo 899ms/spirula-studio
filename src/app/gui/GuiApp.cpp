@@ -122,7 +122,16 @@ bool parse_settings_equal(const TrainConfig& a, const TrainConfig& b) {
 // format the mesher writes -- one list, so the picker and the drop handler
 // cannot disagree about what is openable.
 const std::vector<std::string> kViewableExtensions = {".ply", ".obj", ".gltf",
-                                                      ".glb"};
+                                                      ".glb", ".stl"};
+
+// Can this format carry this color? The child's own answer, asked through the
+// same function it refuses the run with.
+bool mesh_format_carries(int format, int color) {
+    meshing::MeshFormatSpec spec;
+    spec.fmt = kMeshFormats[format];
+    return meshing::check_export_support(spec, (meshing::MeshColorMode)color)
+        .empty();
+}
 
 std::vector<std::string> video_dialog_filters() {
     return std::vector<std::string>(kVideoExtensions,
@@ -756,9 +765,38 @@ void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
 void GuiApp::apply_dataset_preset(const DatasetPreset& p) {
     apply_dataset_settings(p.s);
     _ds_presets.file = p.path;
+    _ds_presets.builtin.clear();
     _ds_presets.display = p.name;
     _ds_presets.desc = p.description;
     _ds_presets.msg.clear();
+}
+
+// A built-in is the capture's own answers with the preset's over them, and
+// then the one question only the frames can settle -- which is why it is not
+// simply a DatasetSettings the way a saved one is.
+void GuiApp::apply_dataset_builtin(const std::string& name) {
+    const std::string use = name.empty() ? std::string("general") : name;
+    DatasetSettings s;
+    apply_capture_defaults(_sources, s.sfm, s.colmap);
+    if (!dataset_apply_preset(s, use)) return;
+    dataset_adapt_preset(use, _sources, s.sfm, s.colmap, _ffmpeg_exe);
+    apply_dataset_settings(s);
+    _ds_presets.file.clear();
+    _ds_presets.builtin = use;
+    _ds_presets.display.clear();
+    _ds_presets.desc.clear();
+    _ds_presets.msg.clear();
+}
+
+// The capture's own defaults have just moved settings a built-in preset
+// decided, so it goes back on top of them and asks the new frames its own
+// question. Only a built-in: re-applying a FILE would undo every edit since.
+void GuiApp::reapply_dataset_builtin() {
+    if (!_ds_presets.file.empty() || _ds_presets.builtin.empty()) return;
+    DatasetSettings s = capture_dataset_settings();
+    if (dataset_apply_preset(s, _ds_presets.builtin)) apply_dataset_settings(s);
+    dataset_adapt_preset(_ds_presets.builtin, _sources, _sfm_job, _colmap_job,
+                         _ffmpeg_exe);
 }
 
 void GuiApp::load_dataset_preset_file(const std::string& path) {
@@ -1012,15 +1050,20 @@ void GuiApp::run_pending_if_stopped() {
 // Append a row for `dataset`, seeded with whatever preset the trainer screen
 // is on -- a queue is usually built right after tuning the settings it should
 // run with. Shared by the picker, the recents menu and drag-and-drop.
+BatchRun GuiApp::batch_run_on_screen() const {
+    BatchRun run;
+    run.preset.path = _train_presets.file;
+    run.preset.name =
+        _train_presets.file.empty() ? _preset : _train_presets.display;
+    return run;
+}
+
 void GuiApp::add_batch_row(const std::string& dataset) {
     if (dataset.empty()) return;
     BatchRow r;
     r.dataset = dataset;
     r.does(BatchStage::Train) = true;
-    BatchPreset p;
-    p.path = _train_presets.file;
-    p.name = _train_presets.file.empty() ? _preset : _train_presets.display;
-    r.train_presets.push_back(p);
+    r.runs.push_back(batch_run_on_screen());
     _batch.push_back(std::move(r));
     _batch_open_row = (int)_batch.size() - 1;
     batch_edited();
@@ -1035,11 +1078,9 @@ void GuiApp::add_batch_source_row(const std::vector<std::string>& sources) {
     r.does(BatchStage::Dataset) = true;
     r.does(BatchStage::Train) = true;
     r.dataset_preset.path = _ds_presets.file;
-    r.dataset_preset.name = _ds_presets.display;
-    BatchPreset p;
-    p.path = _train_presets.file;
-    p.name = _train_presets.file.empty() ? _preset : _train_presets.display;
-    r.train_presets.push_back(p);
+    r.dataset_preset.name =
+        _ds_presets.file.empty() ? _ds_presets.builtin : _ds_presets.display;
+    r.runs.push_back(batch_run_on_screen());
     _batch.push_back(std::move(r));
     _batch_open_row = (int)_batch.size() - 1;
     batch_edited();
@@ -1051,8 +1092,8 @@ void GuiApp::add_batch_mesh_row(const std::string& model) {
     r.model = model;
     r.does(BatchStage::Train) = false;
     r.does(BatchStage::Mesh) = true;
-    r.mesh_preset.path = _mesh_presets.file;
-    r.mesh_preset.name = _mesh_presets.display;
+    r.mesh.preset.path = _mesh_presets.file;
+    r.mesh.preset.name = _mesh_presets.display;
     _batch.push_back(std::move(r));
     _batch_open_row = (int)_batch.size() - 1;
     batch_edited();
@@ -1085,11 +1126,18 @@ void GuiApp::check_batch() {
     for (int i = 0; i < (int)_batch.size(); i++)
         _batch[i].issues = batch_check_row(_batch[i], _batch, i, caps);
     _batch_checked = true;
-    _batch_msg.clear();
-    _batch_msg_err = false;
-    bool any = false;
-    for (const BatchRow& r : _batch) any = any || !r.issues.empty();
-    if (!any && !_batch.empty()) _batch_msg = msg::batch_checked_ok.get();
+    _batch_checked_at = ImGui::GetTime();
+}
+
+// Nothing waits for a button: an edit re-checks at once, and a timer catches
+// a preset file or a dataset folder that went missing while the screen was
+// up. A few stats and a small JSON per preset, so the cost is noise.
+void GuiApp::check_batch_if_stale() {
+    if (_batch_active) return;
+    const double now = ImGui::GetTime();
+    if (_batch_checked && _batch_checked_at >= 0.0 && now - _batch_checked_at < 2.0)
+        return;
+    check_batch();
 }
 
 void GuiApp::request_start_batch(bool skip_invalid) {
@@ -1180,6 +1228,7 @@ void GuiApp::record_batch_task() {
     if (_batch_current < 0 || _batch_current >= (int)_batch_tasks.size()) return;
     BatchTask& t = _batch_tasks[(size_t)_batch_current];
     const long long n = _batch_current + 1;
+    t.seconds = std::max(0.0, ImGui::GetTime() - t.started_at);
 
     bool ok = false, cancelled = false;
     std::string error;
@@ -1341,6 +1390,7 @@ bool GuiApp::launch_batch_mesh(BatchTask& task, const BatchRow& row) {
 
 bool GuiApp::launch_batch_task(BatchTask& task) {
     const BatchRow& row = _batch[(size_t)task.row];
+    task.started_at = ImGui::GetTime();
     try {
         switch (task.stage) {
             case BatchStage::Dataset: return launch_batch_dataset(task, row);
@@ -1614,10 +1664,9 @@ void GuiApp::handle_drop(const std::vector<std::string>& paths) {
         const fs::path p(paths[0]);
         std::string ext = p.extension().string();
         for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
-        // A .ply is a model to look at -- Gaussians, a point cloud or a
-        // mesh, which the viewer works out for itself; .obj/.gltf/.glb can
-        // only be a mesh. (A Metashape dataset FOLDER is caught above, before
-        // this, so dropping one still opens the dataset.)
+        // A .ply is a model to look at -- Gaussians, a point cloud or a mesh,
+        // which the viewer works out for itself. (A Metashape dataset FOLDER is
+        // caught above, so dropping one still opens the dataset.)
         if (std::find(kViewableExtensions.begin(), kViewableExtensions.end(),
                       ext) != kViewableExtensions.end()) {
             request_open_splat(p.string());
@@ -1792,6 +1841,7 @@ void GuiApp::add_sources(const std::vector<std::string>& paths, bool replace) {
     }
     if (_sources.empty()) return;
     apply_capture_defaults(_sources, _sfm_job, _colmap_job);
+    reapply_dataset_builtin();
     if (_mask_preview_input >= (int)_sources.size()) _mask_preview_input = 0;
     adopt_exr_color_space();
     refresh_sources();
@@ -2034,7 +2084,7 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
             if (!path.empty() && _pick_row >= 0 && _pick_row < (int)_batch.size()) {
                 try {
                     MeshPreset p = load_mesh_preset(path);
-                    _batch[_pick_row].mesh_preset = {p.path, p.name};
+                    _batch[_pick_row].mesh.preset = {p.path, p.name};
                     batch_edited();
                 } catch (const std::exception& e) {
                     _batch_msg = i18n::format(msg::preset_failed, {e.what()});
@@ -2049,11 +2099,13 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
                 try {
                     TrainPreset p = load_preset(path);
                     BatchRow& row = _batch[_pick_row];
-                    if (_pick_slot >= 0 && _pick_slot < (int)row.train_presets.size()) {
-                        row.train_presets[_pick_slot].path = p.path;
-                        row.train_presets[_pick_slot].name = p.name;
+                    if (_pick_slot >= 0 && _pick_slot < (int)row.runs.size()) {
+                        row.runs[_pick_slot].preset.path = p.path;
+                        row.runs[_pick_slot].preset.name = p.name;
                     } else {
-                        row.train_presets.push_back({p.path, p.name});
+                        BatchRun run;
+                        run.preset = {p.path, p.name};
+                        row.runs.push_back(std::move(run));
                     }
                     batch_edited();
                 } catch (const std::exception& e) {
@@ -5024,8 +5076,8 @@ void GuiApp::draw_train() {
     if (_batch_active) {
         if (ui::Button(msg::batch_show_list)) _screen = Screen::Batch;
         ImGui::SameLine();
-        ui::TextDisabledRaw(_batch_current >= 0 ? _batch[_batch_current].dataset
-                                                : std::string());
+        const BatchRow* row = batch_running_row();
+        ui::TextDisabledRaw(row ? row->dataset : std::string());
     } else {
         ui::TextDisabledRaw(_cfg.data);
     }
@@ -5273,11 +5325,19 @@ void GuiApp::draw_mesh_options() {
     }
 
     // ---- color ----
-    ImGui::SetNextItemWidth(px(220.0f));
-    ui::Combo(msg::mesh_color, &_mesh_job.color,
-              {&msg::mesh_color_none, &msg::mesh_color_vertex,
-               &msg::mesh_color_texture});
-    if (_mesh_job.color == 2) {
+    // A set rather than a choice: one extraction, written in each of them, so
+    // a textured GLB and a plain PLY cost one run between them, not two.
+    ui::SeparatorText(msg::mesh_color);
+    const Msg* color_names[kNumMeshColorModes] = {
+        &msg::mesh_color_none, &msg::mesh_color_vertex, &msg::mesh_color_texture};
+    for (int i = 0; i < kNumMeshColorModes; i++) {
+        if (i) ImGui::SameLine();
+        ImGui::PushID(i);
+        ui::Checkbox(*color_names[i], &_mesh_job.colors[i]);
+        ImGui::PopID();
+    }
+    ui::help_on_hover(msg::mesh_color_help);
+    if (_mesh_job.wants_color(2)) {
         ImGui::Indent();
         static const int kTexSizes[] = {0, 1024, 2048, 4096, 8192};
         int idx = 0;
@@ -5302,14 +5362,14 @@ void GuiApp::draw_mesh_options() {
     }
 
     // ---- formats ----
-    // PLY cannot carry a texture and OBJ has no standard place for vertex
-    // colors; the child refuses those combinations outright, so they are
-    // greyed out here rather than failing the run three minutes in.
+    // The child refuses a format that cannot carry the color asked of it, so
+    // one no ticked color travels in is greyed out rather than failing the run.
     ui::SeparatorText(msg::mesh_formats);
     for (int i = 0; i < kNumMeshFormats; i++) {
         if (i) ImGui::SameLine();
-        const bool ok = !(i == 0 && _mesh_job.color == 2) &&
-                        !(i == 1 && _mesh_job.color == 1);
+        bool ok = false;
+        for (int c = 0; c < kNumMeshColorModes; c++)
+            ok = ok || (_mesh_job.colors[c] && mesh_format_carries(i, c));
         if (!ok) _mesh_job.formats[i] = false;
         ImGui::BeginDisabled(!ok);
         // A file extension is a file extension in every language.
@@ -5318,11 +5378,11 @@ void GuiApp::draw_mesh_options() {
         ImGui::PopID();
         ImGui::EndDisabled();
     }
-    // Every format was ruled out by the color choice: fall back to one that
-    // can carry it, so the Create button is never armed with nothing to write.
-    bool any = false;
-    for (int i = 0; i < kNumMeshFormats; i++) any |= _mesh_job.formats[i];
-    if (!any) _mesh_job.formats[_mesh_job.color == 2 ? 3 : 0] = true;
+    // Nothing left that a requested color and a requested format can both
+    // carry. Said here rather than fixed silently: which of the two to give up
+    // is the user's choice, and the Create button stays disabled until it is.
+    if (mesh_job_writes_nothing(_mesh_job))
+        ui::TextColoredWrapped(kErr, msg::mesh_no_output_warn);
     ImGui::SetNextItemWidth(field_width(msg::mesh_output));
     ui::InputTextRaw("##meshout", &_mesh_job.output);
     ImGui::SameLine();
@@ -5417,7 +5477,8 @@ void GuiApp::draw_mesh() {
                 _mesh.cancel();
             }
         } else {
-            ImGui::BeginDisabled(_mesh_job.checkpoint.empty() || _batch_active);
+            ImGui::BeginDisabled(_mesh_job.checkpoint.empty() || _batch_active ||
+                                 mesh_job_writes_nothing(_mesh_job));
             if (ui::Button(msg::mesh_start, ImVec2(220, 34))) start_meshing();
             ImGui::EndDisabled();
             if (_mesh_job.checkpoint.empty()) {
@@ -5479,46 +5540,105 @@ void draw_status_word(BatchStatus st) {
     }
 }
 
-// The combo the dataset and meshing pickers share: one stock row and then the
-// saved files. -3 = "from a file", -2 = nothing picked, -1 = the stock row,
-// else the index into `pick.items`.
+// One built-in row of a preset combo: the name the file and the command line
+// spell, the translated label beside it, and the sentence it hovers to.
+struct BuiltinRow {
+    std::string name, label, help;
+};
+
+std::vector<BuiltinRow> dataset_builtin_rows() {
+    std::vector<BuiltinRow> out;
+    for (const DatasetPresetInfo& p : kDatasetPresets) {
+        const auto* t = i18n::msg::dataset::preset_text(p.name);
+        BuiltinRow r;
+        r.name = p.name;
+        r.label = t ? std::string(t->label->get()) + " (" + p.name + ")" : p.name;
+        r.help = t ? std::string(t->help->get()) : std::string();
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+// What a preset combo came back with. Nothing moved unless `moved`; a
+// built-in is `builtin`, a saved file is `index`, and `from_file` is the row
+// that opens a file dialog.
+struct PresetChoice {
+    bool moved = false;
+    bool from_file = false;
+    std::string builtin;
+    int index = -1;
+};
+
+// The combo every preset picker draws: the built-ins of that kind (or a
+// single stock row for a kind that has none), then the saved files, then the
+// way to a file outside the folder.
 template <class T>
-int stock_preset_combo(const char* id, PresetPicker<T>& pick,
-                       const std::string& selected, bool offer_file = false) {
-    std::string preview = msg::batch_preset_stock.get(), desc;
-    for (const T& p : pick.items)
-        if (!selected.empty() && p.path == selected) {
-            preview = p.name;
-            desc = p.description;
-        }
-    // A file outside the saved folder still shows as itself rather than as
-    // the stock row it is not.
-    if (!selected.empty() && preview == msg::batch_preset_stock.get())
-        preview = fs::path(selected).stem().string();
-    int picked = -2;
+PresetChoice preset_combo(const char* id, const PresetPicker<T>& pick,
+                          const std::string& file, const std::string& builtin,
+                          const std::vector<BuiltinRow>& builtins,
+                          bool offer_file = false) {
+    PresetChoice out;
+    std::string preview, desc;
+    if (!file.empty()) {
+        // A file outside the saved folder still shows as itself.
+        preview = fs::path(file).stem().string();
+        for (const T& p : pick.items)
+            if (p.path == file) { preview = p.name; desc = p.description; }
+    } else if (builtins.empty()) {
+        preview = msg::batch_preset_stock.get();
+    } else {
+        // Nothing selected (a deleted preset, a fresh session) is the first
+        // built-in, which is that kind's base settings.
+        preview = builtins.front().label;
+        desc = builtins.front().help;
+        for (const BuiltinRow& b : builtins)
+            if (b.name == builtin) { preview = b.label; desc = b.help; }
+    }
     const bool open = ui::BeginComboRaw(id, preview.c_str());
     // On the closed combo too: a row shows only a name, and two saved presets
     // can share one -- the path in the tooltip is what tells them apart.
-    preset_hover(desc, selected);
-    if (!open) return picked;
-    if (ui::Selectable(msg::batch_preset_stock, selected.empty())) picked = -1;
+    preset_hover(desc, file);
+    if (!open) return out;
+
+    if (builtins.empty()) {
+        if (ui::Selectable(msg::batch_preset_stock, file.empty())) out.moved = true;
+    } else {
+        ui::SeparatorText(msg::preset_builtin_group);
+        for (const BuiltinRow& b : builtins) {
+            const bool sel = file.empty() &&
+                             (b.name == builtin ||
+                              (builtin.empty() && b.name == builtins.front().name));
+            if (ui::SelectableRaw(b.label, sel)) {
+                out.moved = true;
+                out.builtin = b.name;
+            }
+            preset_hover(b.help, {});
+            if (sel) ImGui::SetItemDefaultFocus();
+        }
+    }
     ui::SeparatorText(msg::preset_user_group);
     if (pick.items.empty()) ui::TextDisabled(msg::preset_none_saved);
     for (size_t i = 0; i < pick.items.size(); i++) {
         const T& p = pick.items[i];
         ImGui::PushID((int)i);
-        const bool sel = !selected.empty() && selected == p.path;
-        if (ui::SelectableRaw(p.name, sel)) picked = (int)i;
+        const bool sel = !file.empty() && file == p.path;
+        if (ui::SelectableRaw(p.name, sel)) {
+            out.moved = true;
+            out.index = (int)i;
+        }
         preset_hover(p.description, p.path);
         if (sel) ImGui::SetItemDefaultFocus();
         ImGui::PopID();
     }
     if (offer_file) {
         ImGui::Separator();
-        if (ui::Selectable(msg::batch_preset_from_file)) picked = -3;
+        if (ui::Selectable(msg::batch_preset_from_file)) {
+            out.moved = true;
+            out.from_file = true;
+        }
     }
     ImGui::EndCombo();
-    return picked;
+    return out;
 }
 
 }  // namespace
@@ -5553,22 +5673,9 @@ void GuiApp::draw_batch() {
     refresh_presets();
     refresh_dataset_presets();
     refresh_mesh_presets();
+    check_batch_if_stale();
 
     if (ui::Button(msg::back_home)) request_go_home();
-    if (_batch_active) {
-        ImGui::SameLine();
-        if (ui::Button(msg::batch_show_training)) {
-            const BatchStage st =
-                _batch_current >= 0 && _batch_current < (int)_batch_tasks.size()
-                    ? _batch_tasks[(size_t)_batch_current].stage
-                    : BatchStage::Train;
-            switch (st) {
-                case BatchStage::Dataset: _screen = Screen::NewDataset; break;
-                case BatchStage::Mesh:    _screen = Screen::Mesh; break;
-                default:                  _screen = Screen::Train; break;
-            }
-        }
-    }
     ImGui::SameLine();
     ui::Text(msg::batch_title);
 
@@ -5579,6 +5686,10 @@ void GuiApp::draw_batch() {
     const float log_h = log_height(ImGui::GetContentRegionAvail().y);
     ImGui::BeginChild("##batchlist", ImVec2(0, body_height(log_h)));
 
+    if (_batch_active) {
+        draw_batch_progress();
+        ImGui::Spacing();
+    }
     draw_batch_rows();
 
     ImGui::Spacing();
@@ -5629,7 +5740,9 @@ void GuiApp::draw_batch() {
     }
 
     ImGui::Spacing();
-    const bool busy_elsewhere = dataset_busy() || _mesh.busy();
+    // A batch's own dataset or meshing task is not something else.
+    const bool busy_elsewhere =
+        !_batch_active && (dataset_busy() || _mesh.busy());
     ImGui::BeginDisabled(_batch.empty());
     if (ui::Button(msg::batch_clear)) {
         _batch.clear();
@@ -5638,10 +5751,6 @@ void GuiApp::draw_batch() {
         _batch_msg.clear();
         batch_edited();
     }
-    ImGui::SameLine();
-    if (ui::Button(msg::batch_check)) check_batch();
-    ui::help_on_hover(msg::batch_check_help);
-
     ImGui::SameLine();
     ImGui::BeginDisabled(busy_elsewhere);
     if (ui::Button(msg::batch_start, ImVec2(px(160.0f), 0)))
@@ -5839,18 +5948,20 @@ void GuiApp::draw_batch_row_dataset(BatchRow& row, int index) {
 
     ui::Text(msg::batch_preset_dataset);
     ImGui::SetNextItemWidth(px(-8.0f));
-    const int picked = stock_preset_combo("##dspreset", _ds_presets,
-                                          row.dataset_preset.path, true);
-    if (picked == -3) {
+    const PresetChoice picked =
+        preset_combo("##dspreset", _ds_presets, row.dataset_preset.path,
+                     row.dataset_preset.name, dataset_builtin_rows(), true);
+    if (!picked.moved) return;
+    if (picked.from_file) {
         _pick_row = index;
         open_pick(PickAction::BatchDatasetPresetFile, msg::preset_pick_file.get(),
                   FileDialog::Mode::File, {".json"});
-    } else if (picked == -1) {
-        row.dataset_preset = BatchPreset{"", ""};
+    } else if (picked.index >= 0 && picked.index < (int)_ds_presets.items.size()) {
+        row.dataset_preset.path = _ds_presets.items[(size_t)picked.index].path;
+        row.dataset_preset.name = _ds_presets.items[(size_t)picked.index].name;
         batch_edited();
-    } else if (picked >= 0 && picked < (int)_ds_presets.items.size()) {
-        row.dataset_preset.path = _ds_presets.items[(size_t)picked].path;
-        row.dataset_preset.name = _ds_presets.items[(size_t)picked].name;
+    } else {
+        row.dataset_preset = BatchPreset{"", picked.builtin};
         batch_edited();
     }
 }
@@ -5859,50 +5970,26 @@ void GuiApp::draw_batch_row_dataset(BatchRow& row, int index) {
 void GuiApp::draw_batch_row_train(BatchRow& row, int index) {
     ui::SeparatorText(msg::batch_stage_train);
     ui::Text(msg::batch_runs);
-    int drop = -1;
     const float bw = ImGui::GetFrameHeight() + 6.0f;
-    for (size_t i = 0; i < row.train_presets.size(); i++) {
+    int drop = -1;
+    for (size_t i = 0; i < row.runs.size(); i++) {
         ImGui::PushID((int)i);
-        ImGui::SetNextItemWidth(-bw);
-        if (draw_batch_train_preset(row.train_presets[i], "##trpreset", index,
-                                    (int)i))
+        if (draw_batch_run(row.runs[i], index, (int)i, row.does(BatchStage::Mesh)))
             batch_edited();
         ImGui::SameLine(0, 2);
         if (ui::ButtonRaw("x##rmrun")) drop = (int)i;
         ImGui::PopID();
     }
     if (drop >= 0) {
-        row.train_presets.erase(row.train_presets.begin() + drop);
+        row.runs.erase(row.runs.begin() + drop);
         batch_edited();
     }
-    if (row.train_presets.empty()) ui::TextDisabled(msg::batch_runs_default);
+    if (row.runs.empty()) ui::TextDisabled(msg::batch_runs_default);
     if (ui::Button(msg::batch_add_run)) {
-        BatchPreset p;
-        p.path = _train_presets.file;
-        p.name = _train_presets.file.empty() ? _preset : _train_presets.display;
-        row.train_presets.push_back(p);
+        row.runs.push_back(batch_run_on_screen());
         batch_edited();
     }
     ui::help_on_hover(msg::batch_add_run_help);
-
-    // The three numbers worth changing without a preset for each combination.
-    // Text boxes rather than spinners because empty means "whatever the preset
-    // says", and 0 is a legal SH degree.
-    const Msg* labels[] = {&msg::batch_col_splats, &msg::batch_col_sh,
-                           &msg::batch_col_steps};
-    const char* ids[] = {"##cap", "##sh", "##iters"};
-    std::string* fields[] = {&row.cap_max_override, &row.sh_degree_override,
-                             &row.iterations_override};
-    for (int k = 0; k < 3; k++) {
-        if (k) ImGui::SameLine();
-        ImGui::SetNextItemWidth(px(90.0f));
-        if (ui::InputTextWithHintRaw(ids[k], msg::batch_override_hint, fields[k],
-                                     ImGuiInputTextFlags_CharsDecimal))
-            batch_edited();
-        ui::help_on_hover(msg::batch_override_help);
-        ImGui::SameLine();
-        ui::TextDisabled(*labels[k]);
-    }
 
     ui::Text(msg::batch_col_output);
     ImGui::SetNextItemWidth(-bw);
@@ -5915,6 +6002,44 @@ void GuiApp::draw_batch_row_train(BatchRow& row, int index) {
         open_pick(PickAction::BatchOutput, msg::batch_pick_output.get(),
                   FileDialog::Mode::Folder, {}, row.output_dir);
     }
+}
+
+
+// One training run on one line: which preset, the three numbers worth
+// changing without a preset for each combination, and -- when the row meshes
+// -- whether this is one of the runs it meshes.
+bool GuiApp::draw_batch_run(BatchRun& run, int row, int slot, bool meshing) {
+    bool moved = false;
+    const float num_w = px(84.0f);
+    const float sp = ImGui::GetStyle().ItemSpacing.x;
+    const float bw = ImGui::GetFrameHeight() + 6.0f;
+    const float boxes = 3.0f * (num_w + sp) + (meshing ? bw + sp : 0.0f);
+    ImGui::SetNextItemWidth(std::max(px(120.0f),
+                                     ImGui::GetContentRegionAvail().x - bw - boxes));
+    moved |= draw_batch_train_preset(run.preset, "##trpreset", row, slot);
+
+    // Text boxes rather than spinners because empty means "whatever the preset
+    // says", and 0 is a legal SH degree. The hint is the column name, which is
+    // shown exactly when the box is empty and there is nothing else to say.
+    const Msg* labels[] = {&msg::batch_col_splats, &msg::batch_col_sh,
+                           &msg::batch_col_steps};
+    std::string* fields[] = {&run.cap_max, &run.sh_degree, &run.iterations};
+    for (int k = 0; k < 3; k++) {
+        ImGui::SameLine(0, sp);
+        ImGui::PushID(k);
+        ImGui::SetNextItemWidth(num_w);
+        if (ui::InputTextWithHintRaw("##ovr", *labels[k], fields[k],
+                                     ImGuiInputTextFlags_CharsDecimal))
+            moved = true;
+        ui::help_on_hover(msg::batch_override_help);
+        ImGui::PopID();
+    }
+    if (meshing) {
+        ImGui::SameLine(0, sp);
+        if (ui::CheckboxRaw("##runmesh", &run.mesh)) moved = true;
+        ui::help_on_hover(msg::batch_run_mesh_help);
+    }
+    return moved;
 }
 
 
@@ -5938,20 +6063,68 @@ void GuiApp::draw_batch_row_mesh(BatchRow& row, int index) {
 
     ui::Text(msg::batch_preset_mesh);
     ImGui::SetNextItemWidth(px(-8.0f));
-    const int picked = stock_preset_combo("##meshpreset", _mesh_presets,
-                                          row.mesh_preset.path, true);
-    if (picked == -3) {
-        _pick_row = index;
-        open_pick(PickAction::BatchMeshPresetFile, msg::preset_pick_file.get(),
-                  FileDialog::Mode::File, {".json"});
-    } else if (picked == -1) {
-        row.mesh_preset = BatchPreset{"", ""};
-        batch_edited();
-    } else if (picked >= 0 && picked < (int)_mesh_presets.items.size()) {
-        row.mesh_preset.path = _mesh_presets.items[(size_t)picked].path;
-        row.mesh_preset.name = _mesh_presets.items[(size_t)picked].name;
-        batch_edited();
+    const PresetChoice picked = preset_combo("##meshpreset", _mesh_presets,
+                                             row.mesh.preset.path, {}, {}, true);
+    if (picked.moved) {
+        if (picked.from_file) {
+            _pick_row = index;
+            open_pick(PickAction::BatchMeshPresetFile, msg::preset_pick_file.get(),
+                      FileDialog::Mode::File, {".json"});
+        } else if (picked.index >= 0 &&
+                   picked.index < (int)_mesh_presets.items.size()) {
+            row.mesh.preset.path = _mesh_presets.items[(size_t)picked.index].path;
+            row.mesh.preset.name = _mesh_presets.items[(size_t)picked.index].name;
+            batch_edited();
+        } else {
+            row.mesh.preset = BatchPreset{"", ""};
+            batch_edited();
+        }
     }
+    if (draw_batch_mesh_outputs(row.mesh)) batch_edited();
+}
+
+
+// What the row writes, over what its preset says. Nothing ticked in a set is
+// "whatever the preset says" rather than "write nothing", which is why the
+// two sets are ticked rather than selected.
+bool GuiApp::draw_batch_mesh_outputs(BatchMeshOptions& mesh) {
+    bool moved = false;
+    const Msg* color_names[kNumMeshColorModes] = {
+        &msg::mesh_color_none, &msg::mesh_color_vertex, &msg::mesh_color_texture};
+
+    ui::Text(msg::mesh_color);
+    ui::help_on_hover(msg::batch_mesh_override_help);
+    for (int i = 0; i < kNumMeshColorModes; i++) {
+        ImGui::SameLine();
+        ImGui::PushID(i);
+        bool on = (mesh.colors & (1 << i)) != 0;
+        if (ui::Checkbox(*color_names[i], &on)) {
+            mesh.colors = on ? (mesh.colors | (1 << i)) : (mesh.colors & ~(1 << i));
+            moved = true;
+        }
+        ImGui::PopID();
+    }
+
+    ui::Text(msg::mesh_formats);
+    ui::help_on_hover(msg::batch_mesh_override_help);
+    for (int i = 0; i < kNumMeshFormats; i++) {
+        ImGui::SameLine();
+        ImGui::PushID(i);
+        bool on = (mesh.formats & (1 << i)) != 0;
+        // A format no ticked colour can travel in is greyed out; with no
+        // colour ticked at all the preset decides, so all of them are offered.
+        bool ok = mesh.colors == 0;
+        for (int c = 0; c < kNumMeshColorModes && !ok; c++)
+            ok = (mesh.colors & (1 << c)) && mesh_format_carries(i, c);
+        ImGui::BeginDisabled(!ok);
+        if (ui::CheckboxRaw(kMeshFormats[i], &on)) {
+            mesh.formats = on ? (mesh.formats | (1 << i)) : (mesh.formats & ~(1 << i));
+            moved = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+    return moved;
 }
 
 
@@ -6072,10 +6245,7 @@ void GuiApp::draw_batch_plan() {
                                     {n, batch_dataset_workspace(row)});
                 break;
             case BatchStage::Train: {
-                const BatchPreset p =
-                    t.variant < (int)row.train_presets.size()
-                        ? row.train_presets[(size_t)t.variant]
-                        : BatchPreset{};
+                const BatchPreset p = batch_run_of(row, t.variant).preset;
                 const std::string name =
                     p.path.empty() ? preset_label(p.name) : p.name;
                 line = row.does(BatchStage::Dataset)
@@ -6084,11 +6254,20 @@ void GuiApp::draw_batch_plan() {
                                           {n, row.dataset, name});
                 break;
             }
-            case BatchStage::Mesh:
-                line = row.model.empty()
-                           ? i18n::format(msg::batch_plan_mesh_new, {n})
-                           : i18n::format(msg::batch_plan_mesh, {n, row.model});
+            case BatchStage::Mesh: {
+                if (!row.model.empty()) {
+                    line = i18n::format(msg::batch_plan_mesh, {n, row.model});
+                } else if (batch_num_runs(row) > 1) {
+                    // Which run, once a row meshes some of them and not others.
+                    const BatchPreset p = batch_run_of(row, t.variant).preset;
+                    line = i18n::format(msg::batch_plan_mesh_run,
+                                        {n, p.path.empty() ? preset_label(p.name)
+                                                           : p.name});
+                } else {
+                    line = i18n::format(msg::batch_plan_mesh_new, {n});
+                }
                 break;
+            }
         }
         ImVec4 color = kDim;
         if (_batch_active) {
@@ -6101,26 +6280,50 @@ void GuiApp::draw_batch_plan() {
 }
 
 
-// What a work screen's panel says while a batch owns it: which task is
-// running, out of how many, and the two ways to stop.
-void GuiApp::draw_batch_progress() {
-    ui::SeparatorText(msg::batch_title);
-    ui::Text(msg::batch_running_banner,
-             {(long long)(_batch_current + 1), (long long)_batch_tasks.size()});
-    if (_batch_current >= 0 && _batch_current < (int)_batch_tasks.size()) {
-        const BatchTask& t = _batch_tasks[(size_t)_batch_current];
-        ImGui::PushTextWrapPos();
-        ui::TextDisabled(batch_stage_name(t.stage));
-        if (t.row >= 0 && t.row < (int)_batch.size()) {
-            const std::string what = batch_row_summary(_batch[(size_t)t.row]);
-            if (!what.empty()) ui::TextDisabledRaw(what);
+// How far through the running task its own runner says it is. Every stage
+// answers in its own terms, which is why this is not one number somewhere.
+float GuiApp::batch_task_fraction() {
+    if (!_batch_active || _batch_current < 0 ||
+        _batch_current >= (int)_batch_tasks.size())
+        return -1.0f;
+    switch (_batch_tasks[(size_t)_batch_current].stage) {
+        case BatchStage::Dataset: {
+            // The steps a dataset run goes through, with the running one's own
+            // fraction inside its slot. Both engines report through that list.
+            RunProgress* p = dataset_steps();
+            const int at = std::clamp((int)p->current(), 0, kNumStages - 1);
+            const StageProgress sp = p->stage((Stage)at);
+            const float inner = sp.fraction >= 0.0f ? sp.fraction : 0.5f;
+            return std::min(1.0f, ((float)at + inner) / (float)kNumStages);
         }
-        ImGui::PopTextWrapPos();
+        case BatchStage::Train: {
+            const spirula::TrainerProgress pr = _runner.latest_progress();
+            if (pr.total_steps <= 0) return -1.0f;
+            return std::min(1.0f, (float)(pr.step + 1) / (float)pr.total_steps);
+        }
+        case BatchStage::Mesh: return _mesh.progress();
     }
-    if (_batch_stop_after) ui::TextColored(kWarn, msg::batch_stopping);
+    return -1.0f;
+}
 
-    if (ui::Button(msg::batch_show_list, ImVec2(-8, 0)))
-        _screen = Screen::Batch;
+double GuiApp::batch_task_elapsed() const {
+    if (!_batch_active || _batch_current < 0 ||
+        _batch_current >= (int)_batch_tasks.size())
+        return 0.0;
+    return std::max(0.0, ImGui::GetTime() -
+                             _batch_tasks[(size_t)_batch_current].started_at);
+}
+
+const BatchRow* GuiApp::batch_running_row() const {
+    if (!_batch_active || _batch_current < 0 ||
+        _batch_current >= (int)_batch_tasks.size())
+        return nullptr;
+    const int row = _batch_tasks[(size_t)_batch_current].row;
+    if (row < 0 || row >= (int)_batch.size()) return nullptr;
+    return &_batch[(size_t)row];
+}
+
+void GuiApp::draw_batch_stop_buttons() {
     ImGui::BeginDisabled(_batch_stop_after);
     if (ui::Button(msg::batch_stop_after, ImVec2(-8, 0)))
         _batch_stop_after = true;
@@ -6138,6 +6341,59 @@ void GuiApp::draw_batch_progress() {
         }
     }
     ui::help_on_hover(msg::batch_stop_now_help);
+}
+
+// What is running, on the batch screen and on the work screen that owns the
+// running task: two bars, what each has left, and the ways to stop. The work
+// screen shows the job; this says where in the QUEUE it is.
+void GuiApp::draw_batch_progress() {
+    ui::SeparatorText(msg::batch_title);
+    const float frac = batch_task_fraction();
+    const double elapsed = batch_task_elapsed();
+    const BatchProgress p =
+        batch_progress(_batch_tasks, _batch_current, frac, elapsed);
+
+    ui::Text(msg::batch_running_banner,
+             {(long long)(_batch_current + 1), (long long)_batch_tasks.size()});
+    ui::ProgressBarRaw(p.total > 0 ? (float)p.done / (float)p.total : 0.0f,
+                       ImVec2(-8, 0), nullptr);
+    ui::TextDisabled(msg::batch_eta_total,
+                     {spirula::i18n::format_duration_coarse(p.remaining)});
+
+    if (_batch_current >= 0 && _batch_current < (int)_batch_tasks.size()) {
+        const BatchTask& t = _batch_tasks[(size_t)_batch_current];
+        ImGui::PushTextWrapPos();
+        ui::TextDisabled(batch_stage_name(t.stage));
+        if (t.row >= 0 && t.row < (int)_batch.size()) {
+            const std::string what = batch_row_summary(_batch[(size_t)t.row]);
+            if (!what.empty()) ui::TextDisabledRaw(what);
+        }
+        ImGui::PopTextWrapPos();
+        ui::ProgressBarRaw(frac >= 0.0f ? frac : 0.0f, ImVec2(-8, 0), nullptr);
+        ui::TextDisabled(msg::batch_eta_task,
+                         {spirula::i18n::format_duration_coarse(elapsed),
+                          spirula::i18n::format_duration_coarse(p.task_remaining)});
+    }
+    if (_batch_stop_after) ui::TextColored(kWarn, msg::batch_stopping);
+
+    // One button, whichever way round the two screens are: the list from a
+    // work screen, the running step from the list.
+    if (_screen == Screen::Batch) {
+        if (ui::Button(msg::batch_show_training, ImVec2(-8, 0))) {
+            const BatchStage st =
+                _batch_current >= 0 && _batch_current < (int)_batch_tasks.size()
+                    ? _batch_tasks[(size_t)_batch_current].stage
+                    : BatchStage::Train;
+            switch (st) {
+                case BatchStage::Dataset: _screen = Screen::NewDataset; break;
+                case BatchStage::Mesh:    _screen = Screen::Mesh; break;
+                default:                  _screen = Screen::Train; break;
+            }
+        }
+    } else if (ui::Button(msg::batch_show_list, ImVec2(-8, 0))) {
+        _screen = Screen::Batch;
+    }
+    draw_batch_stop_buttons();
 }
 
 
@@ -6276,23 +6532,19 @@ void GuiApp::open_preset_save(PresetKind kind) {
 }
 
 
-// The dataset screen's picker. Its stock row is a reset rather than a preset:
-// the settings a freshly picked capture would have had.
+// The dataset screen's picker. Picking a built-in is a reset as much as a
+// choice: it starts from the settings a freshly picked capture would have had.
 void GuiApp::draw_dataset_preset_picker() {
     refresh_dataset_presets();
     ImGui::SetNextItemWidth(px(-8.0f));
-    const int picked =
-        stock_preset_combo("##dspreset", _ds_presets, _ds_presets.file);
-    if (picked == -1) {
-        DatasetSettings stock;
-        apply_capture_defaults(_sources, stock.sfm, stock.colmap);
-        apply_dataset_settings(stock);
-        _ds_presets.file.clear();
-        _ds_presets.display.clear();
-        _ds_presets.desc.clear();
-        _ds_presets.msg.clear();
-    } else if (picked >= 0 && picked < (int)_ds_presets.items.size()) {
-        apply_dataset_preset(_ds_presets.items[(size_t)picked]);
+    const PresetChoice picked =
+        preset_combo("##dspreset", _ds_presets, _ds_presets.file,
+                     _ds_presets.builtin, dataset_builtin_rows());
+    if (picked.moved) {
+        if (picked.index >= 0 && picked.index < (int)_ds_presets.items.size())
+            apply_dataset_preset(_ds_presets.items[(size_t)picked.index]);
+        else
+            apply_dataset_builtin(picked.builtin);
     }
 
     if (ui::Button(msg::preset_save)) open_preset_save(PresetKind::Dataset);
@@ -6322,17 +6574,19 @@ void GuiApp::draw_dataset_preset_picker() {
 void GuiApp::draw_mesh_preset_picker() {
     refresh_mesh_presets();
     ImGui::SetNextItemWidth(px(-8.0f));
-    const int picked =
-        stock_preset_combo("##meshpreset", _mesh_presets, _mesh_presets.file);
-    if (picked == -1) {
-        MeshPreset stock;
-        apply_mesh_preset(stock);
-        _mesh_presets.file.clear();
-        _mesh_presets.display.clear();
-        _mesh_presets.desc.clear();
-        _mesh_presets.msg.clear();
-    } else if (picked >= 0 && picked < (int)_mesh_presets.items.size()) {
-        apply_mesh_preset(_mesh_presets.items[(size_t)picked]);
+    const PresetChoice picked = preset_combo("##meshpreset", _mesh_presets,
+                                             _mesh_presets.file, {}, {});
+    if (picked.moved) {
+        if (picked.index >= 0 && picked.index < (int)_mesh_presets.items.size()) {
+            apply_mesh_preset(_mesh_presets.items[(size_t)picked.index]);
+        } else {
+            MeshPreset stock;
+            apply_mesh_preset(stock);
+            _mesh_presets.file.clear();
+            _mesh_presets.display.clear();
+            _mesh_presets.desc.clear();
+            _mesh_presets.msg.clear();
+        }
     }
 
     if (ui::Button(msg::preset_save)) open_preset_save(PresetKind::Mesh);
@@ -6582,6 +6836,7 @@ void GuiApp::draw_preset_save_modal() {
                                     _preset_save_path, capture_dataset_settings()};
                     save_dataset_preset(p, _preset_save_path);
                     _ds_presets.file = _preset_save_path;
+                    _ds_presets.builtin.clear();
                     _ds_presets.display = p.name;
                     _ds_presets.desc = p.description;
                     _ds_presets.scanned_at = -1.0;

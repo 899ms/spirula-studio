@@ -47,6 +47,9 @@ struct PresetPicker {
     std::vector<T> items;
     double scanned_at = -1.0;
     std::string file;
+    // Which built-in is selected while `file` is empty, for the kinds that
+    // have them. "" means the stock settings.
+    std::string builtin;
     std::string display;
     std::string desc;
     std::string msg;          // already formatted
@@ -180,6 +183,12 @@ private:
     DatasetSettings capture_dataset_settings() const;
     void apply_dataset_settings(const DatasetSettings& s);
     void apply_dataset_preset(const DatasetPreset& p);
+    // A built-in, which is the capture's own answers with the preset's over
+    // them -- and then the one question only the frames can settle.
+    void apply_dataset_builtin(const std::string& name);
+    // ... and again once the inputs change, so the order they were picked in
+    // does not decide which of the two wins.
+    void reapply_dataset_builtin();
     void load_dataset_preset_file(const std::string& path);
     // Meshing, the same way: the model, its photographs and the output path
     // are what the preset is applied TO.
@@ -208,8 +217,15 @@ private:
     // ... and one that builds a dataset from these inputs, or meshes a model.
     void add_batch_source_row(const std::vector<std::string>& sources);
     void add_batch_mesh_row(const std::string& model);
+    // The training run a new row (or a new run on one) starts with: whatever
+    // the trainer screen is on.
+    BatchRun batch_run_on_screen() const;
     void batch_edited();                    // persist, and re-check
-    void check_batch();                     // pre-flight every row
+    // Pre-flight every row. Cheap enough (a few stats and a small JSON per
+    // preset) that nothing waits for a button: check_batch_if_stale() runs it
+    // whenever an edit or a couple of seconds have gone by.
+    void check_batch();
+    void check_batch_if_stale();
     BatchCapabilities batch_capabilities() const;
     void request_start_batch(bool skip_invalid);
     void start_batch(bool skip_invalid);
@@ -390,11 +406,25 @@ private:
     // The built-in / saved picker one stage of one row uses. True when the
     // choice moved.
     bool draw_batch_train_preset(BatchPreset& p, const char* id, int row, int slot);
-    bool draw_batch_dataset_preset(BatchPreset& p, int row);
-    bool draw_batch_mesh_preset(BatchPreset& p, int row);
+    // One training run: its preset, its three overrides and whether the row's
+    // Mesh stage covers it, on one line.
+    bool draw_batch_run(BatchRun& run, int row, int slot, bool meshing);
+    // The colour and format sets a row writes, over what its preset says.
+    bool draw_batch_mesh_outputs(BatchMeshOptions& mesh);
     void draw_batch_issues();
     void draw_batch_plan();          // the tasks a start would run, in order
-    void draw_batch_progress();      // the running-task block on a work screen
+    // What is running, as bars: the queue, the task, and how long each has
+    // left. Drawn on the batch screen and on whichever work screen the
+    // running task belongs to, so neither has to be guessed from the other.
+    void draw_batch_progress();
+    void draw_batch_stop_buttons();
+    // How far through the running task its own runner says it is, -1 when it
+    // cannot say, and how long it has been going.
+    float batch_task_fraction();
+    double batch_task_elapsed() const;
+    // The row the running task belongs to, null when nothing is running.
+    // `_batch_current` indexes the TASKS, which outnumber the rows.
+    const BatchRow* batch_running_row() const;
     const spirula::i18n::Msg& batch_stage_name(BatchStage s) const;
     void draw_train_settings();      // left panel
     void draw_preset_picker();       // built-in + saved presets, save / load
@@ -640,6 +670,9 @@ private:
     std::vector<BatchTask> _batch_tasks;
     bool _batch_dirty = false;        // edited -> persist once the widget is idle
     bool _batch_checked = false;      // a pre-flight has run since the last edit
+    // When it ran. The list is re-checked on a timer as well as on an edit:
+    // a preset file or a dataset folder can go missing while the screen is up.
+    double _batch_checked_at = -1.0;
     bool _batch_active = false;
     bool _batch_launched = false;     // a task is in flight
     int  _batch_current = -1;         // which task that is

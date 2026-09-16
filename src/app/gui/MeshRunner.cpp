@@ -71,39 +71,12 @@ constexpr int kNumStages = (int)(sizeof(kStages) / sizeof(kStages[0]));
 // reaching or passing it -- a bar that moves but never lies about finishing.
 constexpr double kCreepTau = 25.0;
 
-// Whichever of the requested formats carries the most: a textured GLB is
-// self-contained, a glTF needs its sidecars, OBJ has no vertex colors, PLY has
-// no texture. Preview quality follows that order.
-const char* kPreviewOrder[] = {"glb", "gltf", "obj", "ply"};
-
 double now_seconds() {
     using namespace std::chrono;
     return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 
 }  // namespace
-
-std::string MeshJob::preview_path() const {
-    if (output.empty()) return {};
-    for (const char* want : kPreviewOrder)
-        for (int i = 0; i < kNumMeshFormats; ++i)
-            if (formats[i] && std::strcmp(kMeshFormats[i], want) == 0)
-                return output + "." + want;
-    return {};
-}
-
-// A file becomes <name>_mesh, NEVER <name> -- meshing `splat.ply` to base
-// `splat` writes `splat.ply`, i.e. over the model being meshed.
-std::string default_mesh_output(const std::string& checkpoint) {
-    if (checkpoint.empty()) return {};
-    std::error_code ec;
-    fs::path base(checkpoint);
-    if (fs::is_regular_file(base, ec))
-        base.replace_filename(base.stem().string() + "_mesh");
-    else
-        base /= "mesh";
-    return base.string();
-}
 
 MeshRunner::~MeshRunner() {
     _cancel = true;
@@ -240,6 +213,11 @@ void MeshRunner::run(MeshJob job) {
         if (job.formats[i])
             formats += (formats.empty() ? "" : ",") + std::string(kMeshFormats[i]);
     if (formats.empty()) formats = "ply";
+    std::string colors;
+    for (int i = 0; i < kNumMeshColorModes; ++i)
+        if (job.colors[i])
+            colors += (colors.empty() ? "" : ",") + std::string(kMeshColorModes[i]);
+    if (colors.empty()) colors = "vertex";
 
     if (job.output.empty()) {
         // Beside the checkpoint, as the CLI's own default does -- and for a
@@ -264,7 +242,7 @@ void MeshRunner::run(MeshJob job) {
         spirula::i18n::code(spirula::i18n::current()),
         "mesh", job.checkpoint,
         "--format", formats,
-        "--color", kMeshColorModes[job.color],
+        "--color", colors,
         "--output", job.output,
     };
     if (!job.use_data) {
@@ -277,7 +255,7 @@ void MeshRunner::run(MeshJob job) {
         argv.push_back("--max-cameras");
         argv.push_back(std::to_string(job.max_cameras));
     }
-    if (job.texture_size > 0 && job.color == 2) {
+    if (job.texture_size > 0 && job.wants_color(2)) {
         argv.push_back("--texture-size");
         argv.push_back(std::to_string(job.texture_size));
     }
@@ -332,19 +310,14 @@ void MeshRunner::run(MeshJob job) {
     if (rc != 0) return fail(lmsg::err_mesh_failed.get());
 
     {
-        // Which file the preview opens. The child writes every requested
-        // format, so this is decided from the job rather than read back out of
-        // the log: the preview wants the one that carries the most (a textured
-        // GLB over a bare PLY), and falls back down that order to whatever is
-        // actually on disk.
+        // Which file the preview opens: decided from the job rather than read
+        // back out of the log, and the first one actually on disk wins -- so a
+        // combination the child skipped never becomes the preview.
         std::error_code ec;
-        std::string best = job.preview_path();
-        if (!fs::is_regular_file(best, ec)) {
-            for (const char* want : kPreviewOrder) {
-                const std::string cand = job.output + "." + want;
-                if (fs::is_regular_file(cand, ec)) { best = cand; break; }
-            }
-        }
+        const std::vector<std::string> all = mesh_job_outputs(job);
+        std::string best = all.empty() ? std::string() : all.front();
+        for (const std::string& cand : all)
+            if (fs::is_regular_file(cand, ec)) { best = cand; break; }
         std::lock_guard<std::mutex> lk(_mu);
         _output = best;
     }

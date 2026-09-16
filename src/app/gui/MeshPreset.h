@@ -4,7 +4,7 @@
 // chose. What it never carries is which model, which photographs and where the
 // result goes -- so one preset meshes every run in a folder the same way.
 
-#include "app/gui/MeshRunner.h"
+#include "app/gui/MeshJob.h"
 #include "app/gui/PresetFile.h"
 
 #include <string>

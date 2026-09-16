@@ -344,6 +344,7 @@ if(SS_BUILD_GUI)
     add_executable(preset_roundtrip_test
         ${SS_SRC}/app/gui/tests/preset_roundtrip_test.cpp
         ${SS_SRC}/app/gui/DatasetPreset.cpp
+        ${SS_SRC}/app/gui/MeshJob.cpp
         ${SS_SRC}/app/gui/MeshPreset.cpp
         ${SS_SRC}/app/gui/PresetFile.cpp
         ${SS_SRC}/app/AppPaths.cpp)

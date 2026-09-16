@@ -186,6 +186,8 @@ expectation, one executable. Neither exists yet.
 | build system | every mode in [build.md](build.md) |
 | a comment you wrote | `python3 tools/check_comment_length.py` — the build runs it anyway ([lints](build.md#lints)) |
 | `SS_FILE` or `SS_SOURCE_ROOT` | `./build/source_path` on each toolchain — MSVC, GCC and nvcc spell `__FILE__` differently |
+| a mesh format, or which colors it carries | `./build/mesh_format_roundtrip` — writes every format and reads it back through the other implementation |
+| a preset field, or a batch row's shape | `./build/preset_roundtrip_test` |
 | a per-cell optimizer launcher (Vulkan) | `SS_OPTIM_SLICE_CELLS=2048` on `optim_parity` / `optimgeo_parity`, which forces the multi-slice path only an SH buffer past ~24M splats would otherwise take ([SH layouts](notes/sh-quant-layout.md)) |
 | anything | one short training run per backend on a public scene |
 

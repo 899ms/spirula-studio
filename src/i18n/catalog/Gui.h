@@ -4431,30 +4431,29 @@ SS_MSG(batch_override_hint,
     PT("predefinição"),  IT("preimpostazione"), NL("voorinstelling"),
     RU("пресет"),        TR("hazır ayar"));
 SS_MSG(batch_override_help,
-    EN("Overrides what the preset says, for this row alone. Leave it empty to "
+    EN("Overrides what the preset says, for this run alone. Leave it empty to "
        "train with the preset's own value."),
-    JA("この行だけ、プリセットの値を上書きします。空にしておくとプリセットの値の"
-       "まま学習します。"),
-    ZH_HANS("只对这一行覆盖预设里的值。留空就按预设本身的值来训练。"),
-    ZH_HANT("只對這一行覆寫預設裡的值。留空就按預設本身的值來訓練。"),
-    KO("이 행에 한해 프리셋 값을 덮어씁니다. 비워 두면 프리셋의 값 그대로 "
-       "학습합니다."),
-    DE("Überschreibt nur für diese Zeile, was die Voreinstellung sagt. Leer "
-       "lassen, um mit deren eigenem Wert zu trainieren."),
-    FR("Remplace ce que dit le préréglage, pour cette ligne seulement. Laisser "
-       "vide pour entraîner avec la valeur du préréglage."),
-    ES("Sustituye lo que dice el ajuste, solo en esta fila. Déjalo vacío para "
-       "entrenar con el valor del propio ajuste."),
-    PT("Substitui o que a predefinição diz, só nesta linha. Deixe vazio para "
-       "treinar com o valor da própria predefinição."),
-    IT("Sovrascrive quanto dice la preimpostazione, solo per questa riga. "
-       "Lascialo vuoto per addestrare con il valore della preimpostazione."),
-    NL("Overschrijft wat de voorinstelling zegt, alleen voor deze rij. Laat het "
+    JA("この実行だけ、プリセットの値を上書きします。空にしておくとプリセットの値のまま学習します。"),
+    ZH_HANS("只对这次运行覆盖预设的值。留空就按预设的值训练。"),
+    ZH_HANT("只對這次執行覆蓋預設的值。留空就照預設的值訓練。"),
+    KO("이 실행에만 프리셋 값을 덮어씁니다. 비워 두면 프리셋 값으로 학습합니다."),
+    DE("Überschreibt den Wert der Voreinstellung, nur für diesen Lauf. Leer "
+       "lassen, um mit dem Wert der Voreinstellung zu trainieren."),
+    FR("Remplace ce que dit le préréglage, pour cette exécution seulement. "
+       "Laissez vide pour entraîner avec la valeur du préréglage."),
+    ES("Sustituye lo que dice el ajuste, solo para esta ejecución. Déjelo "
+       "vacío para entrenar con el valor del ajuste."),
+    PT("Substitui o que a predefinição diz, só para esta execução. Deixe vazio "
+       "para treinar com o valor da predefinição."),
+    IT("Sostituisce ciò che dice la preimpostazione, solo per questa "
+       "esecuzione. Lascialo vuoto per addestrare con il valore della "
+       "preimpostazione."),
+    NL("Overschrijft wat de voorinstelling zegt, alleen voor deze run. Laat "
        "leeg om met de waarde van de voorinstelling te trainen."),
-    RU("Переопределяет значение из пресета только для этой строки. Оставьте "
-       "пустым, чтобы обучать со значением самого пресета."),
-    TR("Yalnızca bu satır için hazır ayardaki değerin yerine geçer. Hazır ayarın "
-       "kendi değeriyle eğitmek için boş bırakın."));
+    RU("Переопределяет значение пресета, только для этого прогона. Оставьте "
+       "пустым, чтобы обучать со значением пресета."),
+    TR("Hazır ayarın değerini yalnızca bu çalıştırma için geçersiz kılar. "
+       "Hazır ayarın değeriyle eğitmek için boş bırakın."));
 SS_MSG(batch_output_hint,
     EN("default: <dataset>/outputs"),
     JA("既定: <データセット>/outputs"),
@@ -4554,10 +4553,19 @@ SS_MSG(batch_status_pending,
     PT("Aguardando"),    IT("In attesa"),    NL("Wacht"),        RU("Ожидает"),
     TR("Bekliyor"));
 SS_MSG(batch_status_running,
-    EN("Training"),      JA("学習中"),        ZH_HANS("训练中"),   ZH_HANT("訓練中"),
-    KO("학습 중"),         DE("Training läuft"), FR("Entraînement"),
-    ES("Entrenando"),    PT("Treinando"),    IT("In addestramento"),
-    NL("Bezig met trainen"), RU("Обучается"), TR("Eğitiliyor"));
+    EN("Running"),
+    JA("実行中"),
+    ZH_HANS("运行中"),
+    ZH_HANT("執行中"),
+    KO("실행 중"),
+    DE("Läuft"),
+    FR("En cours"),
+    ES("En curso"),
+    PT("Em execução"),
+    IT("In corso"),
+    NL("Bezig"),
+    RU("Выполняется"),
+    TR("Çalışıyor"));
 SS_MSG(batch_status_done,
     EN("Done"),          JA("完了"),          ZH_HANS("完成"),     ZH_HANT("完成"),
     KO("완료"),           DE("Fertig"),       FR("Terminé"),      ES("Listo"),
@@ -8254,6 +8262,202 @@ SS_MSG(batch_busy_elsewhere,
        "затем запустите пакет."),
     TR("Başka bir şey çalışıyor. Bitmesini bekleyin ya da durdurun, sonra "
        "toplu işi başlatın."));
+
+SS_MSG(batch_run_mesh_help,
+    EN("Mesh what this run produces. A run trained for its appearance can be "
+       "far too large to mesh; tick the cheaper one trained beside it instead."),
+    JA("この実行の結果をメッシュ化します。見た目のために学習した実行はメッシュ化には大きすぎることがあります。その場合は隣で学習した軽いほうにチェックを入れてください。"),
+    ZH_HANS("对这次运行的结果做网格。为外观训练的运行往往太大，做不出网格；这时改勾旁边那个更省资源的运行。"),
+    ZH_HANT("對這次執行的結果做網格。為外觀訓練的執行往往太大，做不出網格；這時改勾旁邊那個較省資源的執行。"),
+    KO("이 실행의 결과로 메시를 만듭니다. 외형을 위해 학습한 실행은 메시로 만들기에 너무 클 수 있으니, 그럴 때는 옆에서 함께 "
+       "학습한 가벼운 쪽을 선택하세요."),
+    DE("Aus dem Ergebnis dieses Laufs ein Netz erzeugen. Ein auf Aussehen "
+       "trainierter Lauf kann dafür viel zu groß sein; haken Sie dann den "
+       "daneben trainierten günstigeren an."),
+    FR("Mailler ce que produit cette exécution. Une exécution entraînée pour "
+       "son apparence peut être bien trop lourde à mailler ; cochez plutôt "
+       "celle, moins coûteuse, entraînée à côté."),
+    ES("Generar la malla de lo que produce esta ejecución. Una ejecución "
+       "entrenada por su apariencia puede ser demasiado grande para mallar; "
+       "marque entonces la más económica entrenada junto a ella."),
+    PT("Gerar a malha do que esta execução produz. Uma execução treinada pela "
+       "aparência pode ser grande demais para malhar; marque então a mais "
+       "barata treinada ao lado."),
+    IT("Crea la mesh da ciò che produce questa esecuzione. Un'esecuzione "
+       "addestrata per l'aspetto può essere troppo grande da convertire; "
+       "spunta invece quella più leggera addestrata accanto."),
+    NL("Maak een mesh van wat deze run oplevert. Een run die op uiterlijk is "
+       "getraind kan veel te groot zijn om te meshen; vink dan de goedkopere "
+       "run ernaast aan."),
+    RU("Строить меш по результату этого прогона. Прогон, обученный ради "
+       "внешнего вида, может быть слишком велик для меша; тогда отметьте более "
+       "дешёвый, обученный рядом."),
+    TR("Bu çalıştırmanın sonucundan ağ oluştur. Görünüm için eğitilen bir "
+       "çalıştırma ağ oluşturmak için fazla büyük olabilir; o zaman yanında "
+       "eğitilen ucuz olanı işaretleyin."));
+
+SS_MSG(batch_mesh_override_help,
+    EN("What this row writes, whatever its preset says. Tick nothing to leave "
+       "the preset alone."),
+    JA("プリセットの指定にかかわらず、この行が書き出すものです。何もチェックしなければプリセットのままになります。"),
+    ZH_HANS("不管预设怎么说，这一行要写出的东西。什么都不勾就按预设来。"),
+    ZH_HANT("不管預設怎麼說，這一列要寫出的東西。什麼都不勾就照預設。"),
+    KO("프리셋이 무엇이라 하든 이 행이 써 내보낼 것. 아무것도 선택하지 않으면 프리셋 그대로입니다."),
+    DE("Was diese Zeile schreibt, unabhängig von ihrer Voreinstellung. Nichts "
+       "anhaken lässt die Voreinstellung unberührt."),
+    FR("Ce que cette ligne écrit, quoi que dise son préréglage. Ne rien cocher "
+       "laisse le préréglage tel quel."),
+    ES("Lo que escribe esta fila, diga lo que diga su ajuste. No marcar nada "
+       "deja el ajuste como está."),
+    PT("O que esta linha escreve, diga o que disser a sua predefinição. Não "
+       "marcar nada deixa a predefinição como está."),
+    IT("Ciò che questa riga scrive, qualunque cosa dica la sua "
+       "preimpostazione. Non spuntare nulla la lascia intatta."),
+    NL("Wat deze rij schrijft, wat de voorinstelling ook zegt. Niets aanvinken "
+       "laat de voorinstelling met rust."),
+    RU("Что записывает эта строка, что бы ни говорил её пресет. Если ничего не "
+       "отмечено, пресет остаётся как есть."),
+    TR("Hazır ayarı ne derse desin, bu satırın yazacağı şey. Hiçbirini "
+       "işaretlemezseniz hazır ayar olduğu gibi kalır."));
+
+SS_MSG(batch_eta_total,
+    EN("Estimated time left: {0}"),
+    JA("残り時間の見込み: {0}"),
+    ZH_HANS("预计剩余时间：{0}"),
+    ZH_HANT("預計剩餘時間：{0}"),
+    KO("남은 시간 예상: {0}"),
+    DE("Geschätzte Restzeit: {0}"),
+    FR("Temps restant estimé : {0}"),
+    ES("Tiempo restante estimado: {0}"),
+    PT("Tempo restante estimado: {0}"),
+    IT("Tempo residuo stimato: {0}"),
+    NL("Geschatte resterende tijd: {0}"),
+    RU("Осталось примерно: {0}"),
+    TR("Tahmini kalan süre: {0}"));
+
+SS_MSG(batch_eta_task,
+    EN("This step: {0} so far, about {1} left"),
+    JA("この工程: これまで {0}、残りおよそ {1}"),
+    ZH_HANS("本步骤：已用 {0}，约剩 {1}"),
+    ZH_HANT("本步驟：已用 {0}，約剩 {1}"),
+    KO("이 단계: 지금까지 {0}, 남은 시간 약 {1}"),
+    DE("Dieser Schritt: bisher {0}, noch etwa {1}"),
+    FR("Cette étape : {0} écoulées, environ {1} restantes"),
+    ES("Este paso: {0} hasta ahora, unos {1} restantes"),
+    PT("Esta etapa: {0} até agora, cerca de {1} restantes"),
+    IT("Questo passaggio: {0} finora, circa {1} rimanenti"),
+    NL("Deze stap: {0} tot nu toe, nog ongeveer {1}"),
+    RU("Этот шаг: прошло {0}, осталось около {1}"),
+    TR("Bu adım: şu ana kadar {0}, yaklaşık {1} kaldı"));
+
+SS_MSG(mesh_color_help,
+    EN("Tick more than one to get the same surface several ways. It is "
+       "extracted once either way; only the color is redone."),
+    JA("複数にチェックすると、同じ面をいくつもの形で書き出せます。面の抽出は一度きりで、やり直すのは色だけです。"),
+    ZH_HANS("可以勾多项，把同一个面以多种方式写出。面只提取一次，重做的只有颜色。"),
+    ZH_HANT("可以勾多項，把同一個面以多種方式寫出。面只擷取一次，重做的只有顏色。"),
+    KO("여러 개를 선택하면 같은 표면을 여러 방식으로 얻습니다. 표면은 한 번만 추출하고, 다시 하는 것은 색뿐입니다."),
+    DE("Mehrere anhaken, um dieselbe Oberfläche mehrfach zu erhalten. Sie wird "
+       "ohnehin nur einmal extrahiert; wiederholt wird nur die Farbe."),
+    FR("Cochez-en plusieurs pour obtenir la même surface de plusieurs façons. "
+       "Elle n'est extraite qu'une fois ; seule la couleur est refaite."),
+    ES("Marque varias para obtener la misma superficie de varias formas. Se "
+       "extrae una sola vez; solo se rehace el color."),
+    PT("Marque várias para obter a mesma superfície de várias formas. Ela é "
+       "extraída uma só vez; apenas a cor é refeita."),
+    IT("Spuntane più di una per ottenere la stessa superficie in più modi. "
+       "Viene estratta una volta sola; si rifà solo il colore."),
+    NL("Vink er meerdere aan om hetzelfde oppervlak op meerdere manieren te "
+       "krijgen. Het wordt maar één keer geëxtraheerd; alleen de kleur wordt "
+       "opnieuw gedaan."),
+    RU("Отметьте несколько, чтобы получить одну и ту же поверхность в разных "
+       "видах. Извлекается она всё равно один раз; заново делается только "
+       "цвет."),
+    TR("Aynı yüzeyi birkaç biçimde almak için birden fazlasını işaretleyin. "
+       "Yüzey yine bir kez çıkarılır; yalnızca renk yeniden yapılır."));
+
+SS_MSG(mesh_no_output_warn,
+    EN("Nothing would be written: no ticked format can carry a ticked color."),
+    JA("何も書き出せません。チェックした形式のどれも、チェックした色を持てません。"),
+    ZH_HANS("什么都写不出：勾选的格式都装不下勾选的颜色。"),
+    ZH_HANT("什麼都寫不出：勾選的格式都裝不下勾選的顏色。"),
+    KO("아무것도 쓰이지 않습니다. 선택한 형식 중 선택한 색을 담을 수 있는 것이 없습니다."),
+    DE("Es würde nichts geschrieben: kein angehaktes Format kann eine "
+       "angehakte Farbe tragen."),
+    FR("Rien ne serait écrit : aucun format coché ne peut porter une couleur "
+       "cochée."),
+    ES("No se escribiría nada: ningún formato marcado puede llevar un color "
+       "marcado."),
+    PT("Nada seria escrito: nenhum formato marcado consegue levar uma cor "
+       "marcada."),
+    IT("Non verrebbe scritto nulla: nessun formato spuntato può portare un "
+       "colore spuntato."),
+    NL("Er zou niets worden geschreven: geen aangevinkt formaat kan een "
+       "aangevinkte kleur dragen."),
+    RU("Ничего не будет записано: ни один отмеченный формат не несёт "
+       "отмеченный цвет."),
+    TR("Hiçbir şey yazılmaz: işaretli biçimlerin hiçbiri işaretli bir rengi "
+       "taşıyamaz."));
+
+SS_MSG(chk_mesh_no_runs,
+    EN("Meshing is on, but no training run is ticked for it."),
+    JA("メッシュ化が有効ですが、対象の学習実行が一つも選ばれていません。"),
+    ZH_HANS("开了网格生成，但没有勾选任何训练运行。"),
+    ZH_HANT("開了網格生成，但沒有勾選任何訓練執行。"),
+    KO("메시 생성이 켜져 있지만, 대상으로 선택된 학습 실행이 없습니다."),
+    DE("Netzerzeugung ist an, aber kein Trainingslauf ist dafür angehakt."),
+    FR("Le maillage est activé, mais aucune exécution d'entraînement n'est "
+       "cochée pour lui."),
+    ES("El mallado está activado, pero no hay ninguna ejecución de "
+       "entrenamiento marcada."),
+    PT("A malha está ativada, mas nenhuma execução de treino está marcada para "
+       "ela."),
+    IT("La mesh è attiva, ma nessuna esecuzione di addestramento è spuntata "
+       "per essa."),
+    NL("Meshen staat aan, maar er is geen trainingsrun voor aangevinkt."),
+    RU("Построение меша включено, но ни один прогон обучения для него не "
+       "отмечен."),
+    TR("Ağ oluşturma açık, ama bunun için hiçbir eğitim çalıştırması "
+       "işaretlenmedi."));
+
+SS_MSG(chk_mesh_no_output,
+    EN("The colors and formats ticked for meshing have no combination between "
+       "them."),
+    JA("メッシュ化で選んだ色と形式に、組み合わせられるものがありません。"),
+    ZH_HANS("为网格生成勾选的颜色和格式之间没有可用的组合。"),
+    ZH_HANT("為網格生成勾選的顏色與格式之間沒有可用的組合。"),
+    KO("메시 생성에 선택한 색과 형식 사이에 가능한 조합이 없습니다."),
+    DE("Die für die Netzerzeugung angehakten Farben und Formate haben keine "
+       "gemeinsame Kombination."),
+    FR("Les couleurs et les formats cochés pour le maillage n'ont aucune "
+       "combinaison possible."),
+    ES("Los colores y formatos marcados para el mallado no tienen ninguna "
+       "combinación posible."),
+    PT("As cores e os formatos marcados para a malha não têm nenhuma "
+       "combinação possível."),
+    IT("I colori e i formati spuntati per la mesh non hanno alcuna "
+       "combinazione possibile."),
+    NL("De voor het meshen aangevinkte kleuren en formaten hebben geen enkele "
+       "combinatie."),
+    RU("У отмеченных для меша цветов и форматов нет ни одной допустимой "
+       "комбинации."),
+    TR("Ağ oluşturma için işaretlenen renkler ve biçimler arasında hiçbir "
+       "birleşim yok."));
+
+SS_MSG(batch_plan_mesh_run,
+    EN("{0}. Mesh the run trained with {1}"),
+    JA("{0}. {1} で学習した実行をメッシュ化する"),
+    ZH_HANS("{0}. 为用 {1} 训练的那次运行生成网格"),
+    ZH_HANT("{0}. 為用 {1} 訓練的那次執行產生網格"),
+    KO("{0}. {1} 로 학습한 실행으로 메시 만들기"),
+    DE("{0}. Den mit {1} trainierten Lauf vernetzen"),
+    FR("{0}. Mailler l'exécution entraînée avec {1}"),
+    ES("{0}. Mallar la ejecución entrenada con {1}"),
+    PT("{0}. Malhar a execução treinada com {1}"),
+    IT("{0}. Crea la mesh dell'esecuzione addestrata con {1}"),
+    NL("{0}. Mesh maken van de run getraind met {1}"),
+    RU("{0}. Построить меш по прогону, обученному с {1}"),
+    TR("{0}. {1} ile eğitilen çalıştırmadan ağ oluştur"));
 
 }  // namespace gui
 }  // namespace msg
