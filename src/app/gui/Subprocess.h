@@ -27,11 +27,22 @@ int run_process(const std::vector<std::string>& argv,
 // True when `exe` resolves to an executable (PATH search like the shell).
 bool command_exists(const std::string& exe);
 
-// Splits a free-form flag string the way a shell would for the simple cases:
-// whitespace separated, with "quoted runs" kept together. Enough for
-// `--max-error 2 --masks "/path/with space"`. This is what the runners' "extra
-// arguments" fields go through before becoming argv entries.
+// Splits a flag or command string the way a shell would for the simple cases:
+// whitespace separates (a line break included), "quoted runs" stay together,
+// and a backslash before a break continues the line instead of being an arg.
 std::vector<std::string> split_args(const std::string& s);
+
+// A MESSAGE made safe to hand to another program: no backslash, no straight
+// quote, no control character, so it needs no escaping in a JSON payload or a
+// command line. Quotes curl (” ’), a backslash becomes '/', spaces collapse.
+std::string safe_arg(const std::string& text);
+
+// split_args(command) with every `token` inside an argument replaced by
+// safe_arg(value). The value lands in ONE argument whether or not the token
+// was quoted, so nothing in it can be read as syntax.
+std::vector<std::string> command_argv(const std::string& command,
+                                      const std::string& token,
+                                      const std::string& value);
 
 // Hands a URL to the desktop's default browser and returns immediately. False
 // when nothing could be launched (a headless session, no xdg-open), which is

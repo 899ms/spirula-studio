@@ -409,6 +409,21 @@ inline bool InputTextHintBufRaw(const char* id, const Msg& hint, char* buf,
                                 size_t buf_size) {
     return ImGui::InputTextWithHint(id, hint.get(), buf, buf_size);
 }
+// A box for text the CALLER sizes, because it grows with what is in it.
+inline bool InputTextMultilineRaw(const char* id, std::string* v,
+                                  const ImVec2& size,
+                                  ImGuiInputTextFlags flags = 0) {
+    return ImGui::InputTextMultiline(id, v, size, flags);
+}
+// The example an empty multi-line box shows: ImGui draws a hint for the
+// one-line field and not for this one, so it is drawn where that one's goes.
+inline void hint_over_last_item_raw(const char* example) {
+    const ImVec2 at = ImGui::GetItemRectMin();
+    const ImVec2 pad = ImGui::GetStyle().FramePadding;
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(at.x + pad.x, at.y + pad.y),
+        ImGui::GetColorU32(ImGuiCol_TextDisabled), example);
+}
 
 // ---------------------------------------------------------------------------
 // Tables

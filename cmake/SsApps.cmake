@@ -341,6 +341,11 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/ReconStamp.cpp)
     ss_configure_app(recon_stamp_test)
 
+    add_executable(command_argv_test
+        ${SS_SRC}/app/gui/tests/command_argv_test.cpp
+        ${SS_SRC}/app/gui/Subprocess.cpp)
+    ss_configure_app(command_argv_test)
+
     add_executable(preset_roundtrip_test
         ${SS_SRC}/app/gui/tests/preset_roundtrip_test.cpp
         ${SS_SRC}/app/gui/DatasetPreset.cpp

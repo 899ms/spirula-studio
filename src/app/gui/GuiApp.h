@@ -8,6 +8,7 @@
 #include "config/TrainConfig.h"
 #include "app/gui/BatchProcess.h"
 #include "app/gui/ColmapRunner.h"
+#include "app/gui/CommandRunner.h"
 #include "app/gui/CompareView.h"
 #include "app/gui/Fonts.h"
 #include "app/gui/ConfigUI.h"
@@ -425,6 +426,11 @@ private:
     // The row the running task belongs to, null when nothing is running.
     // `_batch_current` indexes the TASKS, which outnumber the rows.
     const BatchRow* batch_running_row() const;
+    // The command the queue runs when it is over: the field and its Test
+    // button, starting it with a message, and reporting how it went.
+    void draw_batch_command();
+    void run_batch_command(const std::string& message);
+    void poll_batch_command();
     const spirula::i18n::Msg& batch_stage_name(BatchStage s) const;
     void draw_train_settings();      // left panel
     void draw_preset_picker();       // built-in + saved presets, save / load
@@ -684,6 +690,11 @@ private:
     bool _batch_show_plan = false;
     std::string _batch_msg;           // already formatted; "" when there is none
     bool _batch_msg_err = false;
+    // What to run once the queue is over -- a notification, usually. Empty is
+    // "run nothing", and it is kept in gui.conf rather than in the list: it
+    // belongs to this machine, not to the rows.
+    std::string _batch_cmd;
+    CommandRunner _batch_cmd_run;
 
     FileDialog _dialog;
     PickAction _pick = PickAction::None;

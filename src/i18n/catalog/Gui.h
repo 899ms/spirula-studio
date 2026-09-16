@@ -4833,6 +4833,221 @@ SS_MSG(batch_log_summary,
     RU("Пакет завершён. Готово: {0}   Сбоев: {1}   Не завершено: {2}"),
     TR("Toplu iş bitti. Biten: {0}   Başarısız: {1}   Tamamlanmayan: {2}"));
 
+// ---- the command a finished queue runs ----
+// The message these hand over goes through gui::safe_arg(), so an apostrophe
+// or a quote in a translation cannot reach the command as syntax.
+SS_MSG(batch_cmd_title,
+    EN("When the queue finishes"),
+    JA("バッチが終わったら"),
+    ZH_HANS("批处理结束后"),
+    ZH_HANT("批次結束後"),
+    KO("일괄 실행이 끝나면"),
+    DE("Wenn der Stapel fertig ist"),
+    FR("Quand le lot est terminé"),
+    ES("Cuando el lote termina"),
+    PT("Quando o lote termina"),
+    IT("Quando il batch è finito"),
+    NL("Als de batch klaar is"),
+    RU("Когда пакет завершится"),
+    TR("Toplu iş bittiğinde"));
+SS_MSG(batch_cmd_help,
+    EN("Runs when the last task is over, however it ended. {message} is "
+       "replaced by a one-line summary, and always arrives as a single "
+       "argument whether it is quoted or not. The command is run directly, "
+       "not through a shell."),
+    JA("最後の作業が終わったときに、どのような終わり方であっても実行します。"
+       "{message} は結果を1行にまとめた文に置き換わり、引用符の有無にかかわ"
+       "らず必ず1つの引数として渡されます。コマンドはシェルを通さずそのまま"
+       "実行します。"),
+    ZH_HANS("最后一个作业结束时运行，无论以何种方式结束。{message} 会替换为"
+            "一行结果摘要，无论是否加引号，都作为单个参数传入。命令直接运行，"
+            "不经过 shell。"),
+    ZH_HANT("最後一個作業結束時執行，無論以何種方式結束。{message} 會替換為"
+            "一行結果摘要，無論有沒有加引號，都會當成單一引數傳入。命令會直接"
+            "執行，不經過 shell。"),
+    KO("마지막 작업이 어떻게 끝나든, 끝나면 실행합니다. {message} 는 결과를 "
+       "한 줄로 요약한 문장으로 바뀌며, 따옴표가 있든 없든 항상 인수 하나로 "
+       "전달됩니다. 명령은 셸을 거치지 않고 바로 실행합니다."),
+    DE("Läuft, wenn die letzte Aufgabe vorbei ist, wie sie auch endete. "
+       "{message} wird durch eine einzeilige Zusammenfassung ersetzt und "
+       "kommt immer als ein einziges Argument an, in Anführungszeichen oder "
+       "nicht. Der Befehl läuft direkt, nicht über eine Shell."),
+    FR("S’exécute quand la dernière tâche est finie, quelle qu’en soit "
+       "l’issue. {message} est remplacé par un résumé d’une ligne et arrive "
+       "toujours comme un seul argument, entre guillemets ou non. La "
+       "commande est lancée directement, sans passer par un shell."),
+    ES("Se ejecuta cuando la última tarea termina, sea como sea. {message} "
+       "se sustituye por un resumen de una línea y siempre llega como un "
+       "solo argumento, esté entrecomillado o no. El comando se ejecuta "
+       "directamente, sin pasar por un shell."),
+    PT("É executado quando a última tarefa termina, seja como for. {message} "
+       "é substituído por um resumo de uma linha e chega sempre como um "
+       "único argumento, entre aspas ou não. O comando é executado "
+       "diretamente, sem passar por um shell."),
+    IT("Parte quando l’ultima attività è finita, comunque sia finita. "
+       "{message} viene sostituito da un riassunto di una riga e arriva "
+       "sempre come un solo argomento, tra virgolette o no. Il comando viene "
+       "eseguito direttamente, senza passare da una shell."),
+    NL("Draait als de laatste taak voorbij is, hoe die ook afliep. {message} "
+       "wordt vervangen door een samenvatting van één regel en komt altijd "
+       "als één argument aan, met of zonder aanhalingstekens. De opdracht "
+       "draait rechtstreeks, niet via een shell."),
+    RU("Запускается, когда последняя задача закончилась, чем бы она ни "
+       "кончилась. {message} заменяется однострочной сводкой и всегда "
+       "приходит одним аргументом, в кавычках или без. Команда запускается "
+       "напрямую, без оболочки."),
+    TR("Son iş nasıl biterse bitsin, bittiğinde çalışır. {message} tek "
+       "satırlık bir özetle değiştirilir ve tırnak içinde olsun olmasın her "
+       "zaman tek bir argüman olarak gelir. Komut kabuk üzerinden değil, "
+       "doğrudan çalıştırılır."));
+SS_MSG(batch_cmd_test,
+    EN("Test"),
+    JA("テスト"),
+    ZH_HANS("测试"),
+    ZH_HANT("測試"),
+    KO("테스트"),
+    DE("Testen"),
+    FR("Tester"),
+    ES("Probar"),
+    PT("Testar"),
+    IT("Prova"),
+    NL("Testen"),
+    RU("Проверить"),
+    TR("Dene"));
+SS_MSG(batch_cmd_test_help,
+    EN("Runs the command now, with a test message in place of the summary."),
+    JA("結果のまとめの代わりにテスト用の文を入れて、コマンドをいま実行します。"),
+    ZH_HANS("现在就运行这条命令，用一条测试消息代替结果摘要。"),
+    ZH_HANT("現在就執行這條命令，用一則測試訊息代替結果摘要。"),
+    KO("요약 대신 테스트 문구를 넣어 명령을 지금 실행합니다."),
+    DE("Führt den Befehl jetzt aus, mit einer Testnachricht statt der "
+       "Zusammenfassung."),
+    FR("Lance la commande maintenant, avec un message de test à la place du "
+       "résumé."),
+    ES("Ejecuta el comando ahora, con un mensaje de prueba en lugar del "
+       "resumen."),
+    PT("Executa o comando agora, com uma mensagem de teste no lugar do "
+       "resumo."),
+    IT("Esegue il comando adesso, con un messaggio di prova al posto del "
+       "riassunto."),
+    NL("Voert de opdracht nu uit, met een testbericht in plaats van de "
+       "samenvatting."),
+    RU("Запускает команду сейчас, подставив пробное сообщение вместо сводки."),
+    TR("Komutu şimdi çalıştırır, özet yerine bir deneme iletisi koyarak."));
+// The product name is the localized one where there is one (brand::product):
+// this is in-text copy, not the wordmark, and it is written out per language
+// rather than assembled, exactly as brand::window_title is.
+SS_MSG(batch_cmd_test_message,
+    EN("Spirula Studio: this is a test message."),
+    JA("スピルラ・スタジオ: これはテスト用のメッセージです。"),
+    ZH_HANS("旋影工坊：这是一条测试消息。"),
+    ZH_HANT("旋影工坊：這是一則測試訊息。"),
+    KO("스피룰라 스튜디오: 테스트 메시지입니다."),
+    DE("Spirula Studio: Das ist eine Testnachricht."),
+    FR("Spirula Studio : ceci est un message de test."),
+    ES("Spirula Studio: este es un mensaje de prueba."),
+    PT("Spirula Studio: esta é uma mensagem de teste."),
+    IT("Spirula Studio: questo è un messaggio di prova."),
+    NL("Spirula Studio: dit is een testbericht."),
+    RU("Spirula Studio: это пробное сообщение."),
+    TR("Spirula Studio: bu bir deneme iletisidir."));
+SS_MSG(batch_cmd_message,
+    EN("Spirula Studio: batch processing finished. Done: {0}, failed: {1}, "
+       "not finished: {2}."),
+    JA("スピルラ・スタジオ: バッチ処理が終了しました。完了: {0}、失敗: {1}、"
+       "未完了: {2}。"),
+    ZH_HANS("旋影工坊：批处理结束。完成：{0}，失败：{1}，未完成：{2}。"),
+    ZH_HANT("旋影工坊：批次處理結束。完成：{0}，失敗：{1}，未完成：{2}。"),
+    KO("스피룰라 스튜디오: 일괄 처리가 끝났습니다. 완료: {0}, 실패: {1}, "
+       "미완료: {2}."),
+    DE("Spirula Studio: Die Stapelverarbeitung ist fertig. Fertig: {0}, "
+       "fehlgeschlagen: {1}, unfertig: {2}."),
+    FR("Spirula Studio : le traitement par lots est terminé. Terminées : "
+       "{0}, en échec : {1}, inachevées : {2}."),
+    ES("Spirula Studio: el procesamiento por lotes ha terminado. Listos: "
+       "{0}, con error: {1}, sin terminar: {2}."),
+    PT("Spirula Studio: o processamento em lote terminou. Concluídos: {0}, "
+       "com falha: {1}, não concluídos: {2}."),
+    IT("Spirula Studio: l’elaborazione batch è finita. Fatti: {0}, non "
+       "riusciti: {1}, non finiti: {2}."),
+    NL("Spirula Studio: de batchverwerking is klaar. Klaar: {0}, mislukt: "
+       "{1}, niet afgemaakt: {2}."),
+    RU("Spirula Studio: пакетная обработка завершена. Готово: {0}, сбоев: "
+       "{1}, не завершено: {2}."),
+    TR("Spirula Studio: toplu işlem bitti. Biten: {0}, başarısız: {1}, "
+       "tamamlanmayan: {2}."));
+SS_MSG(batch_cmd_running,
+    EN("Running the finish command: {0}"),
+    JA("終了時のコマンドを実行します: {0}"),
+    ZH_HANS("正在运行结束命令：{0}"),
+    ZH_HANT("正在執行結束命令：{0}"),
+    KO("종료 명령을 실행합니다: {0}"),
+    DE("Abschlussbefehl wird ausgeführt: {0}"),
+    FR("Exécution de la commande de fin : {0}"),
+    ES("Ejecutando el comando de fin: {0}"),
+    PT("Executando o comando de fim: {0}"),
+    IT("Esecuzione del comando di fine: {0}"),
+    NL("De afsluitopdracht draait: {0}"),
+    RU("Запускается команда завершения: {0}"),
+    TR("Bitiş komutu çalıştırılıyor: {0}"));
+SS_MSG(batch_cmd_missing,
+    EN("Could not run the finish command: {0} was not found."),
+    JA("終了時のコマンドを実行できませんでした: {0} が見つかりません。"),
+    ZH_HANS("无法运行结束命令：找不到 {0}。"),
+    ZH_HANT("無法執行結束命令：找不到 {0}。"),
+    KO("종료 명령을 실행할 수 없습니다: {0} 을(를) 찾을 수 없습니다."),
+    DE("Der Abschlussbefehl ließ sich nicht ausführen: {0} wurde nicht "
+       "gefunden."),
+    FR("Impossible de lancer la commande de fin : {0} est introuvable."),
+    ES("No se ha podido ejecutar el comando de fin: no se encuentra {0}."),
+    PT("Não foi possível executar o comando de fim: {0} não foi encontrado."),
+    IT("Non è stato possibile eseguire il comando di fine: {0} non si trova."),
+    NL("De afsluitopdracht kon niet draaien: {0} is niet gevonden."),
+    RU("Не удалось выполнить команду завершения: {0} не найден."),
+    TR("Bitiş komutu çalıştırılamadı: {0} bulunamadı."));
+SS_MSG(batch_cmd_exit,
+    EN("The finish command exited with code {0}."),
+    JA("終了時のコマンドが終了コード {0} で終わりました。"),
+    ZH_HANS("结束命令退出，返回码 {0}。"),
+    ZH_HANT("結束命令結束，回傳碼 {0}。"),
+    KO("종료 명령이 코드 {0}(으)로 끝났습니다."),
+    DE("Der Abschlussbefehl endete mit Code {0}."),
+    FR("La commande de fin s’est terminée avec le code {0}."),
+    ES("El comando de fin ha terminado con el código {0}."),
+    PT("O comando de fim terminou com o código {0}."),
+    IT("Il comando di fine è terminato con codice {0}."),
+    NL("De afsluitopdracht eindigde met code {0}."),
+    RU("Команда завершения закончилась с кодом {0}."),
+    TR("Bitiş komutu {0} koduyla sona erdi."));
+SS_MSG(batch_cmd_ok,
+    EN("The finish command finished."),
+    JA("終了時のコマンドが完了しました。"),
+    ZH_HANS("结束命令已完成。"),
+    ZH_HANT("結束命令已完成。"),
+    KO("종료 명령이 끝났습니다."),
+    DE("Der Abschlussbefehl ist durch."),
+    FR("La commande de fin est terminée."),
+    ES("El comando de fin ha terminado."),
+    PT("O comando de fim terminou."),
+    IT("Il comando di fine è finito."),
+    NL("De afsluitopdracht is klaar."),
+    RU("Команда завершения выполнена."),
+    TR("Bitiş komutu tamamlandı."));
+SS_MSG(batch_cmd_busy,
+    EN("The finish command is already running; this one was not started."),
+    JA("終了時のコマンドはすでに実行中です。今回は実行しませんでした。"),
+    ZH_HANS("结束命令已经在运行，这一次没有再启动。"),
+    ZH_HANT("結束命令已經在執行，這一次沒有再啟動。"),
+    KO("종료 명령이 이미 실행 중이어서 이번에는 실행하지 않았습니다."),
+    DE("Der Abschlussbefehl läuft schon; dieser wurde nicht gestartet."),
+    FR("La commande de fin est déjà en cours ; celle-ci n’a pas été lancée."),
+    ES("El comando de fin ya se está ejecutando; este no se ha iniciado."),
+    PT("O comando de fim já está em execução; este não foi iniciado."),
+    IT("Il comando di fine è già in esecuzione; questo non è stato avviato."),
+    NL("De afsluitopdracht draait al; deze is niet gestart."),
+    RU("Команда завершения уже выполняется; эта не запущена."),
+    TR("Bitiş komutu zaten çalışıyor; bu çalıştırılmadı."));
+
 // ---- what a pre-flight can find ----
 SS_MSG(chk_dataset_empty,
     EN("No dataset folder is set."),

@@ -190,6 +190,30 @@ void GuiApp::shutdown() {
 // One line per remembered pick directory, keyed by dir_key().
 static constexpr char kDirPrefix[] = "dialog_dir.";
 
+// gui.conf is one setting per line, so a setting that may HOLD line breaks --
+// the batch's finish command -- is written with them escaped. An escape that
+// means nothing is left alone, so a hand-typed `C:\Users` still reads back.
+static std::string escape_setting(const std::string& v) {
+    std::string out;
+    for (char c : v) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '\n') out += "\\n";
+        else if (c != '\r') out += c;
+    }
+    return out;
+}
+static std::string unescape_setting(const std::string& v) {
+    std::string out;
+    for (size_t i = 0; i < v.size(); i++) {
+        if (v[i] != '\\' || i + 1 >= v.size()) { out += v[i]; continue; }
+        const char next = v[i + 1];
+        if (next == 'n') { out += '\n'; i++; }
+        else if (next == '\\') { out += '\\'; i++; }
+        else out += v[i];
+    }
+    return out;
+}
+
 std::string GuiApp::settings_path() {
     return (fs::path(app::config_dir()) / "gui.conf").string();
 }
@@ -224,6 +248,7 @@ void GuiApp::load_settings() {
         else if (k == "python_exe" && !v.empty()) _python_exe = v;
         else if (k == "sfm_engine") _engine = v == "colmap" ? Engine::Colmap
                                                             : Engine::BuiltIn;
+        else if (k == "batch_command") _batch_cmd = unescape_setting(v);
         else if (k == "accepted_license" && !v.empty() && !license_accepted(v))
             _accepted_licenses.push_back(v);
         else if (k == "lang" && !v.empty()) saved_lang = v;
@@ -272,6 +297,7 @@ void GuiApp::save_settings() {
     std::fprintf(f, "python_exe=%s\n", _python_exe.c_str());
     std::fprintf(f, "sfm_engine=%s\n",
                  _engine == Engine::Colmap ? "colmap" : "builtin");
+    std::fprintf(f, "batch_command=%s\n", escape_setting(_batch_cmd).c_str());
     std::fprintf(f, "lang=%s\n", spirula::i18n::code(spirula::i18n::current()));
     std::fprintf(f, "ui_scale=%.3f\n", _scale.user());
     std::fprintf(f, "panel_w=%.1f\n", _panel_w);
@@ -557,6 +583,7 @@ void GuiApp::append_logs() {
     }
     for (auto& s : _compare.drain_log()) log(s);
     for (auto& s : _mesh.drain_log()) log(s);
+    poll_batch_command();
     for (auto& s : _download.drain_log()) log(s);
     for (auto& s : _font_download.drain_log()) log(s);
     // A finished font download is the one thing besides a language switch
@@ -1465,6 +1492,34 @@ void GuiApp::finish_batch() {
         _batch_dirty = false;
         save_batch_list(_batch);
     }
+    run_batch_command(i18n::format(msg::batch_cmd_message,
+                                   {(long long)done, (long long)failed,
+                                    (long long)other}));
+}
+
+// The whole point of an unattended queue is not watching it, so the one thing
+// it can do on its own behalf is tell somebody it is over. Runs however the
+// queue ended -- finished, failed or stopped; the message says which.
+void GuiApp::run_batch_command(const std::string& message) {
+    if (_batch_cmd.empty()) return;
+    const std::vector<std::string> argv =
+        command_argv(_batch_cmd, kBatchMessageToken, message);
+    if (argv.empty()) return;
+    log(i18n::format(msg::batch_cmd_running, {_batch_cmd}));
+    if (!_batch_cmd_run.start(argv)) log(msg::batch_cmd_busy.get());
+}
+
+// What it printed and how it ended, in the log like any other runner's.
+void GuiApp::poll_batch_command() {
+    for (const std::string& s : _batch_cmd_run.drain_log()) log(s);
+    const int code = _batch_cmd_run.take_exit_code();
+    if (code == CommandRunner::kNoResult || code == kCancelled) return;
+    if (code == kSpawnFailed)
+        log(i18n::format(msg::batch_cmd_missing, {_batch_cmd_run.program()}));
+    else if (code != 0)
+        log(i18n::format(msg::batch_cmd_exit, {(long long)code}));
+    else
+        log(msg::batch_cmd_ok.get());
 }
 
 void GuiApp::cancel_batch() {
@@ -5781,6 +5836,7 @@ void GuiApp::draw_batch() {
         ui::TextColoredWrappedRaw(_batch_msg_err ? kErr : kOk, _batch_msg);
 
     draw_batch_issues();
+    draw_batch_command();
     draw_batch_plan();
     ImGui::EndChild();
 
@@ -6218,6 +6274,58 @@ void GuiApp::draw_batch_issues() {
                              {(long long)(i + 1), batch_issue_line(issue)}));
         }
     }
+}
+
+
+// A box that grows with what is in it. A real command is a curl invocation
+// with a JSON body, which nobody writes on one line; the empty state is still
+// one line, because that is what the screen looks like for everyone else.
+static ImVec2 batch_cmd_box_size(const std::string& text, float room) {
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float least = px(560.0f);
+    float widest = 0.0f;
+    int lines = 0;
+    for (size_t at = 0; at <= text.size();) {
+        const size_t nl = text.find('\n', at);
+        const std::string line =
+            text.substr(at, nl == std::string::npos ? nl : nl - at);
+        widest = std::max(widest, ImGui::CalcTextSize(line.c_str()).x);
+        lines++;
+        if (nl == std::string::npos) break;
+        at = nl + 1;
+    }
+    return ImVec2(std::clamp(widest + st.FramePadding.x * 4.0f, least,
+                             std::max(least, room)),
+                  ImGui::GetTextLineHeight() * (float)std::clamp(lines, 1, 12) +
+                      st.FramePadding.y * 2.0f);
+}
+
+// The command a finished queue runs. What {message} means is on the screen
+// rather than behind a hover, because nobody guesses a placeholder.
+void GuiApp::draw_batch_command() {
+    ui::SeparatorText(msg::batch_cmd_title);
+    // Split rather than empty: a field holding only spaces names no program,
+    // and a Test button that does nothing at all is worse than a greyed one.
+    const bool can_test =
+        !split_args(_batch_cmd).empty() && !_batch_cmd_run.busy();
+    const float button_w =
+        ImGui::CalcTextSize(msg::batch_cmd_test.get()).x +
+        ImGui::GetStyle().FramePadding.x * 2.0f;
+    const float room = ImGui::GetContentRegionAvail().x - button_w -
+                       ImGui::GetStyle().ItemSpacing.x - px(8.0f);
+    // The content is a command line: English wherever the interface is.
+    ui::InputTextMultilineRaw("##batchcmd", &_batch_cmd,
+                              batch_cmd_box_size(_batch_cmd, room));
+    if (ImGui::IsItemDeactivatedAfterEdit()) save_settings();
+    if (_batch_cmd.empty())
+        ui::hint_over_last_item_raw("python notify_me.py --message \"{message}\"");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!can_test);
+    if (ui::Button(msg::batch_cmd_test))
+        run_batch_command(msg::batch_cmd_test_message.get());
+    ui::help_on_hover_disabled(msg::batch_cmd_test_help);
+    ImGui::EndDisabled();
+    ui::TextDisabledWrapped(msg::batch_cmd_help);
 }
 
 
