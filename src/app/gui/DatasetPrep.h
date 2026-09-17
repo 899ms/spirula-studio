@@ -111,6 +111,10 @@ struct PrepInput {
     // Which rig this input's lenses belong to (kRig*). A multi-lens video
     // starts on its own; folders sharing a letter form one rig by file name.
     int rig = kRigNone;
+    // Kept frames per second for THIS video; 0 takes the job's. A capture shot
+    // as several clips is rarely shot at one pace, and a clip walked through
+    // slowly wants fewer frames than the one that ran past the same wall.
+    float fps = 0.0f;
     int video_tracks = 0;            // 0 = not probed yet
     // The camera folders found under this input, when it arrived with more
     // than one. Empty means the lens above describes all of it.
@@ -210,7 +214,12 @@ struct PrepJob {
     // panoramas and pinhole faces in one image tree describes no camera rig.
     app::Pano360Options pano;
 
-    float video_fps = 2.0f;          // kept frames per second
+    // Kept frames per second; PrepInput::fps overrides it per video.
+    float video_fps = 2.0f;
+    // Space them by view change rather than by time (app/FrameMotion.h): the
+    // rate above becomes the average and stays within `adaptive_range` of it.
+    bool  adaptive_fps = false;
+    float adaptive_range = 4.0f;
     int   sharp_window = 3;          // keep the sharpest of N (1 = off)
     // Every track of a multi-lens file keeps the same instants (one sharpness
     // window over all of them), so every frame is a rig frame. Built-in decoder only.
@@ -265,6 +274,11 @@ struct PrepJob {
     bool  force_external_masking = false;
     std::string python_exe = "python3";
 };
+
+// The rate an input is actually extracted at: its own, or the job's.
+inline float input_fps(const PrepJob& job, const PrepInput& in) {
+    return in.fps > 0.0f ? in.fps : job.video_fps;
+}
 
 // Images read where they are instead of gathered into the dataset's own
 // images/ (see DatasetPrep::run). Several inputs reconstruct from ONE image

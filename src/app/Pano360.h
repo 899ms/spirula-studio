@@ -29,7 +29,7 @@ struct Eac360Layout {
 };
 
 // Two equal video tracks whose width is three square faces plus two small
-// strips. Both recording modes answer this: 4096x1344 (5.6K) and 2272x736.
+// strips: 4096x1344 (5.6K), 2272x736 (3K), 5952x1920 (8K).
 bool eac360_detect(int tracks, int width, int height, Eac360Layout& out);
 
 // One column range of a track, and where it lands in the canvas row. Each
@@ -39,6 +39,12 @@ struct Eac360Slice {
     int src_x = 0, dst_x = 0, width = 0;
 };
 std::vector<Eac360Slice> eac360_slices(const Eac360Layout& l);
+
+// A track pixel's viewing direction, unit, in the frame Pano360View::rot maps
+// into. False inside an overlap strip -- the one place the packing stores two
+// answers -- and outside the track.
+bool eac360_direction(const Eac360Layout& l, int row, float x, float y,
+                      float dir[3]);
 
 enum class Pano360Mode { Off, Faces, Equirect };
 

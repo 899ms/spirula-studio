@@ -57,6 +57,8 @@ static void test_dataset_preset() {
     s.sfm.prep.photo_import = gui::PhotoImport::Move;
     s.sfm.prep.flip_found_masks = true;
     s.sfm.prep.video_fps = 5.5f;
+    s.sfm.prep.adaptive_fps = true;
+    s.sfm.prep.adaptive_range = 2.5f;
     s.sfm.prep.sharp_window = 7;
     s.sfm.prep.sync_tracks = false;
     s.sfm.prep.max_frames = 1234;
@@ -167,6 +169,8 @@ static void test_dataset_preset() {
     CHECK(b.sfm.prep.photo_import == s.sfm.prep.photo_import);
     CHECK_EQ(b.sfm.prep.flip_found_masks, s.sfm.prep.flip_found_masks);
     CHECK_EQ(b.sfm.prep.video_fps, s.sfm.prep.video_fps);
+    CHECK_EQ(b.sfm.prep.adaptive_fps, s.sfm.prep.adaptive_fps);
+    CHECK_EQ(b.sfm.prep.adaptive_range, s.sfm.prep.adaptive_range);
     CHECK_EQ(b.sfm.prep.sharp_window, s.sfm.prep.sharp_window);
     CHECK_EQ(b.sfm.prep.sync_tracks, s.sfm.prep.sync_tracks);
     CHECK_EQ(b.sfm.prep.max_frames, s.sfm.prep.max_frames);
@@ -323,6 +327,7 @@ static void test_sanitize() {
     s.sfm.features = 0;
     s.sfm.matcher = 1;          // LightGlue without a learned frontend
     s.sfm.prep.sharp_window = -3;
+    s.sfm.prep.adaptive_range = 0.1f;
     s.mask.threshold = 4.0f;
     s.colmap.matcher = 0;
     s.colmap.camera_model = "NONSENSE";
@@ -331,6 +336,7 @@ static void test_sanitize() {
     CHECK_EQ(s.sfm.camera_model, std::string("opencv"));
     CHECK_EQ(s.sfm.matcher, 0);
     CHECK(s.sfm.prep.sharp_window >= 1);
+    CHECK(s.sfm.prep.adaptive_range >= 1.0f);
     CHECK(s.mask.threshold <= 1.0f);
     CHECK(s.colmap.matcher >= 1);
     CHECK_EQ(s.colmap.camera_model, std::string("OPENCV"));

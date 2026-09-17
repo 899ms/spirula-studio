@@ -2520,42 +2520,202 @@ SS_MSG(frames_per_second,
 
 SS_MSG(frames_per_second_help,
     EN("How many frames to keep per second of video. 1-3 is right for a slow "
-       "walkthrough; more only helps if the camera moved fast. Applies to "
-       "every video in the list."),
+       "walkthrough; more only helps if the camera moved fast. A video with a "
+       "rate of its own uses that instead."),
     JA("動画1秒あたり何フレーム残すかです。ゆっくり歩いて撮ったなら 1〜3 が"
-       "適切で、それ以上が効くのはカメラが速く動いたときだけです。リスト内の"
-       "すべての動画に適用されます。"),
+       "適切で、それ以上が効くのはカメラが速く動いたときだけです。個別の値を"
+       "入れた動画はそちらに従います。"),
     ZH_HANS("每秒视频保留多少帧。慢慢走着拍的话 1-3 就合适；更高只有在相机移动"
-            "很快时才有用。对列表中的所有视频都生效。"),
+            "很快时才有用。单独设了帧率的视频按各自的来。"),
     ZH_HANT("每秒影片保留多少影格。慢慢走著拍的話 1-3 就合適；更高只有在相機移動"
-            "很快時才有用。對清單中的所有影片都生效。"),
+            "很快時才有用。單獨設了影格率的影片按各自的來。"),
     KO("동영상 1초당 몇 프레임을 남길지입니다. 천천히 걸으며 찍었다면 1~3이 "
        "알맞고, 그보다 높이는 건 카메라가 빠르게 움직였을 때만 도움이 됩니다. "
-       "목록의 모든 동영상에 적용됩니다."),
+       "자체 값이 있는 동영상은 그 값을 씁니다."),
     DE("Wie viele Bilder je Sekunde Video behalten werden. 1-3 passt für "
        "einen langsamen Rundgang; mehr hilft nur, wenn die Kamera schnell "
-       "bewegt wurde. Gilt für jedes Video in der Liste."),
+       "bewegt wurde. Ein Video mit eigener Rate nimmt seine eigene."),
     FR("Combien d'images conserver par seconde de vidéo. 1 à 3 convient à une "
        "déambulation lente ; davantage n'aide que si la caméra bougeait vite. "
-       "S'applique à toutes les vidéos de la liste."),
+       "Une vidéo ayant son propre débit garde le sien."),
     ES("Cuántos fotogramas conservar por segundo de vídeo. De 1 a 3 va bien "
        "para un recorrido lento; más solo ayuda si la cámara se movía rápido. "
-       "Se aplica a todos los vídeos de la lista."),
+       "Un vídeo con su propia tasa usa la suya."),
     PT("Quantos quadros manter por segundo de vídeo. De 1 a 3 serve para um "
-       "percurso lento; mais só ajuda se a câmera se moveu rápido. Vale para "
-       "todos os vídeos da lista."),
+       "percurso lento; mais só ajuda se a câmera se moveu rápido. Um vídeo "
+       "com taxa própria usa a dele."),
     IT("Quanti fotogrammi tenere per ogni secondo di video. Da 1 a 3 va bene "
        "per una camminata lenta; di più serve solo se la fotocamera si "
-       "muoveva in fretta. Vale per tutti i video dell'elenco."),
+       "muoveva in fretta. Un video con una frequenza propria usa la sua."),
     NL("Hoeveel beelden per seconde video bewaard blijven. 1-3 past bij een "
-       "rustige rondgang; meer helpt alleen als de camera snel bewoog. Geldt "
-       "voor elke video in de lijst."),
+       "rustige rondgang; meer helpt alleen als de camera snel bewoog. Een "
+       "video met een eigen tempo houdt dat van zichzelf."),
     RU("Сколько кадров оставлять на секунду видео. 1-3 подходит для "
        "неторопливого обхода; больше помогает, только если камера двигалась "
-       "быстро. Применяется ко всем видео в списке."),
+       "быстро. Видео со своей частотой берёт свою."),
     TR("Videonun her saniyesinden kaç karenin tutulacağı. Yavaş bir gezinti "
        "için 1-3 uygundur; daha fazlası yalnızca kamera hızlı hareket ettiyse "
-       "işe yarar. Listedeki bütün videolara uygulanır."));
+       "işe yarar. Kendi hızı olan video kendininkini kullanır."));
+
+SS_MSG(frames_per_second_help_adaptive,
+    EN("The AVERAGE number of frames to keep per second of video; where they "
+       "fall is decided by how much the view changes. A video with a rate of "
+       "its own uses that instead."),
+    JA("動画1秒あたり平均で何フレーム残すかです。どこで残すかは見えの変化量が"
+       "決めます。個別の値を入れた動画はそちらに従います。"),
+    ZH_HANS("每秒视频平均保留多少帧；具体取在哪里由画面变化量决定。单独设了帧率"
+            "的视频按各自的来。"),
+    ZH_HANT("每秒影片平均保留多少影格；具體取在哪裡由畫面變化量決定。單獨設了影格率"
+            "的影片按各自的來。"),
+    KO("동영상 1초당 평균 몇 프레임을 남길지입니다. 어디서 남길지는 시야가 바뀐 "
+       "정도가 정합니다. 자체 값이 있는 동영상은 그 값을 씁니다."),
+    DE("Wie viele Bilder je Sekunde Video im DURCHSCHNITT behalten werden; wo "
+       "sie liegen, entscheidet die Änderung des Blicks. Ein Video mit eigener "
+       "Rate nimmt seine eigene."),
+    FR("Le nombre MOYEN d'images conservées par seconde de vidéo ; leur "
+       "emplacement suit le changement de vue. Une vidéo ayant son propre "
+       "débit garde le sien."),
+    ES("El número MEDIO de fotogramas conservados por segundo de vídeo; dónde "
+       "caen lo decide cuánto cambia la vista. Un vídeo con su propia tasa usa "
+       "la suya."),
+    PT("O número MÉDIO de quadros guardados por segundo de vídeo; onde caem "
+       "depende de quanto a vista muda. Um vídeo com taxa própria usa o dele."),
+    IT("Il numero MEDIO di fotogrammi tenuti per secondo di video; dove "
+       "cadono lo decide quanto cambia la vista. Un video con una frequenza "
+       "propria usa la sua."),
+    NL("Het GEMIDDELDE aantal beelden per seconde video; waar ze vallen "
+       "bepaalt hoeveel het beeld verandert. Een video met een eigen tempo "
+       "houdt dat van zichzelf."),
+    RU("СРЕДНЕЕ число кадров, оставляемых на секунду видео; где именно они "
+       "придутся, решает изменение вида. Видео со своей частотой берёт свою."),
+    TR("Videonun her saniyesinden ORTALAMA kaç kare tutulacağı; nereye "
+       "düşecekleri görüntünün ne kadar değiştiğine bağlıdır. Kendi hızı olan "
+       "video kendininkini kullanır."));
+
+SS_MSG(video_fps_this_one_help,
+    EN("Frames per second for this video alone. Set it back to the rate above "
+       "to follow that one again."),
+    JA("この動画だけの毎秒フレーム数です。上と同じ値に戻すと、また上に従います。"),
+    ZH_HANS("仅用于这个视频的每秒帧数。改回上面的值就重新跟随上面的设置。"),
+    ZH_HANT("僅用於這個影片的每秒影格數。改回上面的值就重新跟隨上面的設定。"),
+    KO("이 동영상에만 적용되는 초당 프레임 수입니다. 위의 값으로 되돌리면 다시 "
+       "위를 따릅니다."),
+    DE("Bilder je Sekunde nur für dieses Video. Auf die Rate oben zurückgesetzt "
+       "folgt es wieder jener."),
+    FR("Images par seconde pour cette vidéo seule. Remettez le débit ci-dessus "
+       "pour qu'elle le suive à nouveau."),
+    ES("Fotogramas por segundo solo para este vídeo. Vuelve a poner la tasa de "
+       "arriba para que la siga otra vez."),
+    PT("Quadros por segundo só para este vídeo. Reponha a taxa acima para que "
+       "volte a segui-la."),
+    IT("Fotogrammi al secondo solo per questo video. Rimetti la frequenza "
+       "qui sopra perché la segua di nuovo."),
+    NL("Beelden per seconde alleen voor deze video. Zet het terug op het tempo "
+       "hierboven om dat weer te volgen."),
+    RU("Кадров в секунду только для этого видео. Верните значение сверху, "
+       "чтобы снова следовать ему."),
+    TR("Yalnızca bu video için saniyedeki kare sayısı. Yukarıdaki hıza geri "
+       "ayarlayınca yine onu izler."));
+
+SS_MSG(adaptive_fps,
+    EN("Adapt the rate to the motion"),
+    JA("動きに合わせてレートを変える"),
+    ZH_HANS("按运动调整帧率"),
+    ZH_HANT("依運動調整影格率"),
+    KO("움직임에 맞춰 속도 조절"),
+    DE("Rate an die Bewegung anpassen"),
+    FR("Adapter le débit au mouvement"),
+    ES("Adaptar la tasa al movimiento"),
+    PT("Adaptar a taxa ao movimento"),
+    IT("Adatta la frequenza al movimento"),
+    NL("Tempo aanpassen aan de beweging"),
+    RU("Подстраивать частоту под движение"),
+    TR("Hızı harekete göre ayarla"));
+
+SS_MSG(adaptive_fps_help,
+    EN("Keep more frames where the camera moves fast or passes close to "
+       "something, fewer where it only turns on the spot or looks at distant "
+       "scenery. The rate above becomes the average. Costs one extra pass "
+       "over each video."),
+    JA("カメラが速く動いたときや近くの物のそばを通ったときは多めに、その場で"
+       "向きを変えただけのときや遠景を見ているときは少なめに残します。上の"
+       "レートは平均値になります。動画ごとに1回分の解析が余計にかかります。"),
+    ZH_HANS("相机移动快或贴近物体时多留几帧，原地转动或只看远景时少留。上面的帧率"
+            "变成平均值。每个视频要多跑一遍分析。"),
+    ZH_HANT("相機移動快或貼近物體時多留幾格，原地轉動或只看遠景時少留。上面的影格率"
+            "變成平均值。每個影片要多跑一遍分析。"),
+    KO("카메라가 빠르게 움직이거나 가까운 물체를 지날 때는 더 많이, 제자리에서 "
+       "돌거나 먼 풍경만 볼 때는 더 적게 남깁니다. 위의 속도는 평균이 됩니다. "
+       "동영상마다 분석 패스가 한 번 더 듭니다."),
+    DE("Mehr Bilder behalten, wo die Kamera schnell fährt oder dicht an etwas "
+       "vorbeikommt, weniger, wo sie sich nur dreht oder in die Ferne sieht. "
+       "Die Rate oben wird der Durchschnitt. Kostet einen zusätzlichen "
+       "Durchlauf je Video."),
+    FR("Conserver davantage d'images là où la caméra va vite ou frôle un "
+       "objet, moins là où elle pivote sur place ou regarde au loin. Le débit "
+       "ci-dessus devient la moyenne. Coûte une passe supplémentaire par "
+       "vidéo."),
+    ES("Conservar más fotogramas donde la cámara va rápido o pasa cerca de "
+       "algo, y menos donde solo gira sobre sí misma o mira a lo lejos. La "
+       "tasa de arriba pasa a ser el promedio. Cuesta una pasada más por "
+       "vídeo."),
+    PT("Guardar mais quadros onde a câmera anda depressa ou passa perto de "
+       "algo, e menos onde apenas gira no lugar ou olha ao longe. A taxa "
+       "acima passa a ser a média. Custa uma passagem extra por vídeo."),
+    IT("Tenere più fotogrammi dove la camera va veloce o sfiora qualcosa, "
+       "meno dove ruota sul posto o guarda lontano. La frequenza qui sopra "
+       "diventa la media. Costa un passaggio in più per video."),
+    NL("Meer beelden bewaren waar de camera snel gaat of vlak langs iets "
+       "komt, minder waar hij alleen draait of in de verte kijkt. Het tempo "
+       "hierboven wordt het gemiddelde. Kost één extra doorloop per video."),
+    RU("Оставлять больше кадров там, где камера идёт быстро или проходит "
+       "близко к предмету, и меньше там, где она лишь поворачивается на месте "
+       "или смотрит вдаль. Частота сверху становится средней. Стоит одного "
+       "дополнительного прохода на каждое видео."),
+    TR("Kamera hızlı giderken ya da bir şeyin yakınından geçerken daha çok, "
+       "yerinde dönerken ya da uzağa bakarken daha az kare tut. Yukarıdaki "
+       "hız ortalama olur. Her video için bir ek geçişe mal olur."));
+
+SS_MSG(adaptive_range,
+    EN("Spread"),
+    JA("振れ幅"),
+    ZH_HANS("浮动范围"),
+    ZH_HANT("浮動範圍"),
+    KO("변동 폭"),
+    DE("Spanne"),
+    FR("Amplitude"),
+    ES("Margen"),
+    PT("Margem"),
+    IT("Escursione"),
+    NL("Spreiding"),
+    RU("Разброс"),
+    TR("Aralık"));
+
+SS_MSG(adaptive_range_help,
+    EN("How far the rate may stray from the average, either way. 4 lets it "
+       "run between a quarter of it and four times it."),
+    JA("レートが平均からどこまで離れてよいかです。4 なら平均の 1/4 から 4 倍まで"
+       "振れます。"),
+    ZH_HANS("帧率相对平均值的上下浮动倍数。设为 4 表示可在平均值的 1/4 到 4 倍之间。"),
+    ZH_HANT("影格率相對平均值的上下浮動倍數。設為 4 表示可在平均值的 1/4 到 4 倍之間。"),
+    KO("속도가 평균에서 얼마나 벗어날 수 있는지입니다. 4면 평균의 1/4에서 4배 "
+       "사이를 오갑니다."),
+    DE("Wie weit die Rate nach beiden Seiten vom Durchschnitt abweichen darf. "
+       "Bei 4 reicht sie von einem Viertel bis zum Vierfachen."),
+    FR("De combien le débit peut s'écarter de la moyenne, dans les deux sens. "
+       "4 le laisse aller du quart au quadruple."),
+    ES("Cuánto puede alejarse la tasa del promedio, en ambos sentidos. Con 4 "
+       "va de la cuarta parte al cuádruple."),
+    PT("Quanto a taxa pode afastar-se da média, nos dois sentidos. Com 4 vai "
+       "de um quarto ao quádruplo."),
+    IT("Di quanto la frequenza può scostarsi dalla media, in entrambi i sensi. "
+       "Con 4 va da un quarto al quadruplo."),
+    NL("Hoever het tempo van het gemiddelde mag afwijken, beide kanten op. "
+       "Bij 4 loopt het van een kwart tot vier keer."),
+    RU("Насколько частота может отходить от средней в обе стороны. При 4 она "
+       "идёт от четверти до четырёхкратной."),
+    TR("Hızın ortalamadan iki yöne de ne kadar sapabileceği. 4 olunca dörtte "
+       "birinden dört katına kadar gider."));
 
 SS_MSG(pano360_output,
     EN("Unwrap into (360 video)"),

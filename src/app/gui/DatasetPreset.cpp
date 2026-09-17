@@ -23,6 +23,8 @@ namespace {
     X("use_found_masks",            use_found_masks)                          \
     X("flip_found_masks",           sfm.prep.flip_found_masks)                \
     X("video_fps",                  sfm.prep.video_fps)                       \
+    X("adaptive_fps",               sfm.prep.adaptive_fps)                    \
+    X("adaptive_range",             sfm.prep.adaptive_range)                  \
     X("sharp_window",               sfm.prep.sharp_window)                    \
     X("sync_tracks",                sfm.prep.sync_tracks)                     \
     X("max_frames",                 sfm.prep.max_frames)                      \
@@ -197,6 +199,7 @@ void sanitize_dataset_settings(DatasetSettings& s) {
     clamp_enum(p.pano.mode, 0, (int)app::Pano360Mode::Equirect);
     clamp_to(p.pano.size, 0, 16384);
     p.video_fps = std::clamp(p.video_fps, 0.0f, 240.0f);
+    p.adaptive_range = std::clamp(p.adaptive_range, 1.0f, 64.0f);
     clamp_to(p.sharp_window, 1, 1000);
     clamp_to(p.max_frames, 1, 1000000);
     clamp_to(p.mask_detect_every, 1, 1000);

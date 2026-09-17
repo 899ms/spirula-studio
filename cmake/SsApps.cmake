@@ -65,6 +65,7 @@ set(SS_TOOL_LIBS "")
 list(APPEND SS_TOOL_SOURCES
      ${SS_SRC}/app/FrameMask.cpp
      ${SS_SRC}/app/FrameLook.cpp
+     ${SS_SRC}/app/FrameMotion.cpp
      ${SS_SRC}/app/Pano360.cpp
      ${SS_SRC}/app/AppPaths.cpp
      ${SS_SRC}/app/CrashLog.cpp)
@@ -309,7 +310,8 @@ if(SS_SEPARATE_TOOLS)
     endif()
     if(SS_BUILD_SAM)
         set(_sam_src ${SS_SRC}/app/cli/sam_main.cpp ${SS_SRC}/app/FrameMask.cpp
-                     ${SS_SRC}/app/FrameLook.cpp ${SS_SRC}/app/Pano360.cpp)
+                     ${SS_SRC}/app/FrameLook.cpp ${SS_SRC}/app/FrameMotion.cpp
+                     ${SS_SRC}/app/Pano360.cpp)
         set(_sam_lib ss_sam)
         if(SS_ENABLE_PATENTED)
             list(APPEND _sam_src ${SS_SRC}/app/cli/sam_extract.cpp
@@ -331,6 +333,13 @@ foreach(test_src ${SS_CORE_TESTS})
     add_executable(${test_name} ${test_src})
     ss_configure_app(${test_name})
 endforeach()
+
+# The frame plan: no device, no GUI, and a wrong answer is silent.
+add_executable(frame_motion_test
+    ${SS_SRC}/app/tests/frame_motion_test.cpp
+    ${SS_SRC}/app/FrameMotion.cpp
+    ${SS_SRC}/app/Pano360.cpp)
+ss_configure_app(frame_motion_test)
 
 # The GUI files with no GUI in them: the stamp that decides whether a finished
 # reconstruction is kept or built again, and the preset serializers. Named

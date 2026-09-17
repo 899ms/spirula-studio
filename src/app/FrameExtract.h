@@ -46,6 +46,11 @@ struct FrameExtractJob : FrameLook {
     // instants (one sharpness window over all of them), so the frames of one
     // stem are a rig. Off picks each track's sharpest frame on its own.
     bool  sync_tracks = false;
+    // Space the kept frames by view change instead of by time
+    // (app/FrameMotion.h): `skip` then sets the average and the rate stays
+    // within `adaptive_range` of it. Costs one extra pass over the first track.
+    bool  adaptive = false;
+    float adaptive_range = 4.0f;
 
     // Masking. Empty model = no masks.
     sam::MaskOptions mask;
@@ -55,7 +60,8 @@ struct FrameExtractJob : FrameLook {
 struct FrameExtractStats {
     double decode = 0, sharpness = 0, convert = 0, mask = 0, submit = 0;
     double drain = 0, total = 0, encode_cpu = 0;
-    int64_t decoded = 0, measured = 0, written = 0;
+    double plan = 0;                 // the adaptive pass, decode included
+    int64_t decoded = 0, measured = 0, written = 0, analyzed = 0;
     int    tracks = 1;
     int    encoder_threads = 0;
     int    write_failures = 0;

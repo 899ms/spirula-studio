@@ -520,6 +520,12 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("force_external_decode", cfg_str(j.prep.force_external_decode));
     line("force_external_masking", cfg_str(j.prep.force_external_masking));
     line("video_fps", cfg_str(j.prep.video_fps));
+    line("adaptive_fps", cfg_str(j.prep.adaptive_fps));
+    if (j.prep.adaptive_fps) line("adaptive_range", cfg_str(j.prep.adaptive_range));
+    for (const PrepInput& s : _sources)
+        if (s.is_video && s.fps > 0.0f)
+            line("video_fps:" + (s.subdir.empty() ? s.path : s.subdir),
+                 cfg_str(s.fps));
     line("sharp_window", std::to_string(j.prep.sharp_window));
     line("sync_tracks", cfg_str(j.prep.sync_tracks));
     line("max_frames", std::to_string(j.prep.max_frames));
@@ -2690,6 +2696,8 @@ void GuiApp::sync_dataset_jobs() {
     prep.workspace = _workspace;
     prep.resume = _resume;
     prep.video_fps = _sfm_job.prep.video_fps;
+    prep.adaptive_fps = _sfm_job.prep.adaptive_fps;
+    prep.adaptive_range = _sfm_job.prep.adaptive_range;
     prep.sharp_window = _sfm_job.prep.sharp_window;
     prep.pano = _sfm_job.prep.pano;
     prep.max_frames = _sfm_job.prep.max_frames;
@@ -2721,6 +2729,8 @@ void GuiApp::sync_dataset_jobs() {
     _colmap_job.workspace = prep.workspace;
     _colmap_job.resume = prep.resume;
     _colmap_job.video_fps = prep.video_fps;
+    _colmap_job.adaptive_fps = prep.adaptive_fps;
+    _colmap_job.adaptive_range = prep.adaptive_range;
     _colmap_job.sharp_window = prep.sharp_window;
     _colmap_job.pano = prep.pano;
     _colmap_job.max_frames = prep.max_frames;
@@ -2906,12 +2916,17 @@ void GuiApp::draw_dataset_source() {
     // its own folder of frames under images/, and so its own camera.
     int remove = -1;
     bool edited = false;
+    // Several clips are rarely shot at one pace, so each gets its own rate
+    // once there is another one to differ from.
+    int n_video = 0;
+    for (const PrepInput& s : _sources) n_video += s.is_video ? 1 : 0;
+    const bool per_video_fps = n_video > 1;
     for (size_t i = 0; i < _sources.size(); i++) {
         PrepInput& s = _sources[i];
         ImGui::PushID((int)i);
         // Room for Browse + Remove + where the frames go + what sensors it
         // carries, which is longer than any other row on the screen.
-        ImGui::SetNextItemWidth(px(-500.0f));
+        ImGui::SetNextItemWidth(px(per_video_fps ? -580.0f : -500.0f));
         if (ui::InputTextRaw("##in", &s.path)) {
             std::error_code ec;
             s.is_video = !fs::is_directory(s.path, ec) && is_video_path(s.path);
@@ -2937,6 +2952,24 @@ void GuiApp::draw_dataset_source() {
         }
         ImGui::SameLine();
         if (ui::Button(dmsg::remove)) remove = (int)i;
+        if (per_video_fps) {
+            ImGui::SameLine();
+            if (s.is_video) {
+                ImGui::BeginDisabled(dataset_locked(Stage::Frames));
+                ImGui::SetNextItemWidth(px(74.0f));
+                float shown = input_fps(_sfm_job.prep, s);
+                // Typing the dataset-wide rate back in is how a row goes back
+                // to following it, which is what an empty override means.
+                if (ui::InputFloatRaw("##fps", &shown, "%.3g fps")) {
+                    if (shown <= 0.0f) shown = _sfm_job.prep.video_fps;
+                    s.fps = shown == _sfm_job.prep.video_fps ? 0.0f : shown;
+                }
+                ui::help_on_hover(dmsg::video_fps_this_one_help);
+                ImGui::EndDisabled();
+            } else {
+                ImGui::Dummy(ImVec2(px(74.0f), 0.0f));
+            }
+        }
         ImGui::SameLine();
         // What this input is, and -- the part worth seeing before pressing the
         // button -- whether masks were found for it. Four whole messages
@@ -3245,7 +3278,19 @@ void GuiApp::draw_dataset_basics() {
         ImGui::SetNextItemWidth(px(220.0f));
         ui::InputFloat(dmsg::frames_per_second, &_sfm_job.prep.video_fps,
                        0, 0, "%.2g");
-        ui::help_on_hover(dmsg::frames_per_second_help);
+        ui::help_on_hover(_sfm_job.prep.adaptive_fps
+                              ? dmsg::frames_per_second_help_adaptive
+                              : dmsg::frames_per_second_help);
+        ui::Checkbox(dmsg::adaptive_fps, &_sfm_job.prep.adaptive_fps);
+        ui::help_on_hover(dmsg::adaptive_fps_help);
+        if (_sfm_job.prep.adaptive_fps) {
+            ImGui::Indent();
+            ImGui::SetNextItemWidth(px(220.0f));
+            ui::SliderFloat(dmsg::adaptive_range, &_sfm_job.prep.adaptive_range,
+                            1.0f, 16.0f, "%.1f");
+            ui::help_on_hover(dmsg::adaptive_range_help);
+            ImGui::Unindent();
+        }
         ImGui::SetNextItemWidth(px(220.0f));
         ui::SliderInt(dmsg::sharpness_window, &_sfm_job.prep.sharp_window, 1, 8);
         ui::help_on_hover(dmsg::sharpness_window_help);

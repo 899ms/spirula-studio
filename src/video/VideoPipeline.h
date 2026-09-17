@@ -70,6 +70,12 @@ public:
     void  flushSharpness();
     float sharpness(const FrameHandle& h) const;
 
+    // A box-filtered grey copy of the frame at `w` x `h`, on the host. What
+    // motion analysis reads: the GPU does the reduction, so a frame costs a
+    // dispatch and a few tens of kilobytes over the bus rather than a download.
+    bool toGray(const FrameHandle& h, int w, int h_out, std::vector<uint8_t>& out,
+                std::string& error);
+
     // Converts to host RGB. Blocks until the frame is ready.
     bool toImage(const FrameHandle& h, const ConvertOpts& opts, nn::Image& out,
                  std::string& error);

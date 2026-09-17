@@ -246,12 +246,16 @@ void ColmapRunner::take_reconstruction(ColmapJob& job) {
     const std::string workspace = job.workspace;
     const bool resume = job.resume;
     const float fps = job.video_fps;
+    const bool adaptive = job.adaptive_fps;
+    const float range = job.adaptive_range;
     const int sharp = job.sharp_window, maxf = job.max_frames;
     job = _live;
     job.inputs = inputs;
     job.workspace = workspace;
     job.resume = resume;
     job.video_fps = fps;
+    job.adaptive_fps = adaptive;
+    job.adaptive_range = range;
     job.sharp_window = sharp;
     job.max_frames = maxf;
 }
@@ -504,6 +508,8 @@ void ColmapRunner::run(ColmapJob job) {
             pj.redo_masks = job.redo_masks;
             pj.photo_import = job.photo_import;
             pj.video_fps = job.video_fps;
+            pj.adaptive_fps = job.adaptive_fps;
+            pj.adaptive_range = job.adaptive_range;
             pj.sharp_window = job.sharp_window;
             pj.pano = job.pano;
             pj.max_frames = job.max_frames;

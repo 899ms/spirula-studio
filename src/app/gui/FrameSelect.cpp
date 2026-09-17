@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -21,33 +22,19 @@ namespace gui {
 
 namespace {
 
-// Sharpness metric, matching extract_frames.py add_frame(): resize to
-// 512x512 (area average), grayscale, subtract mean, variance of the 3x3
-// Laplacian. Returns -1 on decode failure.
-double sharpness_score(const std::string& path) {
-    int W = 0, H = 0, C = 0;
-    std::vector<uint8_t> exr_rgb;
-    unsigned char* img = nullptr;
-    if (exr::is_exr(path)) {
-        exr::Info info;
-        if (!exr::decode_srgb8(path, exr::Options(), info, exr_rgb).empty()) return -1.0;
-        W = info.width;
-        H = info.height;
-        img = exr_rgb.data();
-    } else {
-        img = stbi_load(path.c_str(), &W, &H, &C, 3);
-        if (!img) return -1.0;
-    }
+// Candidates loaded ahead of the motion tracker, which has to walk them in
+// order. 64 grey frames is a few tens of megabytes whatever the source is.
+constexpr size_t kChunk = 64;
 
-    constexpr int S = 512;
-    std::vector<float> gray((size_t)S * S);
-    double mean = 0.0;
-    for (int y = 0; y < S; y++) {
-        // Box-average the source rows/cols covered by this output cell.
-        int y0 = (int)((int64_t)y * H / S), y1 = (int)((int64_t)(y + 1) * H / S);
+// Box-average an interleaved RGB image into a grey rectangle. `rows` is how
+// much of the source to read, so an EAC canvas can be measured on its top row.
+void box_grey(const unsigned char* img, int W, int rows, int ow, int oh,
+              float* out) {
+    for (int y = 0; y < oh; y++) {
+        int y0 = (int)((int64_t)y * rows / oh), y1 = (int)((int64_t)(y + 1) * rows / oh);
         if (y1 <= y0) y1 = y0 + 1;
-        for (int x = 0; x < S; x++) {
-            int x0 = (int)((int64_t)x * W / S), x1 = (int)((int64_t)(x + 1) * W / S);
+        for (int x = 0; x < ow; x++) {
+            int x0 = (int)((int64_t)x * W / ow), x1 = (int)((int64_t)(x + 1) * W / ow);
             if (x1 <= x0) x1 = x0 + 1;
             double acc = 0.0;
             for (int yy = y0; yy < y1; yy++)
@@ -56,28 +43,68 @@ double sharpness_score(const std::string& path) {
                     // BT.601 luma like cv2.cvtColor BGR2GRAY (RGB order here).
                     acc += 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
                 }
-            float v = (float)(acc / ((y1 - y0) * (x1 - x0)));
-            gray[(size_t)y * S + x] = v;
-            mean += v;
+            out[(size_t)y * ow + x] = (float)(acc / ((y1 - y0) * (x1 - x0)));
         }
     }
-    if (exr_rgb.empty()) stbi_image_free(img);
-    mean /= (double)S * S;
-    for (auto& v : gray) v -= (float)mean;
+}
 
-    // Variance of the 3x3 Laplacian (cv2.Laplacian default kernel).
+// Sharpness, matching extract_frames.py add_frame(): 512x512 grey, mean
+// subtracted, variance of the 3x3 Laplacian.
+double laplacian_variance(std::vector<float>& gray, int S) {
+    double mean = 0.0;
+    for (float v : gray) mean += v;
+    mean /= (double)gray.size();
+    for (float& v : gray) v -= (float)mean;
     double sum = 0.0, sum2 = 0.0;
     int64_t n = 0;
     for (int y = 1; y < S - 1; y++)
         for (int x = 1; x < S - 1; x++) {
             const float* r = &gray[(size_t)y * S + x];
-            double lap = (double)r[-S] + r[S] + r[-1] + r[1] - 4.0 * r[0];
+            const double lap = (double)r[-S] + r[S] + r[-1] + r[1] - 4.0 * r[0];
             sum += lap;
             sum2 += lap * lap;
             n++;
         }
-    double mu = sum / n;
+    const double mu = sum / n;
     return sum2 / n - mu * mu;
+}
+
+struct Analysis {
+    double score = -1.0;
+    std::vector<uint8_t> grey;   // empty unless the motion pass wants it
+};
+
+// `mw`/`mh` <= 0 asks for the sharpness only. `top_rows` limits what the grey
+// covers, for an EAC canvas whose bottom row is a different half of the sphere.
+void analyze(const std::string& path, int mw, int mh, bool top_rows,
+             Analysis& out) {
+    int W = 0, H = 0, C = 0;
+    std::vector<uint8_t> exr_rgb;
+    unsigned char* img = nullptr;
+    if (exr::is_exr(path)) {
+        exr::Info info;
+        if (!exr::decode_srgb8(path, exr::Options(), info, exr_rgb).empty()) return;
+        W = info.width;
+        H = info.height;
+        img = exr_rgb.data();
+    } else {
+        img = stbi_load(path.c_str(), &W, &H, &C, 3);
+        if (!img) return;
+    }
+
+    constexpr int S = 512;
+    std::vector<float> gray((size_t)S * S);
+    box_grey(img, W, H, S, S, gray.data());
+    out.score = laplacian_variance(gray, S);
+
+    if (mw > 0 && mh > 0) {
+        std::vector<float> f((size_t)mw * mh);
+        box_grey(img, W, top_rows ? H / 2 : H, mw, mh, f.data());
+        out.grey.resize(f.size());
+        for (size_t i = 0; i < f.size(); i++)
+            out.grey[i] = (uint8_t)std::min(255.0f, std::max(0.0f, f[i] + 0.5f));
+    }
+    if (exr_rgb.empty()) stbi_image_free(img);
 }
 
 }  // namespace
@@ -85,7 +112,7 @@ double sharpness_score(const std::string& path) {
 int select_sharpest_frames(const std::string& cand_dir,
                            const std::string& out_dir,
                            const std::string& prefix,
-                           int group, int max_frames,
+                           const FrameSelectOptions& options,
                            const std::function<void(const std::string&)>& log,
                            const std::atomic<bool>& cancel) {
     std::error_code ec;
@@ -95,49 +122,113 @@ int select_sharpest_frames(const std::string& cand_dir,
     std::sort(files.begin(), files.end());
     if (files.empty()) return -1;
 
-    group = std::max(group, 1);
-    if (max_frames > 0)
-        group = std::max<int>(group, (int)((files.size() + max_frames - 1) / max_frames));
+    int group = std::max(options.group, 1);
+    if (!options.adaptive && options.max_frames > 0)
+        group = std::max<int>(
+            group, (int)((files.size() + options.max_frames - 1) / options.max_frames));
 
-    // Score all candidates in parallel.
-    std::vector<double> scores(files.size(), -1.0);
-    if (group > 1) {
-        unsigned n_threads = std::max(1u, std::thread::hardware_concurrency());
-        std::atomic<size_t> next{0};
-        std::atomic<size_t> done{0};
-        std::vector<std::thread> pool;
-        for (unsigned t = 0; t < n_threads; t++)
-            pool.emplace_back([&] {
-                for (;;) {
-                    size_t i = next.fetch_add(1);
-                    if (i >= files.size() || cancel.load()) return;
-                    // A decode that throws would be std::terminate off a
-                    // worker thread. An unscored frame just loses its group.
-                    try {
-                        scores[i] = sharpness_score(files[i].string());
-                    } catch (...) {}
-                    done.fetch_add(1);
-                }
-            });
-        // Progress line roughly once a second.
-        while (done.load() < files.size() && !cancel.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            if (log) log("scored " + std::to_string(done.load()) + "/" +
-                         std::to_string(files.size()) + " candidate frames");
+    // The motion tracker's frames: the EAC top row is three faces wide and one
+    // tall, with no overlap strips left in a canvas ffmpeg already cut.
+    app::MotionOptions mo;
+    std::unique_ptr<app::MotionTracker> tracker;
+    if (options.adaptive) {
+        mo.view = options.view;
+        mo.out_fov = options.out_fov;
+        int src_w = 0, src_h = 0;
+        if (options.eac.valid()) {
+            mo.eac.face = options.eac.face;
+            mo.eac.strip = 0;
+            mo.eac.track_w = 3 * options.eac.face;
+            mo.eac.track_h = options.eac.face;
+            src_w = mo.eac.track_w;
+            src_h = mo.eac.track_h;
+        } else {
+            int w = 0, h = 0, c = 0;
+            if (stbi_info(files[0].string().c_str(), &w, &h, &c)) {
+                src_w = w;
+                src_h = h;
+            }
         }
-        for (auto& th : pool) th.join();
-        if (cancel.load()) return -1;
+        app::motion_frame_size(mo.view, src_w, src_h, mo.width, mo.height);
+        if (mo.width > 0) tracker = std::make_unique<app::MotionTracker>(mo);
     }
 
-    // Keep the sharpest per group; move to out_dir, delete the rest.
+    // Score, and measure, in chunks: the tracker has to see the frames in
+    // order, and everything before it parallelizes.
+    std::vector<double> scores(files.size(), -1.0);
+    const bool want_scores = group > 1 || options.adaptive;
+    if (want_scores) {
+        const unsigned n_threads = std::max(1u, std::thread::hardware_concurrency());
+        auto last_log = std::chrono::steady_clock::now();
+        for (size_t base = 0; base < files.size(); base += kChunk) {
+            if (cancel.load()) return -1;
+            const size_t end = std::min(base + kChunk, files.size());
+            std::vector<Analysis> got(end - base);
+            std::atomic<size_t> next{base};
+            std::vector<std::thread> pool;
+            for (unsigned t = 0; t < n_threads; t++)
+                pool.emplace_back([&] {
+                    for (;;) {
+                        const size_t i = next.fetch_add(1);
+                        if (i >= end || cancel.load()) return;
+                        // A decode that throws would be std::terminate off a
+                        // worker thread. An unscored frame loses its group.
+                        try {
+                            analyze(files[i].string(), tracker ? mo.width : 0,
+                                    tracker ? mo.height : 0, options.eac.valid(),
+                                    got[i - base]);
+                        } catch (...) {}
+                    }
+                });
+            for (auto& th : pool) th.join();
+            if (cancel.load()) return -1;
+            for (size_t i = base; i < end; i++) {
+                scores[i] = got[i - base].score;
+                if (tracker && !got[i - base].grey.empty())
+                    tracker->track(got[i - base].grey.data(), (int64_t)i);
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (log && (end == files.size() ||
+                        now - last_log > std::chrono::seconds(1))) {
+                last_log = now;
+                log("scored " + std::to_string(end) + "/" +
+                    std::to_string(files.size()) + " candidate frames");
+            }
+        }
+    }
+
+    // Which candidates survive: one per group, or one per equal share of view
+    // change with the sharpest of the window around it.
+    std::vector<size_t> keep;
+    if (tracker) {
+        tracker->finish();
+        const int window = std::max(options.window, 1);
+        const std::vector<int64_t> plan = app::plan_by_motion(
+            tracker->costs(), tracker->ends(), (int64_t)files.size(), group,
+            window, options.range, options.max_frames);
+        for (int64_t at : plan) {
+            const size_t g1 = (size_t)at + 1;
+            const size_t g0 = g1 > (size_t)window ? g1 - (size_t)window : 0;
+            size_t best = g0;
+            for (size_t i = g0 + 1; i < g1; i++)
+                if (scores[i] > scores[best]) best = i;
+            if (keep.empty() || keep.back() != best) keep.push_back(best);
+        }
+    }
+    if (keep.empty())
+        for (size_t g0 = 0; g0 < files.size(); g0 += (size_t)group) {
+            const size_t g1 = std::min(g0 + (size_t)group, files.size());
+            size_t best = g0;
+            for (size_t i = g0 + 1; i < g1; i++)
+                if (scores[i] > scores[best]) best = i;
+            keep.push_back(best);
+        }
+
     fs::create_directories(out_dir, ec);
+    std::vector<bool> kept_flag(files.size(), false);
     int kept = 0;
-    for (size_t g0 = 0; g0 < files.size(); g0 += group) {
-        size_t g1 = std::min(g0 + (size_t)group, files.size());
-        size_t best = g0;
-        for (size_t i = g0 + 1; i < g1; i++)
-            if (scores[i] > scores[best]) best = i;
-        std::string ext = files[best].extension().string();
+    for (size_t best : keep) {
+        const std::string ext = files[best].extension().string();
         char name[64];
         std::snprintf(name, sizeof name, "%s%05d%s", prefix.c_str(), kept,
                       ext.empty() ? ".jpg" : ext.c_str());
@@ -147,11 +238,12 @@ int select_sharpest_frames(const std::string& cand_dir,
                           fs::copy_options::overwrite_existing, ec);
             fs::remove(files[best], ec);
         }
+        kept_flag[best] = true;
         kept++;
-        for (size_t i = g0; i < g1; i++)
-            if (i != best) fs::remove(files[i], ec);
         if (cancel.load()) return -1;
     }
+    for (size_t i = 0; i < files.size(); i++)
+        if (!kept_flag[i]) fs::remove(files[i], ec);
     return kept;
 }
 

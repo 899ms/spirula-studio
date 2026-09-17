@@ -551,6 +551,21 @@ SS_MSG(using_bundled_masks,
     TR("Fotoğraflarla birlikte gelen maskeler kullanılıyor: {0}"));
 
 // {0} is a whole number of degrees.
+SS_MSG(motion_plan,
+    EN("Motion analysis: {0} frames planned, between {1} and {2} per second."),
+    JA("動き解析: {0} フレームを予定しました（毎秒 {1}〜{2} フレーム）。"),
+    ZH_HANS("运动分析：计划取 {0} 帧，每秒 {1} 到 {2} 帧。"),
+    ZH_HANT("運動分析：計畫取 {0} 影格，每秒 {1} 到 {2} 影格。"),
+    KO("움직임 분석: {0}개 프레임을 계획했습니다(초당 {1}~{2}장)."),
+    DE("Bewegungsanalyse: {0} Einzelbilder geplant, zwischen {1} und {2} pro Sekunde."),
+    FR("Analyse du mouvement : {0} images prévues, entre {1} et {2} par seconde."),
+    ES("Análisis de movimiento: {0} fotogramas previstos, entre {1} y {2} por segundo."),
+    PT("Análise de movimento: {0} quadros previstos, entre {1} e {2} por segundo."),
+    IT("Analisi del movimento: {0} fotogrammi previsti, tra {1} e {2} al secondo."),
+    NL("Bewegingsanalyse: {0} beelden gepland, tussen {1} en {2} per seconde."),
+    RU("Анализ движения: запланировано {0} кадров, от {1} до {2} в секунду."),
+    TR("Hareket incelemesi: {0} kare planlandı, saniyede {1} ile {2} arasında."));
+
 SS_MSG(video_autorotate,
     EN("The capture asks to be turned {0} degrees; the frames are written already turned."),
     JA("この撮影は {0} 度回転して表示するよう指定されています。フレームは回転済みで書き出されます。"),

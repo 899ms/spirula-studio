@@ -479,18 +479,18 @@ private:
     Clock::time_point _start, _last;
 };
 
-// One frame is written every this many source frames, from the run's kept
-// frame rate and what the container says it holds.
-int frame_skip(const PrepJob& job, double src_fps) {
-    return std::max(1, (int)std::lround(src_fps / std::max(job.video_fps, 0.01f)));
+// One frame is written every this many source frames, from the kept frame rate
+// this input asked for and what the container says it holds.
+int frame_skip(float fps, double src_fps) {
+    return std::max(1, (int)std::lround(src_fps / std::max(fps, 0.01f)));
 }
 
 // What a video is expected to yield, for the step's bar. The extraction loop
 // stops on the real end of stream either way.
-int64_t expected_frames(const PrepJob& job, double src_fps, int64_t src_frames,
-                        int tracks) {
+int64_t expected_frames(const PrepJob& job, float fps, double src_fps,
+                        int64_t src_frames, int tracks) {
     int64_t expect = src_frames > 0
-                         ? (src_frames / frame_skip(job, src_fps)) * (int64_t)tracks
+                         ? (src_frames / frame_skip(fps, src_fps)) * (int64_t)tracks
                          : 0;
     if (job.max_frames > 0 &&
         (expect == 0 || expect > (int64_t)job.max_frames * tracks))
@@ -540,9 +540,12 @@ bool ffmpeg_probe_video(const std::string& ffmpeg_exe, const std::string& path,
                             out.duration = hh * 3600.0 + mm * 60.0 + ss;
                     }
                     // "... 1920x1080, 19938 kb/s, 30.01 fps, 30 tbr, ..."
+                    // A cover picture is a video stream to ffmpeg and is not a
+                    // lens; counting it gives a DJI .osv three of them.
                     const size_t f = line.find(" fps");
                     if (f == std::string::npos ||
-                        line.find("Video:") == std::string::npos)
+                        line.find("Video:") == std::string::npos ||
+                        line.find("(attached pic)") != std::string::npos)
                         return;
                     // The frame size off the same line. The 16-pixel floor is
                     // what rejects the fourcc ("0x31637661"), which is also
@@ -989,7 +992,8 @@ int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
         std::string err;
         video::VideoProbe probe;
         if (video::probe_video(in.path, probe, err) && probe.tracks > 0)
-            return expected_frames(job, probe.fps > 1.0 ? probe.fps : 30.0,
+            return expected_frames(job, input_fps(job, in),
+                                   probe.fps > 1.0 ? probe.fps : 30.0,
                                    probe.frame_count,
                                    per_frame > 0 ? per_frame : probe.tracks);
     }
@@ -997,7 +1001,7 @@ int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
     VideoFacts facts;
     if (ffmpeg_probe_video(job.ffmpeg_exe, in.path, facts, _cancel) &&
         facts.fps > 1.0)
-        return expected_frames(job, facts.fps, facts.frames,
+        return expected_frames(job, input_fps(job, in), facts.fps, facts.frames,
                                per_frame > 0 ? per_frame
                                              : (is_dual_fisheye_path(in.path) ? 2 : 1));
     return 0;
@@ -1294,7 +1298,7 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
     const bool ok = in.eac360.valid() && job.pano.mode != app::Pano360Mode::Off
                         ? extract_360_ffmpeg(job, in, images, out, error)
                         : extract_video_ffmpeg(job, in, images, out, error);
-    if (ok) out.captures.push_back({in.subdir, in.path, (double)job.video_fps});
+    if (ok) out.captures.push_back({in.subdir, in.path, (double)input_fps(job, in)});
     return ok;
 }
 
@@ -1328,7 +1332,7 @@ bool DatasetPrep::extract_video_builtin(const PrepJob& job, const PrepInput& in,
 
     const double src_fps = probe.fps > 1.0 ? probe.fps : 30.0;
     const int window = std::max(job.sharp_window, 1);
-    const int skip = frame_skip(job, src_fps);
+    const int skip = frame_skip(input_fps(job, in), src_fps);
 
     app::FrameExtractJob fx;
     fx.input = in.path;
@@ -1337,6 +1341,8 @@ bool DatasetPrep::extract_video_builtin(const PrepJob& job, const PrepInput& in,
     fx.keep = window > 1 ? window : 0;
     fx.max_frames = job.max_frames;
     fx.sync_tracks = job.sync_tracks;
+    fx.adaptive = job.adaptive_fps;
+    fx.adaptive_range = job.adaptive_range;
     fx.auto_rotate = job.auto_rotate;
     fx.quality = 95;
     if (!views.empty()) {
@@ -1391,25 +1397,27 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
     }
     log(fmt(lmsg::video_input, {in.path}), /*detail=*/false);
 
-    // Multi-track videos (Insta360 .insv): one folder per track, one camera
-    // per folder, as in reference/scripts/extract_frames.py.
-    std::vector<int> streams = {0};
-    if (is_dual_fisheye_path(in.path)) {
-        std::vector<int> found;
-        run_process({"ffprobe", "-v", "error", "-select_streams", "v",
-                     "-show_entries", "stream=index", "-of", "csv=p=0",
-                     in.path}, "",
-                    [&](const std::string& l) {
-                        try { found.push_back(std::stoi(l)); } catch (...) {}
-                    }, _cancel);
-        if (found.size() > 1) streams = found;
-    }
-    if (streams.size() > 1) out.per_folder_cameras = true;
+    // Multi-track videos (an Insta360 .insv, a DJI .osv): one folder per track,
+    // one camera per folder. Counted off the stream table rather than ffprobe's
+    // stream list, which calls an attached cover picture a video track.
+    VideoFacts facts;
+    ffmpeg_probe_video(job.ffmpeg_exe, in.path, facts, _cancel);
+    size_t streams = 1;
+    if (is_dual_fisheye_path(in.path) && facts.tracks.size() > 1)
+        streams = facts.tracks.size();
+    if (streams > 1) out.per_folder_cameras = true;
 
     const int window = std::max(job.sharp_window, 1);
-    for (size_t tr = 0; tr < streams.size(); tr++) {
+    // Adaptive selection picks from the candidates, so there have to be enough
+    // of them for the fastest rate it may ask for.
+    const int group = job.adaptive_fps
+                          ? std::max(window, (int)std::ceil(job.adaptive_range))
+                          : window;
+    const bool fisheye = streams > 1 && !facts.tracks.empty() &&
+                         facts.tracks[0].first == facts.tracks[0].second;
+    for (size_t tr = 0; tr < streams; tr++) {
         std::string track_path = in.path;
-        const fs::path out_dir = streams.size() > 1
+        const fs::path out_dir = streams > 1
             ? fs::path(images) / ("cam" + std::to_string(tr))
             : fs::path(images);
         if (job.resume && !job.redo_frames &&
@@ -1418,7 +1426,7 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
                 /*detail=*/false);
             continue;
         }
-        if (streams.size() > 1) {
+        if (streams > 1) {
             enter(Stage::Frames, fmt(lmsg::stage_split_track, {(long long)tr}));
             const fs::path tmp_track =
                 ws / ("track_cam" + std::to_string(tr) + ".mp4");
@@ -1440,7 +1448,7 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         std::error_code ec;
         fs::create_directories(cand, ec);
         char vf[64];
-        std::snprintf(vf, sizeof vf, "fps=%g", (double)job.video_fps * window);
+        std::snprintf(vf, sizeof vf, "fps=%g", (double)input_fps(job, in) * group);
         // ffmpeg turns the picture by the container's matrix unless told not
         // to, which is what the built-in decoder's auto_rotate matches.
         std::vector<std::string> argv{job.ffmpeg_exe, "-nostdin", "-y"};
@@ -1456,11 +1464,19 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
 
         if (window > 1) enter(Stage::Frames, lmsg::stage_select_sharpest.get());
         fs::create_directories(out_dir, ec);
+        FrameSelectOptions so;
+        so.group = group;
+        so.max_frames = job.max_frames;
+        so.adaptive = job.adaptive_fps;
+        so.range = job.adaptive_range;
+        so.window = window;
+        if (fisheye) so.view = app::MotionView::Fisheye;
+        so.out_fov = fisheye ? 3.4034f : 1.5708f;
         const int kept = select_sharpest_frames(
-            cand.string(), out_dir.string(), "", window, job.max_frames,
+            cand.string(), out_dir.string(), "", so,
             [this](const std::string& l) { log(l); }, _cancel);
         remove_tree(cand);
-        if (streams.size() > 1) fs::remove(track_path, ec);
+        if (streams > 1) fs::remove(track_path, ec);
         if (kept < 0) {
             error = _cancel.load() ? "cancelled" : "frame selection failed";
             return false;
@@ -1556,6 +1572,9 @@ bool DatasetPrep::extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
 
     const fs::path ws = job.workspace;
     const int window = std::max(job.sharp_window, 1);
+    const int group = job.adaptive_fps
+                          ? std::max(window, (int)std::ceil(job.adaptive_range))
+                          : window;
     std::error_code ec;
 
     // ffmpeg decodes both tracks and cuts the overlap strips out; the warp is
@@ -1567,7 +1586,7 @@ bool DatasetPrep::extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
     remove_tree(cand);
     fs::create_directories(cand, ec);
     char pre[64];
-    std::snprintf(pre, sizeof pre, "fps=%g", (double)job.video_fps * window);
+    std::snprintf(pre, sizeof pre, "fps=%g", (double)input_fps(job, in) * group);
     const std::string graph = app::pano360_graph(in.eac360, pre);
     // A 360 capture's geometry is the EAC layout, not the display matrix: the
     // built-in path leaves it alone and so must this one.
@@ -1587,8 +1606,17 @@ bool DatasetPrep::extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
     const fs::path kept = ws / "canvas_tmp";
     remove_tree(kept);
     fs::create_directories(kept, ec);
+    FrameSelectOptions so;
+    so.group = group;
+    so.max_frames = job.max_frames;
+    so.adaptive = job.adaptive_fps;
+    so.range = job.adaptive_range;
+    so.window = window;
+    so.view = app::MotionView::Eac360;
+    so.eac = in.eac360;
+    so.out_fov = app::motion_out_fov(views);
     const int n = select_sharpest_frames(
-        cand.string(), kept.string(), "", window, job.max_frames,
+        cand.string(), kept.string(), "", so,
         [this](const std::string& l) { log(l); }, _cancel);
     remove_tree(cand);
     if (n < 0) {

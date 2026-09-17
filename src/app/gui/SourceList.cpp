@@ -388,7 +388,12 @@ void dataset_adapt_preset(const std::string& preset,
 void resolve_source_lenses(std::vector<PrepInput>& sources, SfmJob& sfm,
                            ColmapJob& colmap) {
     if (sources.empty()) return;
-    if (any_pano360(sources) && sfm.prep.pano.mode != app::Pano360Mode::Off) {
+    if (any_pano360(sources)) {
+        // Nothing on the panel can say "leave the packed tracks alone", and
+        // the combo draws that state as "views", so a preset saved off a flat
+        // capture must not be able to leave a 360 one in it.
+        if (sfm.prep.pano.mode == app::Pano360Mode::Off)
+            sfm.prep.pano.mode = app::Pano360Mode::Faces;
         if (sfm.prep.pano.size <= 0) reset_pano_size(sources, sfm.prep.pano);
         apply_pano_lens(sources, sfm, colmap);
         return;

@@ -151,12 +151,13 @@ void yuv_to_rgb(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
 // written out.
 
 struct ThumbParams {
-    float* out;      // S*S
+    float* out;      // out_w * out_h
     uint*  luma;
     uint   src_w;
     uint   src_h;
     uint   luma_stride;
-    uint   size;     // S
+    uint   out_w;
+    uint   out_h;
     uint   flags;
     uint   shift;
     uint   groups_per_row;
@@ -167,14 +168,14 @@ struct ThumbParams {
 void luma_thumbnail(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
                     uniform ThumbParams p) {
     uint i = fold_index(gid, tid, p.groups_per_row, uint(WG));
-    if (i >= p.size * p.size) return;
-    uint ox = i % p.size;
-    uint oy = i / p.size;
+    if (i >= p.out_w * p.out_h) return;
+    uint ox = i % p.out_w;
+    uint oy = i / p.out_w;
 
-    uint x0 = (ox * p.src_w) / p.size;
-    uint x1 = max(x0 + 1u, ((ox + 1u) * p.src_w) / p.size);
-    uint y0 = (oy * p.src_h) / p.size;
-    uint y1 = max(y0 + 1u, ((oy + 1u) * p.src_h) / p.size);
+    uint x0 = (ox * p.src_w) / p.out_w;
+    uint x1 = max(x0 + 1u, ((ox + 1u) * p.src_w) / p.out_w);
+    uint y0 = (oy * p.src_h) / p.out_h;
+    uint y1 = max(y0 + 1u, ((oy + 1u) * p.src_h) / p.out_h);
     x1 = min(x1, p.src_w);
     y1 = min(y1, p.src_h);
 

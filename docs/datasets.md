@@ -462,11 +462,12 @@ video modes, 0 and 4 for timelapse -- enumerate them, do not hardcode).
 Together they are a YouTube-style **EAC 3x2 cubemap**: the first track is the
 top row (LEFT, FRONT, RIGHT), the second the bottom (DOWN rot270, BACK rot90,
 UP rot270). Faces are square and as tall as a track. Each track carries three
-of them plus **two 32 px overlap strips**, inserted at the centre lines of its
+of them plus **two overlap strips**, inserted at the centre lines of its
 two side faces, which is where the two lenses meet:
 
 | mode | track | face | strips | canvas |
 |---|---|---|---|---|
+| 8K   | 5952x1920 | 1920 | 2 x 96 | 5760x3840 |
 | 5.6K | 4096x1344 | 1344 | 2 x 32 | 4032x2688 |
 | 3K   | 2272x736  | 736  | 2 x 32 | 2208x1472 |
 
@@ -552,6 +553,71 @@ high`) -- about 4.4 px per degree, against 16.7 for a 1504 px face.
   `docs/notes/imu-gps-for-sfm.md` is the plan for what will.
 - **The operator.** Whoever is holding it is in the downward and rearward views
   of every frame of most captures, and wants masking out.
+
+## Frames out of a video
+
+One frame every `skip` source frames, the sharpest of a window of `keep`
+around each. Both decode paths choose the same frames (`app/FrameExtract.h`),
+and the GUI's rate is **per input**: a capture shot as several clips is rarely
+shot at one pace, so `PrepInput::fps` overrides the job's for that video.
+
+### Adaptive spacing
+
+`--adaptive` (the GUI: "Adapt the rate to the motion") spaces the kept frames
+by how much the **view** changed instead of by how much time passed. The rate
+asked for becomes the average; the realized rate stays within `--adaptive-range`
+either side of it, and the frame count comes out the same.
+
+`app/FrameMotion.h` measures it. A grid of about 500 points is tracked between
+small grey frames by pyramidal Lucas-Kanade, one global model is fitted to the
+flow by RANSAC, and two numbers come out:
+
+- **coverage** -- the share of the frame's content that left it, as the area of
+  the frame carried over by the fitted model and cut back to the frame. Pan and
+  zoom cost; roll costs only its corners, which is right, because a rolled
+  frame still sees what it saw.
+- **parallax** -- the flow the global model could not explain, as the 75th
+  percentile of the residual. This is what a translation past something close
+  produces and what a translation towards something far does not.
+
+`cost = coverage + 2 * parallax`, and the plan spaces frames at equal
+cumulative cost. The weight is the only hand-set number: a tenth of the frame
+of unexplained disparity is a harder match than a tenth of the frame of pan,
+and carries the triangulation the pan does not.
+
+The global model depends on what the frames are pictures of:
+
+| capture | model | coverage |
+|---|---|---|
+| ordinary video | 2D affine, in the image | the frame carried over |
+| `.360` (EAC) | a rotation of the SPHERE, through the packing's own mapping | 0 |
+| dual fisheye (`.insv`, `.osv`) | a rotation of the sphere, equidistant lens | 0 |
+
+A camera that sees every direction keeps every direction when it turns, so a
+360 capture spinning on the spot scores nothing and is given frames at the
+slowest rate the bounds allow. That is the whole point of fitting the rotation
+in 3D rather than fitting a homography per track: on a sphere, turning is free
+and only moving is not.
+
+Two details that were measured rather than chosen:
+
+- A sphere frame is analyzed at **four times the pixels** of a flat one. It
+  spans three times the angle, and at flat resolution the tracking floor is
+  itself a degree wide and drowns the parallax.
+- The step is found by **bisection** on the wanted count, not as
+  `total / count`. A burst of motion swallows several steps' budget within one
+  sample and can spend only one frame of it, which left plans a third short.
+
+It costs one extra decode pass over the first track of each video: measured at
++21% on a dual-fisheye `.osv` (whose main pass already decodes two tracks) and
+up to +100% on a 1080p clip, with the tracking itself overlapped with the
+decode. Nothing is buffered: a video's worth of pictures does not fit, and a
+plan cannot be made until the whole cost curve is known.
+
+Without the built-in decoder the same plan is made from the candidate frames
+ffmpeg already extracts, at `fps x max(window, range)` instead of
+`fps x window` so there are enough of them for the fastest rate it may ask for
+(`gui/FrameSelect.h`).
 
 ## Preprocessing tools
 

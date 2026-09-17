@@ -205,7 +205,7 @@ struct YuvParams {
 };
 struct ThumbParams {
     vk::DevicePtr out, luma;
-    uint32_t src_w, src_h, luma_stride, size, flags, shift, groups_per_row;
+    uint32_t src_w, src_h, luma_stride, out_w, out_h, flags, shift, groups_per_row;
 };
 struct VarianceParams {
     vk::DevicePtr out, thumb;
@@ -289,7 +289,8 @@ struct VideoPipeline::Impl {
 
     // Conversion scratch.
     vk::DevicePtr luma_buf = 0, chroma_buf = 0, chroma2_buf = 0;
-    vk::DevicePtr thumb_buf = 0, metric_buf = 0, rgb_buf = 0;
+    vk::DevicePtr thumb_buf = 0, metric_buf = 0, rgb_buf = 0, gray_buf = 0;
+    VkDeviceSize gray_capacity = 0;
     VkDeviceSize  rgb_capacity = 0;
     std::vector<float> metrics;
     std::vector<int>   metric_pending;
@@ -378,7 +379,8 @@ VideoPipeline::Impl::~Impl() {
     for (VkDeviceMemory m : session_mem) vkFreeMemory(dev, m, nullptr);
     if (vtimeline) vkDestroySemaphore(dev, vtimeline, nullptr);
     if (vpool) vkDestroyCommandPool(dev, vpool, nullptr);
-    for (vk::DevicePtr p : {luma_buf, chroma_buf, chroma2_buf, thumb_buf, metric_buf, rgb_buf})
+    for (vk::DevicePtr p : {luma_buf, chroma_buf, chroma2_buf, thumb_buf, metric_buf,
+                            rgb_buf, gray_buf})
         if (p) vk::device_free(p);
 }
 
@@ -1310,7 +1312,8 @@ void VideoPipeline::queueSharpness(const FrameHandle& h) {
     tp.src_w = (uint32_t)s.fmt.width;
     tp.src_h = (uint32_t)s.fmt.height;
     tp.luma_stride = s.coded.width;
-    tp.size = kThumbSize;
+    tp.out_w = kThumbSize;
+    tp.out_h = kThumbSize;
     tp.flags = s.planeFlags();
     tp.shift = (uint32_t)s.planes.shift;
     vk::Stream::get().dispatchFlat("video.luma_thumbnail", {}, (int64_t)kThumbSize * kThumbSize,
@@ -1357,6 +1360,47 @@ bool VideoPipeline::Impl::ensureRgb(VkDeviceSize bytes) {
     rgb_capacity = bytes;
     rgb_buf = vk::device_alloc(bytes, "video.rgb");
     return rgb_buf != 0;
+}
+
+bool VideoPipeline::toGray(const FrameHandle& h, int w, int gh,
+                           std::vector<uint8_t>& out, std::string& error) {
+    Impl& s = *impl_;
+    if (h.slot < 0 || w <= 0 || gh <= 0) {
+        error = "toGray: invalid request";
+        return false;
+    }
+    const VkDeviceSize bytes = (VkDeviceSize)w * gh * 4;
+    if (s.gray_capacity < bytes) {
+        if (s.gray_buf) vk::device_free(s.gray_buf);
+        s.gray_buf = vk::device_alloc(bytes, "video.gray");
+        s.gray_capacity = s.gray_buf ? bytes : 0;
+    }
+    if (!s.gray_buf) {
+        error = "out of device memory for the grey frame buffer";
+        return false;
+    }
+    s.copyPlanes(h.slot);
+
+    ThumbParams tp{};
+    tp.out = s.gray_buf;
+    tp.luma = s.luma_buf;
+    tp.src_w = (uint32_t)s.fmt.width;
+    tp.src_h = (uint32_t)s.fmt.height;
+    tp.luma_stride = s.coded.width;
+    tp.out_w = (uint32_t)w;
+    tp.out_h = (uint32_t)gh;
+    tp.flags = s.planeFlags();
+    tp.shift = (uint32_t)s.planes.shift;
+    vk::Stream::get().dispatchFlat("video.luma_thumbnail", {}, (int64_t)w * gh, 256,
+                                   &tp, sizeof(tp), &tp.groups_per_row);
+
+    std::vector<float> f((size_t)w * gh);
+    vk::Stream::get().download(f.data(), s.gray_buf, bytes);
+    out.resize(f.size());
+    for (size_t i = 0; i < f.size(); i++)
+        out[i] = (uint8_t)std::min(255.0f, std::max(0.0f, f[i] + 0.5f));
+    s.pool[(size_t)h.slot].read_value = 0;
+    return true;
 }
 
 bool VideoPipeline::toImage(const FrameHandle& h, const ConvertOpts& opts, nn::Image& out,

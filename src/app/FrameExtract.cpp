@@ -6,6 +6,7 @@
 
 #include "app/FrameExtract.h"
 
+#include "app/FrameMotion.h"
 #include "app/WriterPool.h"
 #include "i18n/catalog/Data.h"
 #include "i18n/catalog/Log.h"
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
@@ -48,21 +50,149 @@ using app::WriterPool;
 // because the paired path has to choose the same frames as the single-track
 // one and as the ffmpeg fallback.
 struct SelectClock {
+    // A fixed rate is arithmetic on the index; `ends`, from the motion pass,
+    // is the frame each window closes at. Both are walked forward only.
     int keep = 0, skip = 1;
-    int64_t count = 0;
-    bool candidate(int64_t i) const {
+    std::vector<int64_t> ends;
+    size_t next = 0;
+
+    bool candidate(int64_t i) {
+        if (!ends.empty()) {
+            while (next < ends.size() && ends[next] < i) ++next;
+            return next < ends.size() && i > ends[next] - std::max(keep, 1) &&
+                   i <= ends[next];
+        }
         return keep == 0 ? (i % skip == 0) : (((i + keep) % skip) < keep);
     }
-    void skipped() { ++count; }
-    // The Python increments its counter before the modulo test when a blur
-    // window is in use, and after it when it is not; both are reproduced here.
-    bool step() {
-        if (keep != 0) ++count;
-        const bool write = (count % skip) == 0;
-        if (keep == 0) ++count;
-        return write;
+    bool step(int64_t i) {
+        if (!ends.empty()) return next < ends.size() && i == ends[next];
+        return keep == 0 || ((i + 1) % skip) == 0;
     }
 };
+
+// ---------------------------------------------------------------------------
+// Adaptive selection
+// ---------------------------------------------------------------------------
+
+// Pass one of an adaptive run: ONE track, reduced on the GPU so a frame costs
+// a few tens of kilobytes over the bus. Decoding twice is cheaper than holding
+// a video's worth of pictures until the plan is known.
+bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
+                    int track, int tracks, std::vector<int64_t>& plan,
+                    FrameExtractStats& t, std::string& error) {
+    const double t_start = nn::now_ms();
+    video::VideoPipeline pipe;
+    if (!pipe.open(o.input, track, 1, error)) return false;
+    const video::TrackInfo& info = pipe.track();
+
+    MotionOptions mo;
+    // A capture that sees the whole sphere: the 360 packing, or the two square
+    // tracks every dual-fisheye camera writes.
+    if (o.eac.valid()) mo.view = MotionView::Eac360;
+    else if (tracks >= 2 && info.width == info.height)
+        mo.view = MotionView::Fisheye;
+    mo.eac = o.eac;
+    mo.out_fov = mo.view == MotionView::Fisheye ? mo.circle_fov
+                                           : motion_out_fov(o.views);
+    motion_frame_size(mo.view, info.width, info.height, mo.width, mo.height);
+
+    MotionTracker tracker(mo);
+    const double fps = info.fps > 1.0 ? info.fps : 30.0;
+    // 15 samples a second is enough to follow a walk, but never coarser than a
+    // third of the spacing being planned: a gap can only land on a sample.
+    const int stride = std::max(
+        1, std::min((int)std::lround(fps / 15.0), std::max(1, o.skip / 3)));
+
+    // Tracking is CPU and decoding is GPU, so they run at the same time: the
+    // decoder fills a short queue and one consumer thread owns the tracker.
+    struct Sample {
+        std::vector<uint8_t> gray;
+        int64_t index = 0;
+    };
+    std::deque<Sample> queue;
+    std::mutex mu;
+    std::condition_variable room, work;
+    bool feeding = true;
+    std::thread consumer([&] {
+        for (;;) {
+            Sample s;
+            {
+                std::unique_lock<std::mutex> lk(mu);
+                work.wait(lk, [&] { return !queue.empty() || !feeding; });
+                if (queue.empty()) return;
+                s = std::move(queue.front());
+                queue.pop_front();
+            }
+            room.notify_one();
+            tracker.track(s.gray.data(), s.index);
+        }
+    });
+    auto stop = [&]() {
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            feeding = false;
+        }
+        work.notify_all();
+        consumer.join();
+    };
+
+    std::vector<uint8_t> gray;
+    int64_t last = -1;
+    for (;;) {
+        if (sinks.cancel && sinks.cancel->load()) {
+            error = "cancelled";
+            stop();
+            return false;
+        }
+        video::FrameHandle h;
+        if (!pipe.next(h, error)) {
+            if (!error.empty()) {
+                stop();
+                return false;
+            }
+            break;
+        }
+        if (h.index % stride == 0) {
+            if (!pipe.toGray(h, mo.width, mo.height, gray, error)) {
+                pipe.release(h);
+                stop();
+                return false;
+            }
+            std::unique_lock<std::mutex> lk(mu);
+            room.wait(lk, [&] { return queue.size() < 3; });
+            queue.push_back({gray, h.index});
+            lk.unlock();
+            work.notify_one();
+            ++t.analyzed;
+        }
+        last = h.index;
+        pipe.release(h);
+    }
+    stop();
+    tracker.finish();
+    const int64_t frames = info.frame_count > 0 ? info.frame_count : last + 1;
+    plan = plan_by_motion(tracker.costs(), tracker.ends(), frames, o.skip,
+                          std::max(o.keep, 1), o.adaptive_range, o.max_frames);
+    t.plan = nn::now_ms() - t_start;
+    if (plan.empty()) {
+        error = "the capture is too short to space frames by motion";
+        return false;
+    }
+    int64_t tightest = frames, widest = 0;
+    for (size_t i = 1; i < plan.size(); i++) {
+        const int64_t gap = plan[i] - plan[i - 1];
+        tightest = std::min(tightest, gap);
+        widest = std::max(widest, gap);
+    }
+    auto rate = [&](int64_t gap) {
+        return std::round((gap > 0 ? fps / (double)gap : fps) * 100.0) / 100.0;
+    };
+    namespace lmsg = spirula::i18n::msg::log;
+    log_line(sinks,
+             spirula::i18n::format(lmsg::motion_plan, {(long long)plan.size(),
+                                                       rate(widest), rate(tightest)}));
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Extraction
@@ -71,8 +201,8 @@ struct SelectClock {
 bool extract_track(const FrameExtractJob& o, const FrameExtractSinks& sinks,
                    int track, const fs::path& image_dir,
                    const fs::path& mask_dir, sam::Masker* masker,
-                   WriterPool& pool, FrameExtractStats& t,
-                   std::string& error) {
+                   WriterPool& pool, const std::vector<int64_t>& plan,
+                   FrameExtractStats& t, std::string& error) {
     video::VideoPipeline pipe;
     // The blur window holds `keep` decoded pictures at once.
     if (!pipe.open(o.input, track, std::max(o.keep, 1), error)) return false;
@@ -90,7 +220,7 @@ bool extract_track(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     };
     std::deque<Buffered> window;
     const int keep = o.keep;
-    SelectClock clock{o.keep, o.skip, 0};
+    SelectClock clock{o.keep, o.skip, plan, 0};
     int written = 0;
     bool measured_pending = false;
 
@@ -192,7 +322,6 @@ bool extract_track(const FrameExtractJob& o, const FrameExtractSinks& sinks,
         // else is decoded (inter prediction needs it) but never touched again.
         if (!clock.candidate(i)) {
             pipe.release(h);
-            clock.skipped();
             continue;
         }
 
@@ -209,7 +338,7 @@ bool extract_track(const FrameExtractJob& o, const FrameExtractSinks& sinks,
             window.pop_front();
         }
 
-        if (clock.step()) flush_window(true);
+        if (clock.step(i)) flush_window(true);
     }
     flush_window(false);
     return true;
@@ -223,7 +352,8 @@ using LockstepSink = std::function<bool(std::vector<nn::Image>& imgs, int64_t in
 
 bool extract_lockstep(const FrameExtractJob& o, const FrameExtractSinks& sinks,
                       const std::vector<int>& tracks, const video::ConvertOpts& conv,
-                      FrameExtractStats& t, std::string& error, const LockstepSink& on_frame) {
+                      const std::vector<int64_t>& plan, FrameExtractStats& t,
+                      std::string& error, const LockstepSink& on_frame) {
     const size_t n = tracks.size();
     std::vector<std::unique_ptr<video::VideoPipeline>> pipe;
     for (size_t k = 0; k < n; k++) {
@@ -237,7 +367,7 @@ bool extract_lockstep(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     };
     std::deque<Buffered> window;
     const int keep = o.keep;
-    SelectClock clock{o.keep, o.skip, 0};
+    SelectClock clock{o.keep, o.skip, plan, 0};
     int written = 0;
     bool measured_pending = false;
 
@@ -317,7 +447,6 @@ bool extract_lockstep(const FrameExtractJob& o, const FrameExtractSinks& sinks,
         b.index = b.h[0].index;
         if (!clock.candidate(b.index)) {
             release(b);
-            clock.skipped();
             continue;
         }
         if (keep != 0) {
@@ -332,7 +461,7 @@ bool extract_lockstep(const FrameExtractJob& o, const FrameExtractSinks& sinks,
             release(window.front());
             window.pop_front();
         }
-        if (clock.step()) flush_window(true);
+        if (clock.step(b.index)) flush_window(true);
     }
     flush_window(false);
     return true;
@@ -342,7 +471,8 @@ bool extract_lockstep(const FrameExtractJob& o, const FrameExtractSinks& sinks,
 // into every view.
 bool extract_pair(const FrameExtractJob& o, const FrameExtractSinks& sinks,
                   const fs::path& image_dir, WriterPool& pool,
-                  FrameExtractStats& t, std::string& error) {
+                  const std::vector<int64_t>& plan, FrameExtractStats& t,
+                  std::string& error) {
     {
         std::vector<std::pair<int, int>> sizes = video_track_sizes(o.input, error);
         for (size_t k = 0; k < 2; k++) {
@@ -396,14 +526,16 @@ bool extract_pair(const FrameExtractJob& o, const FrameExtractSinks& sinks,
         }
         return true;
     };
-    return extract_lockstep(o, sinks, {0, 1}, video::ConvertOpts{}, t, error, on_frame);
+    return extract_lockstep(o, sinks, {0, 1}, video::ConvertOpts{}, plan, t, error,
+                            on_frame);
 }
 
 // Every track of a multi-lens file at the same instants, one folder per
 // track: the rig the frames of one stem form is then a rig in fact.
 bool extract_synced(const FrameExtractJob& o, const FrameExtractSinks& sinks,
                     const std::vector<int>& tracks, const fs::path& base, WriterPool& pool,
-                    FrameExtractStats& t, std::string& error) {
+                    const std::vector<int64_t>& plan, FrameExtractStats& t,
+                    std::string& error) {
     std::vector<fs::path> dirs;
     for (size_t k = 0; k < tracks.size(); k++) {
         dirs.push_back(base / ("cam" + std::to_string(k)));
@@ -431,7 +563,7 @@ bool extract_synced(const FrameExtractJob& o, const FrameExtractSinks& sinks,
         }
         return true;
     };
-    return extract_lockstep(o, sinks, tracks, conv, t, error, on_frame);
+    return extract_lockstep(o, sinks, tracks, conv, plan, t, error, on_frame);
 }
 
 }  // namespace
@@ -565,11 +697,19 @@ bool extract_frames(const FrameExtractJob& job_in, const FrameExtractSinks& sink
     const double t_start = nn::now_ms();
     bool ok = true;
     const bool synced = !pano && job.sync_tracks && tracks.size() > 1;
+    // One plan for the whole file, measured on its first track: the tracks of
+    // a rig see the same motion, and the ones that do not are still one camera
+    // moving through one scene.
+    std::vector<int64_t> plan;
+    if (job.adaptive &&
+        !measure_motion(job, sinks, tracks[0], (int)tracks.size(), plan, stats,
+                        error))
+        return false;
     if (pano) {
         stats.tracks = 2;
-        ok = extract_pair(job, sinks, base, pool, stats, error);
+        ok = extract_pair(job, sinks, base, pool, plan, stats, error);
     } else if (synced) {
-        ok = extract_synced(job, sinks, tracks, base, pool, stats, error);
+        ok = extract_synced(job, sinks, tracks, base, pool, plan, stats, error);
     }
     for (size_t ti = 0; ti < tracks.size() && ok && !pano && !synced; ++ti) {
         // A multi-track file (an Insta360 .insv carries two fisheye streams)
@@ -582,7 +722,7 @@ bool extract_frames(const FrameExtractJob& job_in, const FrameExtractSinks& sink
             log_line(sinks, "track " + std::to_string(tracks[ti]) + " -> " +
                                 image_dir.string());
         ok = extract_track(job, sinks, tracks[ti], image_dir, mask_dir, masker.get(),
-                           pool, stats, error);
+                           pool, plan, stats, error);
     }
 
     const double t_drain = nn::now_ms();
@@ -792,10 +932,16 @@ std::string format_extract_stats(const FrameExtractStats& s,
     rows.push_back({dmsg::xs_written.get(),
                     format(dmsg::xs_written_to,
                            {(long long)s.written, out_dir}), false});
+    if (s.analyzed > 0)
+        rows.push_back({dmsg::xs_analyzed.get(),
+                        std::to_string((long long)s.analyzed), false});
     rows.push_back({dmsg::xs_decode.get(),
                     format(dmsg::xs_ms_fps,
                            {ms(s.decode), rate((double)s.decoded, s.decode)}),
                     true});
+    if (s.plan > 0)
+        rows.push_back({dmsg::xs_motion.get(),
+                        format(dmsg::xs_ms, {ms(s.plan)}), false});
     rows.push_back({dmsg::xs_sharpness.get(),
                     format(dmsg::xs_ms, {ms(s.sharpness)}), false});
     rows.push_back({dmsg::xs_convert.get(),

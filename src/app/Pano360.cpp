@@ -86,15 +86,33 @@ void dir_to_cell(float x, float y, float z, int& cell, float& u, float& v) {
     }
 }
 
+// dir_to_cell run backwards, cell by cell: the face axis is +-1 and the two
+// in-cell coordinates are what the table above put where.
+void cell_to_dir(int cell, float u, float v, float d[3]) {
+    switch (cell) {
+        case 0: d[0] = -1; d[1] = v;  d[2] = u;  break;
+        case 1: d[0] = u;  d[1] = v;  d[2] = 1;  break;
+        case 2: d[0] = 1;  d[1] = v;  d[2] = -u; break;
+        case 3: d[0] = -v; d[1] = 1;  d[2] = -u; break;
+        case 4: d[0] = -v; d[1] = -u; d[2] = -1; break;
+        default: d[0] = -v; d[1] = -1; d[2] = u; break;
+    }
+    const float n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    d[0] /= n;
+    d[1] /= n;
+    d[2] /= n;
+}
+
 }  // namespace
 
 bool eac360_detect(int tracks, int width, int height, Eac360Layout& out) {
     out = Eac360Layout{};
     if (tracks != 2 || width <= 0 || height <= 0) return false;
     const int strips = width - 3 * height;
-    // 64 px in both recording modes. A generous ceiling still rejects every
-    // other two-track file: an Insta360 .insv is two square-ish fisheyes.
-    if (strips < 0 || strips % 2 != 0 || strips > 128) return false;
+    // 2x32 px at 5.6K and 3K, 2x96 at 8K. A ceiling that scales with the face
+    // still rejects every other two-track file: an Insta360 .insv is two
+    // square-ish fisheyes.
+    if (strips < 0 || strips % 2 != 0 || strips > height / 8) return false;
     out.track_w = width;
     out.track_h = height;
     out.face = height;
@@ -107,6 +125,25 @@ std::vector<Eac360Slice> eac360_slices(const Eac360Layout& l) {
     return {{0, 0, half},
             {half + l.strip, half, 2 * l.face},
             {2 * l.face + half + 2 * l.strip, 2 * l.face + half, half}};
+}
+
+bool eac360_direction(const Eac360Layout& l, int row, float x, float y,
+                      float dir[3]) {
+    if (!l.valid() || row < 0 || row > 1 || y < 0 || y >= (float)l.track_h)
+        return false;
+    int dst_x = -1;
+    for (const Eac360Slice& s : eac360_slices(l))
+        if (x >= (float)s.src_x && x < (float)(s.src_x + s.width))
+            dst_x = (int)(s.dst_x + (x - (float)s.src_x));
+    if (dst_x < 0) return false;
+
+    const float face = (float)l.face;
+    const int col = std::min(2, (int)(dst_x / l.face));
+    const float uf = 2.0f * ((float)dst_x - col * face) / face - 1.0f;
+    const float vf = 2.0f * y / face - 1.0f;
+    cell_to_dir(row * 3 + col, (float)std::tan(kPi / 4 * uf),
+                (float)std::tan(kPi / 4 * vf), dir);
+    return true;
 }
 
 int pano360_default_size(const Eac360Layout& l, const Pano360Options& o) {

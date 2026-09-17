@@ -1,15 +1,14 @@
 #pragma once
 
-// FrameSelect -- motion-blur-aware frame selection for video datasets.
-// C++ multithreaded port of reference/scripts/extract_frames.py's
-// FrameSelector: the sharpness metric is the variance of the 3x3 Laplacian
-// of the mean-subtracted 512x512 grayscale image; within each group of
-// `group` consecutive candidate frames the sharpest one is kept.
+// FrameSelect -- which of the candidate frames ffmpeg extracted are kept.
 //
-// The GUI extracts candidates with ffmpeg at (target fps x group), then
-// calls this to keep the best frame per group -- same output rate as a
-// plain fps filter, but each kept frame is the least blurry of its
-// neighborhood.
+// The sharpness metric is the variance of the 3x3 Laplacian of the
+// mean-subtracted 512x512 grayscale image. Evenly, one per group of `group`
+// candidates; or spaced by how much the view changes (app/FrameMotion.h),
+// which is what the built-in decoder's adaptive mode does from the source
+// frames themselves.
+
+#include "app/FrameMotion.h"
 
 #include <atomic>
 #include <functional>
@@ -17,16 +16,28 @@
 
 namespace gui {
 
+struct FrameSelectOptions {
+    int group = 1;          // candidates per kept frame
+    int max_frames = 0;     // 0 = no cap
+    // Adaptive: the rate stays within `range` either side of the average, and
+    // the sharpest of `window` candidates around each chosen one is kept.
+    bool  adaptive = false;
+    float range = 4.0f;
+    int   window = 3;
+    app::MotionView view = app::MotionView::Planar;
+    // Set when the candidates are EAC canvases: only the top row is measured,
+    // which is half the sphere and all a rotation needs.
+    app::Eac360Layout eac;
+    float out_fov = 1.5708f;
+};
+
 // Scores every image in cand_dir (sorted by filename) across all hardware
-// threads, keeps the sharpest of each consecutive `group`, and MOVES the
-// keepers to out_dir as <prefix>NNNNN.<ext> (contiguous numbering). Losers
-// are deleted. If keeping one per group still exceeds max_frames, the group
-// size is enlarged. Returns the number of frames kept, or -1 on error /
-// cancellation.
+// threads and MOVES the keepers to out_dir as <prefix>NNNNN.<ext>, contiguously
+// numbered; the losers are deleted. -1 on error or cancellation.
 int select_sharpest_frames(const std::string& cand_dir,
                            const std::string& out_dir,
                            const std::string& prefix,
-                           int group, int max_frames,
+                           const FrameSelectOptions& options,
                            const std::function<void(const std::string&)>& log,
                            const std::atomic<bool>& cancel);
 
