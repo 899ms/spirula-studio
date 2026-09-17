@@ -28,6 +28,7 @@
 #include "i18n/catalog/SamHelp.h"
 #include "nn/core/Log.h"
 #include "sam/Masking.h"
+#include "sfm/core/Telemetry.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -269,8 +270,11 @@ int sam_cli_extract(int argc, char** argv) {
         std::string err;
         const std::vector<std::pair<int, int>> tracks =
             app::video_track_sizes(o.input, err);
+        const sfm::VideoProjection pr = sfm::video_projection(o.input);
+        const app::Pano360Meta meta{pr.name, pr.mode};
         if (tracks.size() == 2 && tracks[0] == tracks[1] &&
-            app::eac360_detect(2, tracks[0].first, tracks[0].second, job.eac)) {
+            app::pano360_detect(2, tracks[0].first, tracks[0].second, meta,
+                                job.eac)) {
             o.pano.mode = o.pano_mode == "equirect" ? app::Pano360Mode::Equirect
                                                     : app::Pano360Mode::Faces;
             job.views = app::pano360_views(job.eac, o.pano);
@@ -278,7 +282,7 @@ int sam_cli_extract(int argc, char** argv) {
                          job.eac.track_w, job.eac.track_h, job.views.size(),
                          job.views[0].width, job.views[0].height);
         } else {
-            job.eac = app::Eac360Layout{};
+            job.eac = app::Pano360Layout{};
         }
     }
     if (!o.model.empty()) {

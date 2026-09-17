@@ -318,6 +318,7 @@ private:
     bool feature_model_missing() const;
     // The step list and its bars, in place of the one stage line.
     void draw_dataset_steps();
+    void draw_scan_view(float h);
     // The form and the button that acts on it, `height` tall.
     void draw_dataset_form(float height, bool running);
     // The frames / match map / model area, and the poll that feeds it from what
@@ -606,6 +607,11 @@ private:
     // that runs instead of a parallel copy of it: a video file or photo folder
     // each, plus the sub-folder and the lens that belong to it.
     std::vector<PrepInput> _sources;
+    // The rate box's text per row, kept while it is being typed into: what is
+    // in the model is a number or nothing, and the box shows a caret for the
+    // nothing (draw_dataset_source).
+    std::vector<std::string> _fps_text;
+    int _fps_editing = -1;
     // What each input's IMU / GPS holds, read on its own thread and keyed by
     // path, so re-choosing a file already read costs nothing.
     TelemetryProbe _telemetry;

@@ -29,9 +29,11 @@
 #include "app/Pano360.h"
 #include "app/gui/FilmReel.h"
 #include "app/gui/PrepProgress.h"
+#include "app/gui/ReconStamp.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <functional>
 #include <optional>
 #include <string>
@@ -122,7 +124,10 @@ struct PrepInput {
     // The 360 packing this file was found to carry, when it carries one: two
     // EAC tracks that the job's `pano` plan turns into ordinary views. Detected
     // rather than asked for, so a capture that is not one cannot be warped.
-    app::Eac360Layout eac360;
+    app::Pano360Layout pano360;
+    // Set instead when the file says it IS a 360 packing this build cannot
+    // place, for the line that says its tracks are being left as they are.
+    bool pano360_unsupported = false;
     // Areas of the frame that are never scene -- the fisheye border, a
     // watermark, the rig in shot. Per input because it describes a lens, and
     // resolved per camera folder when it asks for the border to be fitted
@@ -210,7 +215,7 @@ struct PrepJob {
     PhotoImport photo_import = PhotoImport::ConvertJpeg;
 
     // ---- video extraction ----
-    // What a 360 capture (PrepInput::eac360) becomes. Dataset-wide: mixing
+    // What a 360 capture (PrepInput::pano360) becomes. Dataset-wide: mixing
     // panoramas and pinhole faces in one image tree describes no camera rig.
     app::Pano360Options pano;
 
@@ -275,9 +280,36 @@ struct PrepJob {
     std::string python_exe = "python3";
 };
 
-// The rate an input is actually extracted at: its own, or the job's.
+// The rate a row is actually extracted at. 0 means "the same as the row above",
+// which is how the lens column already spells a decision made once for a run of
+// clips; the first row falls back to the dataset's own rate.
+inline float input_fps(const std::vector<PrepInput>& inputs, float dataset_fps,
+                       size_t at) {
+    for (size_t k = std::min(at, inputs.size() - (inputs.empty() ? 0 : 1)) + 1;
+         k-- > 0;)
+        if (k < inputs.size() && inputs[k].fps > 0.0f) return inputs[k].fps;
+    return dataset_fps;
+}
+
+// Rows extracted at one rate, named by the one that states it -- so an adaptive
+// plan can spend one budget over all of them and give the clip that moves more
+// the denser frames.
+inline size_t fps_group(const std::vector<PrepInput>& inputs, size_t at) {
+    size_t g = 0;
+    for (size_t k = 1; k <= at && k < inputs.size(); k++)
+        if (inputs[k].fps > 0.0f) g = k;
+    return g;
+}
+
+// The row `in` is. Called with an input of `job`, so pointer identity answers.
+inline size_t input_index(const PrepJob& job, const PrepInput& in) {
+    for (size_t i = 0; i < job.inputs.size(); i++)
+        if (&job.inputs[i] == &in) return i;
+    return 0;
+}
+
 inline float input_fps(const PrepJob& job, const PrepInput& in) {
-    return in.fps > 0.0f ? in.fps : job.video_fps;
+    return input_fps(job.inputs, job.video_fps, input_index(job, in));
 }
 
 // Images read where they are instead of gathered into the dataset's own
@@ -320,7 +352,43 @@ struct PrepResult {
     // images/ came out holding one sub-folder per camera -- several inputs, or
     // a multi-track video -- so intrinsics must not be shared across them.
     bool per_folder_cameras = false;
+    // The frames were extracted again over ones already there, so anything a
+    // reconstruction left describes pictures that are no longer in images/.
+    bool frames_rebuilt = false;
 };
+
+// Everything that decides which pictures land in images/, and nothing that
+// decides what becomes of them: masking and the reconstruction stamp their own
+// settings, and folding those in would re-extract a video over a prompt.
+inline ReconStamp frames_stamp(const PrepJob& job) {
+    auto num = [](double v) {
+        char b[32];
+        std::snprintf(b, sizeof b, "%g", v);
+        return std::string(b);
+    };
+    ReconStamp st;
+    st.present = true;
+    st.engine = job.force_external_decode ? "ffmpeg" : "builtin";
+    st.args = {"--fps",         num(job.video_fps),
+               "--adaptive",    job.adaptive_fps ? "1" : "0",
+               "--range",       num(job.adaptive_range),
+               "--sharp",       num(job.sharp_window),
+               "--sync",        job.sync_tracks ? "1" : "0",
+               "--max-frames",  num(job.max_frames),
+               "--rotate",      job.auto_rotate ? "1" : "0",
+               "--photos",      num((int)job.photo_import),
+               "--360",         num((int)job.pano.mode),
+               "--360-size",    num(job.pano.size),
+               "--360-orient",  num(job.pano.yaw) + "," + num(job.pano.pitch) +
+                                    "," + num(job.pano.roll)};
+    for (const PrepInput& in : job.inputs) {
+        st.args.push_back("--input");
+        st.args.push_back(in.path);
+        st.args.push_back(in.subdir);
+        st.args.push_back(num(in.fps));
+    }
+    return st;
+}
 
 // What this build, on this machine, can do without an external tool.
 //
@@ -350,7 +418,7 @@ bool is_video_path(const std::string& path);
 // A dual-fisheye Insta360 file: two video tracks, one per lens, and a lens the
 // default camera model does not fit.
 bool is_dual_fisheye_path(const std::string& path);
-// A GoPro MAX .360 by its name. The packing itself is what probe_eac360
+// A GoPro MAX .360 by its name. The packing itself is what probe_pano360
 // confirms; this only decides whether it is worth asking.
 bool is_pano360_path(const std::string& path);
 
@@ -385,7 +453,7 @@ struct FfmpegStillOpts {
     bool auto_rotate = true;
     // A 360 capture: both tracks are decoded and the overlap strips cut out,
     // so what lands in `out_path` is the EAC canvas (app::pano360_graph).
-    app::Eac360Layout eac;
+    app::Pano360Layout eac;
 };
 
 // One frame, `seconds` into the file, written to `out_path` as a JPEG.
@@ -395,12 +463,16 @@ bool ffmpeg_extract_frame(const std::string& ffmpeg_exe, const std::string& vide
                           const std::atomic<bool>& cancel,
                           const FfmpegStillOpts& opts = {});
 
-// The 360 packing a video carries, or a layout that is not valid(). Asks the
-// built-in demuxer where there is one and ffmpeg otherwise, so the answer does
-// not depend on which decode path the run will take.
-app::Eac360Layout probe_eac360(const std::string& ffmpeg_exe,
-                               const std::string& path,
-                               const std::atomic<bool>& cancel);
+// The 360 packing a video carries, asked of the built-in demuxer where there is
+// one and of ffmpeg otherwise, so the answer does not depend on the decode path
+// the run will take. `unsupported`: app::pano360_unsupported.
+struct Pano360Probe {
+    app::Pano360Layout layout;
+    bool unsupported = false;
+};
+Pano360Probe probe_pano360(const std::string& ffmpeg_exe,
+                           const std::string& path,
+                           const std::atomic<bool>& cancel);
 
 // How many video tracks a file carries (0 when it cannot be read).
 int probe_video_tracks(const std::string& ffmpeg_exe, const std::string& path,
@@ -604,10 +676,27 @@ private:
     // is going to keep.
     int64_t estimate_frames(const PrepJob& job, const PrepInput& in,
                             const std::string& images);
+    // Measures every video on `at`'s rate and spaces them against one budget,
+    // once per group. A no-op unless the rate is adaptive and the built-in
+    // decoder is the one reading the file.
+    bool plan_group(const PrepJob& job, size_t at, std::string& error);
+
+    // Whether the settings the frames on disk were extracted with still read
+    // the same (ReconStamp.h). A run that changes how a video is unwrapped has
+    // to go back to the video, and `resume` cannot see that by itself.
+    bool frames_stale(const PrepJob& job) const {
+        return job.redo_frames || _frames_stale;
+    }
 
     RunProgress* _prog;
     RunFilms _films;
     const std::atomic<bool>& _cancel;
+    bool _frames_stale = false;
+    // The spacing chosen per input, and which of them have one: an adaptive
+    // plan covers a whole rate group, so it is made before any of the group is
+    // extracted rather than per video.
+    std::vector<std::vector<int64_t>> _plans;
+    std::vector<bool> _planned;
     StageTally _frames_tally, _masks_tally;
 };
 

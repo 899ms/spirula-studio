@@ -731,6 +731,131 @@ SS_MSG(model_live_counts,
     RU("Размещено камер: {0} из {1}   Точек: {2}"),
     TR("Yerleşen kamera: {0} / {1}   Nokta: {2}"));
 
+SS_MSG(pano360_unsupported,
+    EN("360 layout not recognised"),
+    JA("360 の並びが不明です"),
+    ZH_HANS("无法识别的 360 排布"),
+    ZH_HANT("無法辨識的 360 排布"),
+    KO("알 수 없는 360 배치"),
+    DE("360-Anordnung nicht erkannt"),
+    FR("disposition 360 non reconnue"),
+    ES("disposición 360 no reconocida"),
+    PT("disposição 360 não reconhecida"),
+    IT("disposizione 360 non riconosciuta"),
+    NL("360-indeling niet herkend"),
+    RU("раскладка 360 не распознана"),
+    TR("360 yerleşimi tanınmadı"));
+
+SS_MSG(pano360_unsupported_help,
+    EN("This file says it is a 360 capture, but its two tracks are packed in a "
+       "way this build does not know how to unwrap. They are read as two "
+       "ordinary lenses instead, which is unlikely to reconstruct."),
+    JA("このファイルは 360 撮影だと名乗っていますが、2 つのトラックの並びが"
+       "このビルドでは展開できません。代わりにふつうのレンズ 2 本として読み"
+       "ますが、再構成はまず通りません。"),
+    ZH_HANS("这个文件自称是 360 素材，但两条轨道的排布方式本版本无法展开。"
+            "只能当作两个普通镜头来读，重建多半不会成功。"),
+    ZH_HANT("這個檔案自稱是 360 素材，但兩條軌道的排布方式本版本無法展開。"
+            "只能當作兩個普通鏡頭來讀，重建多半不會成功。"),
+    KO("이 파일은 360 촬영본이라고 하지만, 두 트랙의 배치를 이 빌드는 펼칠 수 "
+       "없습니다. 대신 보통 렌즈 두 개로 읽으며, 재구성은 거의 되지 않습니다."),
+    DE("Diese Datei nennt sich eine 360-Aufnahme, aber ihre zwei Spuren sind so "
+       "gepackt, dass dieser Build sie nicht auffalten kann. Sie werden "
+       "stattdessen als zwei gewöhnliche Objektive gelesen, was kaum "
+       "rekonstruiert."),
+    FR("Ce fichier se dit une prise 360, mais ses deux pistes sont rangées "
+       "d'une façon que cette version ne sait pas déplier. Elles sont lues "
+       "comme deux objectifs ordinaires, ce qui a peu de chances d'aboutir."),
+    ES("Este archivo dice ser una toma 360, pero sus dos pistas están dispuestas "
+       "de un modo que esta versión no sabe desplegar. Se leen como dos "
+       "objetivos corrientes, lo que difícilmente reconstruirá."),
+    PT("Este ficheiro diz ser uma captura 360, mas as suas duas faixas estão "
+       "dispostas de um modo que esta versão não sabe desdobrar. São lidas como "
+       "duas lentes vulgares, o que dificilmente reconstrói."),
+    IT("Questo file si dichiara una ripresa 360, ma le sue due tracce sono "
+       "disposte in un modo che questa versione non sa aprire. Vengono lette "
+       "come due obiettivi normali, e difficilmente si ricostruirà."),
+    NL("Dit bestand noemt zich een 360-opname, maar de twee sporen zijn zo "
+       "ingepakt dat deze versie ze niet kan uitvouwen. Ze worden als twee "
+       "gewone lenzen gelezen, wat vrijwel zeker niet reconstrueert."),
+    RU("Файл называет себя съёмкой 360, но его две дорожки уложены так, что эта "
+       "сборка не умеет их разворачивать. Они читаются как два обычных "
+       "объектива, и реконструкция вряд ли получится."),
+    TR("Bu dosya kendini 360 çekimi diye tanıtıyor, ama iki izi bu yapının "
+       "açmayı bilmediği bir düzende. Bunun yerine iki sıradan mercek gibi "
+       "okunuyorlar; bundan kurma pek çıkmaz."));
+
+SS_MSG(view_motion,
+    EN("Motion"),
+    JA("動き"),
+    ZH_HANS("运动"),
+    ZH_HANT("運動"),
+    KO("움직임"),
+    DE("Bewegung"),
+    FR("Mouvement"),
+    ES("Movimiento"),
+    PT("Movimento"),
+    IT("Movimento"),
+    NL("Beweging"),
+    RU("Движение"),
+    TR("Hareket"));
+
+SS_MSG(scan_photos,
+    EN("{0} photographs, nothing to measure"),
+    JA("写真 {0} 枚、測るものはありません"),
+    ZH_HANS("{0} 张照片，没有运动可测"),
+    ZH_HANT("{0} 張照片，沒有運動可測"),
+    KO("사진 {0}장, 잴 것이 없습니다"),
+    DE("{0} Fotos, nichts zu messen"),
+    FR("{0} photographies, rien à mesurer"),
+    ES("{0} fotografías, nada que medir"),
+    PT("{0} fotografias, nada a medir"),
+    IT("{0} fotografie, niente da misurare"),
+    NL("{0} foto's, niets te meten"),
+    RU("{0} фотографий, измерять нечего"),
+    TR("{0} fotoğraf, ölçecek bir şey yok"));
+
+SS_MSG(scan_kept_frames,
+    EN("{0} frames kept"),
+    JA("{0} フレームを残しました"),
+    ZH_HANS("保留了 {0} 帧"),
+    ZH_HANT("保留了 {0} 影格"),
+    KO("{0}개 프레임을 남겼습니다"),
+    DE("{0} Einzelbilder behalten"),
+    FR("{0} images conservées"),
+    ES("{0} fotogramas conservados"),
+    PT("{0} quadros mantidos"),
+    IT("{0} fotogrammi tenuti"),
+    NL("{0} beelden gehouden"),
+    RU("оставлено кадров: {0}"),
+    TR("{0} kare tutuldu"));
+
+SS_MSG(frame_spacing_help,
+    EN("Left to right is the length of the capture. A tall bar is a stretch "
+       "where the view changed fast and more frames were kept."),
+    JA("左から右が撮影の長さです。棒が高いところは視界の変化が速く、"
+       "多くのフレームを残した区間です。"),
+    ZH_HANS("从左到右是整段素材的长度。柱子高的地方视野变化快，留下的帧也多。"),
+    ZH_HANT("從左到右是整段素材的長度。柱子高的地方視野變化快，留下的影格也多。"),
+    KO("왼쪽에서 오른쪽이 촬영 전체 길이입니다. 막대가 높은 구간은 화면이 빨리 "
+       "바뀌어 프레임을 더 남긴 곳입니다."),
+    DE("Links nach rechts ist die Länge der Aufnahme. Ein hoher Balken ist ein "
+       "Stück, in dem sich das Bild schnell änderte und mehr Bilder blieben."),
+    FR("De gauche à droite, la durée de la prise. Une barre haute est un "
+       "passage où la vue changeait vite et où plus d'images ont été gardées."),
+    ES("De izquierda a derecha, la duración de la toma. Una barra alta es un "
+       "tramo donde la vista cambiaba deprisa y se guardaron más fotogramas."),
+    PT("Da esquerda para a direita, a duração da captura. Uma barra alta é um "
+       "trecho onde a vista mudava depressa e ficaram mais quadros."),
+    IT("Da sinistra a destra, la durata della ripresa. Una barra alta è un "
+       "tratto in cui la vista cambiava in fretta e sono rimasti più fotogrammi."),
+    NL("Van links naar rechts is de lengte van de opname. Een hoge balk is een "
+       "stuk waar het beeld snel veranderde en meer beelden zijn gehouden."),
+    RU("Слева направо — длительность съёмки. Высокий столбик — участок, где "
+       "вид менялся быстро и кадров осталось больше."),
+    TR("Soldan sağa çekimin uzunluğu. Yüksek çubuk, görüntünün hızlı değiştiği "
+       "ve daha çok kare tutulan bir bölüm."));
+
 SS_MSG(model_waiting,
     EN("Nothing placed yet -- the first two views have to agree before there is "
        "anything to draw."),
@@ -2503,21 +2628,6 @@ SS_MSG(loop_closure_help_builtin,
        "varsayılan olarak açıktır. “Otomatik”te yalnızca 100 karenin altında "
        "geçerlidir -- üstünde eşleştirme zaten içerik temellidir."));
 
-SS_MSG(frames_per_second,
-    EN("Frames per second"),
-    JA("1秒あたりのフレーム数"),
-    ZH_HANS("每秒帧数"),
-    ZH_HANT("每秒影格數"),
-    KO("초당 프레임 수"),
-    DE("Bilder pro Sekunde"),
-    FR("Images par seconde"),
-    ES("Fotogramas por segundo"),
-    PT("Quadros por segundo"),
-    IT("Fotogrammi al secondo"),
-    NL("Beelden per seconde"),
-    RU("Кадров в секунду"),
-    TR("Saniyedeki kare"));
-
 SS_MSG(frames_per_second_help,
     EN("How many frames to keep per second of video. 1-3 is right for a slow "
        "walkthrough; more only helps if the camera moved fast. A video with a "
@@ -2593,29 +2703,32 @@ SS_MSG(frames_per_second_help_adaptive,
        "video kendininkini kullanır."));
 
 SS_MSG(video_fps_this_one_help,
-    EN("Frames per second for this video alone. Set it back to the rate above "
-       "to follow that one again."),
-    JA("この動画だけの毎秒フレーム数です。上と同じ値に戻すと、また上に従います。"),
-    ZH_HANS("仅用于这个视频的每秒帧数。改回上面的值就重新跟随上面的设置。"),
-    ZH_HANT("僅用於這個影片的每秒影格數。改回上面的值就重新跟隨上面的設定。"),
-    KO("이 동영상에만 적용되는 초당 프레임 수입니다. 위의 값으로 되돌리면 다시 "
-       "위를 따릅니다."),
-    DE("Bilder je Sekunde nur für dieses Video. Auf die Rate oben zurückgesetzt "
-       "folgt es wieder jener."),
-    FR("Images par seconde pour cette vidéo seule. Remettez le débit ci-dessus "
-       "pour qu'elle le suive à nouveau."),
-    ES("Fotogramas por segundo solo para este vídeo. Vuelve a poner la tasa de "
-       "arriba para que la siga otra vez."),
-    PT("Quadros por segundo só para este vídeo. Reponha a taxa acima para que "
-       "volte a segui-la."),
-    IT("Fotogrammi al secondo solo per questo video. Rimetti la frequenza "
-       "qui sopra perché la segua di nuovo."),
-    NL("Beelden per seconde alleen voor deze video. Zet het terug op het tempo "
-       "hierboven om dat weer te volgen."),
-    RU("Кадров в секунду только для этого видео. Верните значение сверху, "
-       "чтобы снова следовать ему."),
-    TR("Yalnızca bu video için saniyedeki kare sayısı. Yukarıdaki hıza geri "
-       "ayarlayınca yine onu izler."));
+    EN("Frames per second for this video alone. \"^\" is following the video "
+       "above it; type that rate back in to go back to following."),
+    JA("この動画だけの毎秒フレーム数です。「^」は上の動画に従っている印で、"
+       "上と同じ値を入れ直すとまた従います。"),
+    ZH_HANS("仅用于这个视频的每秒帧数。「^」表示跟随上面那个视频；改回上面的值"
+            "就重新跟随。"),
+    ZH_HANT("僅用於這個影片的每秒影格數。「^」表示跟隨上面那個影片；改回上面的"
+            "值就重新跟隨。"),
+    KO("이 동영상에만 적용되는 초당 프레임 수입니다. \"^\"는 위 동영상을 따르고 "
+       "있다는 뜻이며, 그 값을 다시 입력하면 다시 따릅니다."),
+    DE("Bilder je Sekunde nur für dieses Video. \"^\" heißt, es folgt dem Video "
+       "darüber; die Rate wieder eintragen, und es folgt erneut."),
+    FR("Images par seconde pour cette vidéo seule. « ^ » signifie qu'elle suit "
+       "la vidéo au-dessus ; retapez ce débit pour qu'elle la suive à nouveau."),
+    ES("Fotogramas por segundo solo para este vídeo. «^» es que sigue al vídeo "
+       "de arriba; vuelve a escribir esa tasa para que lo siga otra vez."),
+    PT("Quadros por segundo só para este vídeo. \"^\" é seguir o vídeo acima; "
+       "escreva essa taxa outra vez para voltar a segui-lo."),
+    IT("Fotogrammi al secondo solo per questo video. \"^\" vuol dire che segue "
+       "il video qui sopra; riscrivi quella frequenza e torna a seguirlo."),
+    NL("Beelden per seconde alleen voor deze video. \"^\" is de video hierboven "
+       "volgen; typ dat tempo terug om weer te volgen."),
+    RU("Кадров в секунду только для этого видео. «^» значит, что оно следует за "
+       "видео выше; введите ту же частоту, чтобы снова следовать."),
+    TR("Yalnızca bu video için saniyedeki kare sayısı. \"^\", üstündeki videoyu "
+       "izlediği anlamına gelir; o hızı yeniden yazınca yine izler."));
 
 SS_MSG(adaptive_fps,
     EN("Adapt the rate to the motion"),

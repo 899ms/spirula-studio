@@ -15,6 +15,14 @@
 
 namespace sfm {
 
+// What a camera says its pictures ARE, rather than what their shape suggests:
+// a GoPro's PRJT ("EACO" on a MAX, "FSFB" on a MAX 2) and the PMOD beside it,
+// which for FSFB is the rows cut off a panorama and the padding at its sides.
+struct VideoProjection {
+    std::string name;
+    std::vector<uint32_t> mode;
+};
+
 // Every `t` is seconds from the first video frame, on the container's clock.
 struct TelemetryVec {
     double t = 0;
@@ -44,6 +52,7 @@ const char* telemetry_carrier_name(TelemetryCarrier c);
 struct Telemetry {
     TelemetryCarrier carrier = TelemetryCarrier::None;
     std::string camera, firmware, serial;
+    VideoProjection projection;
     double video_duration = 0;   // seconds, from the movie header
     double video_fps = 0;        // first video track; 0 unknown
     double video_unix_start = 0; // 0 unknown
@@ -73,6 +82,7 @@ struct Telemetry {
 // this reads. A container carrying no telemetry is not an error: `carrier`
 // stays None and `out.empty()`.
 bool telemetry_read(const std::string& path, Telemetry& out, std::string& error);
+
 bool telemetry_read(const uint8_t* data, size_t size, Telemetry& out, std::string& error);
 
 // The same over random access the caller supplies: `read` fills `n` bytes at
@@ -80,6 +90,11 @@ bool telemetry_read(const uint8_t* data, size_t size, Telemetry& out, std::strin
 // -- the browser tool reads it back through the File API.
 using TelemetryRead = std::function<bool(uint64_t off, void* dst, size_t n)>;
 bool telemetry_read(uint64_t size, const TelemetryRead& read, Telemetry& out, std::string& error);
+
+// `Telemetry::projection` alone, without reading a sensor sample: a 360 layout
+// is settled per file before anything else about it is wanted, and the
+// container's own boxes carry it. Empty when the file names none.
+VideoProjection video_projection(const std::string& path);
 
 // Whether the readings look like a working sensor, not whether they are
 // precise: units, coverage of the video, sample-rate regularity, a gravity

@@ -1814,6 +1814,7 @@ void GuiApp::refresh_sources() {
 
     refresh_subcameras(_sources);
     normalize_source_lenses(_sources, _sfm_job.camera_model);
+    normalize_source_fps(_sources, _sfm_job.prep.video_fps);
 
     // The output folder follows the input until the user takes it over.
     if (_workspace.empty() || _workspace == _workspace_auto) {
@@ -2911,22 +2912,51 @@ void GuiApp::draw_sensor_badge(const PrepInput& s) {
         ui::SetTooltip(dmsg::sensors_carrier_tooltip, {t.carrier});
 }
 
+namespace {
+
+// The rate box's text. The first video spells its rate out with the unit, since
+// it is the one the rest of the list is written against; every row below it
+// shows the caret the lens column uses for the same idea.
+std::string fps_label(float fps) {
+    if (!(fps > 0.0f)) return "^";
+    char b[32];
+    std::snprintf(b, sizeof b, "%g fps", (double)fps);
+    return b;
+}
+
+// And back: a number is a rate (with or without the unit typed back), and
+// anything else -- or the rate the row above is already on -- means "^".
+float parse_fps(const std::string& text, float above) {
+    const double v = std::atof(text.c_str());
+    if (!(v > 0.0) || (float)v == above) return 0.0f;
+    return (float)v;
+}
+
+// The row whose box holds the dataset's own rate: it has nothing above it to
+// follow, so it is never a caret.
+size_t first_video_row(const std::vector<PrepInput>& sources) {
+    for (size_t i = 0; i < sources.size(); i++)
+        if (sources[i].is_video) return i;
+    return sources.size();
+}
+
+}  // namespace
+
 void GuiApp::draw_dataset_source() {
     // One row per input. Several videos reconstruct as one scene -- each gets
     // its own folder of frames under images/, and so its own camera.
     int remove = -1;
     bool edited = false;
-    // Several clips are rarely shot at one pace, so each gets its own rate
-    // once there is another one to differ from.
-    int n_video = 0;
-    for (const PrepInput& s : _sources) n_video += s.is_video ? 1 : 0;
-    const bool per_video_fps = n_video > 1;
+    // The rate lives beside the video it describes rather than in the settings
+    // below, so a list of clips reads as the one decision it usually is.
+    bool any_video = false;
+    for (const PrepInput& s : _sources) any_video = any_video || s.is_video;
     for (size_t i = 0; i < _sources.size(); i++) {
         PrepInput& s = _sources[i];
         ImGui::PushID((int)i);
         // Room for Browse + Remove + where the frames go + what sensors it
         // carries, which is longer than any other row on the screen.
-        ImGui::SetNextItemWidth(px(per_video_fps ? -580.0f : -500.0f));
+        ImGui::SetNextItemWidth(px(any_video ? -590.0f : -500.0f));
         if (ui::InputTextRaw("##in", &s.path)) {
             std::error_code ec;
             s.is_video = !fs::is_directory(s.path, ec) && is_video_path(s.path);
@@ -2952,22 +2982,46 @@ void GuiApp::draw_dataset_source() {
         }
         ImGui::SameLine();
         if (ui::Button(dmsg::remove)) remove = (int)i;
-        if (per_video_fps) {
+        if (any_video) {
             ImGui::SameLine();
             if (s.is_video) {
                 ImGui::BeginDisabled(dataset_locked(Stage::Frames));
-                ImGui::SetNextItemWidth(px(74.0f));
-                float shown = input_fps(_sfm_job.prep, s);
-                // Typing the dataset-wide rate back in is how a row goes back
-                // to following it, which is what an empty override means.
-                if (ui::InputFloatRaw("##fps", &shown, "%.3g fps")) {
-                    if (shown <= 0.0f) shown = _sfm_job.prep.video_fps;
-                    s.fps = shown == _sfm_job.prep.video_fps ? 0.0f : shown;
+                ImGui::SetNextItemWidth(px(84.0f));
+                // The first video's box IS the dataset's rate -- that is what a
+                // preset carries and what every item of a batch starts from --
+                // so its own `fps` stays 0 and the rest follow it.
+                const bool head = i == first_video_row(_sources);
+                const float above =
+                    head ? 0.0f
+                         : input_fps(_sources, _sfm_job.prep.video_fps, i - 1);
+                if (_fps_text.size() != _sources.size()) {
+                    _fps_text.assign(_sources.size(), std::string());
+                    _fps_editing = -1;
                 }
-                ui::help_on_hover(dmsg::video_fps_this_one_help);
+                std::string& text = _fps_text[i];
+                if (_fps_editing != (int)i)
+                    text = fps_label(head ? _sfm_job.prep.video_fps : s.fps);
+                ui::InputTextRaw("##fps", &text);
+                if (ImGui::IsItemActive()) _fps_editing = (int)i;
+                else if (_fps_editing == (int)i) _fps_editing = -1;
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    const float v = parse_fps(text, above);
+                    // A head row cannot be a caret: an unreadable answer there
+                    // leaves the rate where it was rather than at nothing.
+                    if (head) {
+                        if (v > 0.0f) _sfm_job.prep.video_fps = v;
+                    } else {
+                        s.fps = v;
+                    }
+                    edited = true;
+                }
+                ui::help_on_hover(head ? (_sfm_job.prep.adaptive_fps
+                                              ? dmsg::frames_per_second_help_adaptive
+                                              : dmsg::frames_per_second_help)
+                                       : dmsg::video_fps_this_one_help);
                 ImGui::EndDisabled();
             } else {
-                ImGui::Dummy(ImVec2(px(74.0f), 0.0f));
+                ImGui::Dummy(ImVec2(px(84.0f), 0.0f));
             }
         }
         ImGui::SameLine();
@@ -2990,6 +3044,11 @@ void GuiApp::draw_dataset_source() {
         }
         if (masked && ImGui::IsItemHovered())
             ui::SetTooltip(dmsg::existing_masks_tooltip, {s.mask_dir});
+        if (s.pano360_unsupported) {
+            ImGui::SameLine();
+            ui::TextColored(kWarn, dmsg::pano360_unsupported);
+            ui::help_on_hover(dmsg::pano360_unsupported_help);
+        }
         draw_sensor_badge(s);
         ImGui::PopID();
     }
@@ -3274,13 +3333,9 @@ void GuiApp::draw_dataset_basics() {
     bool any_video = false;
     for (const PrepInput& s : _sources) any_video = any_video || s.is_video;
     if (any_video) {
+        // The rate itself is a column of the input list, beside the video it
+        // describes; what is left here is what it means for all of them.
         ImGui::BeginDisabled(dataset_locked(Stage::Frames));
-        ImGui::SetNextItemWidth(px(220.0f));
-        ui::InputFloat(dmsg::frames_per_second, &_sfm_job.prep.video_fps,
-                       0, 0, "%.2g");
-        ui::help_on_hover(_sfm_job.prep.adaptive_fps
-                              ? dmsg::frames_per_second_help_adaptive
-                              : dmsg::frames_per_second_help);
         ui::Checkbox(dmsg::adaptive_fps, &_sfm_job.prep.adaptive_fps);
         ui::help_on_hover(dmsg::adaptive_fps_help);
         if (_sfm_job.prep.adaptive_fps) {
@@ -3296,7 +3351,7 @@ void GuiApp::draw_dataset_basics() {
         ui::help_on_hover(dmsg::sharpness_window_help);
         bool any_multi = false;
         for (const PrepInput& s : _sources)
-            any_multi = any_multi || (s.is_video && !s.eac360.valid() && s.video_tracks >= 2);
+            any_multi = any_multi || (s.is_video && !s.pano360.valid() && s.video_tracks >= 2);
         if (any_multi) {
             ui::Checkbox(dmsg::sync_lenses, &_sfm_job.prep.sync_tracks);
             ui::help_on_hover(dmsg::sync_lenses_help);
@@ -3447,7 +3502,10 @@ void GuiApp::draw_source_cameras() {
     ImGui::Unindent();
     // Only now: the edit is the row's own, and collapsing it into the row above
     // rewrites what the loop was holding references into.
-    if (edited) normalize_source_lenses(_sources, _sfm_job.camera_model);
+    if (edited) {
+        normalize_source_lenses(_sources, _sfm_job.camera_model);
+        normalize_source_fps(_sources, _sfm_job.prep.video_fps);
+    }
 }
 
 bool GuiApp::input_pixel_size(const std::string& path, bool is_video,
@@ -3489,7 +3547,7 @@ void GuiApp::draw_lens_warning(const std::string& path, bool is_video,
     // A 360 capture's lens describes the WARPED views, which are 2:1 (or square
     // faces) by construction; the frame this would measure is the packing.
     for (const PrepInput& s : _sources)
-        if (s.eac360.valid() && s.path == path) return;
+        if (s.pano360.valid() && s.path == path) return;
     // A dual-lens file is two fisheye circles per frame whatever its pixel
     // dimensions are, so this one needs no measurement.
     if (is_dual_fisheye_path(path)) {
@@ -3522,9 +3580,9 @@ PreviewSource GuiApp::preview_source(size_t input) const {
         !_sfm_job.prep.force_external_decode && backends().builtin_video;
     src.tracks = std::max(in.video_tracks, 1);
     src.look.auto_rotate = _sfm_job.prep.auto_rotate;
-    if (in.eac360.valid() && _sfm_job.prep.pano.mode != app::Pano360Mode::Off) {
-        src.look.eac = in.eac360;
-        src.look.views = app::pano360_views(in.eac360, _sfm_job.prep.pano);
+    if (in.pano360.valid() && _sfm_job.prep.pano.mode != app::Pano360Mode::Off) {
+        src.look.eac = in.pano360;
+        src.look.views = app::pano360_views(in.pano360, _sfm_job.prep.pano);
     }
     return src;
 }
@@ -3981,15 +4039,84 @@ void GuiApp::draw_dataset_steps() {
         }
     }
 
-    if (!any) return;
-    const StageProgress p = prog->stage(running);
     // A step that can say how far through it is gets a bar; one that cannot
     // (the mapper counts registrations, not a total) gets its own sentence.
-    if (p.fraction >= 0.0f)
-        ui::ProgressBarRaw(p.fraction, ImVec2(-1, 0),
-                           p.detail.empty() ? nullptr : p.detail.c_str());
-    else if (!p.detail.empty())
-        ui::TextDisabledRaw(p.detail);
+    if (any) {
+        const StageProgress p = prog->stage(running);
+        if (p.fraction >= 0.0f)
+            ui::ProgressBarRaw(p.fraction, ImVec2(-1, 0),
+                               p.detail.empty() ? nullptr : p.detail.c_str());
+        else if (!p.detail.empty())
+            ui::TextDisabledRaw(p.detail);
+    }
+}
+
+// How much the view changed along every input, as the adaptive pass measures
+// it. One row per input in the order they were given, so a folder of photos
+// among the clips is a row that says it has no motion rather than a gap.
+void GuiApp::draw_scan_view(float h) {
+    const std::vector<ScanRow> rows = dataset_steps()->scan();
+    ImGui::BeginChild("##scanview", ImVec2(0, h));
+    // One scale over all of them: a clip that moves twice as much as its
+    // neighbour has to LOOK it, since that is what took the frames off it.
+    float top = 0.0f;
+    for (const ScanRow& r : rows)
+        for (float v : r.speed) top = std::max(top, v);
+
+    const float band = px(38.0f), strip = px(12.0f);
+    const ImU32 back = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    const ImU32 ink = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+    const ImU32 keep = ImGui::GetColorU32(kOk);
+    const ImU32 veil = ImGui::GetColorU32(ImGuiCol_WindowBg, 0.55f);
+    for (const ScanRow& r : rows) {
+        ui::TextRaw(r.name);
+        ImGui::SameLine();
+        if (!r.video)
+            ui::TextDisabled(dmsg::scan_photos, {(long long)r.frames});
+        else if (r.kept_n > 0)
+            ui::TextDisabled(dmsg::scan_kept_frames, {(long long)r.kept_n});
+        else
+            ui::TextDisabledRaw("");
+
+        const float w = ImGui::GetContentRegionAvail().x;
+        const float tall = band + (r.kept.empty() ? 0.0f : strip + px(2.0f));
+        if (w < px(48.0f)) break;
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(at, ImVec2(at.x + w, at.y + band), back);
+        const float step = w / (float)kScanSlices;
+        for (size_t i = 0; i < r.speed.size(); i++) {
+            if (r.hits[i] <= 0 || top <= 0.0f) continue;
+            const float v = std::min(1.0f, r.speed[i] / top);
+            const float x0 = at.x + step * (float)i;
+            dl->AddRectFilled(ImVec2(x0, at.y + band * (1.0f - v)),
+                              ImVec2(x0 + std::max(step - 1.0f, 1.0f), at.y + band),
+                              ink);
+        }
+        // What is not measured yet, dimmed rather than left blank: an empty
+        // stretch of a slow clip looks the same as one nobody has reached.
+        if (r.video && r.done < 1.0f)
+            dl->AddRectFilled(ImVec2(at.x + w * r.done, at.y),
+                              ImVec2(at.x + w, at.y + band), veil);
+        if (!r.kept.empty()) {
+            const float y = at.y + band + px(2.0f);
+            dl->AddRectFilled(ImVec2(at.x, y), ImVec2(at.x + w, y + strip), back);
+            for (size_t i = 0; i < r.kept.size(); i++) {
+                const float v = std::min(1.0f, std::max(0.0f, r.kept[i]));
+                if (v <= 0.0f) continue;
+                const float x0 = at.x + step * (float)i;
+                // The slowest stretch still keeps frames, so it still gets a
+                // mark: a strip that thins to nothing reads as a gap.
+                const float tall = std::max(strip * v, px(2.0f));
+                dl->AddRectFilled(ImVec2(x0, y + strip - tall),
+                                  ImVec2(x0 + std::max(step - 1.0f, 1.0f), y + strip),
+                                  keep);
+            }
+        }
+        ImGui::Dummy(ImVec2(w, tall));
+        ImGui::Spacing();
+    }
+    ImGui::EndChild();
 }
 
 // Which of the three previews the running step implies. Frames, masks and
@@ -4000,7 +4127,9 @@ int GuiApp::preview_for_stage() {
     // would hide it behind a click nobody knows to make.
     if (!dataset_busy()) return _preview_last_stage;
     switch (dataset_steps()->current()) {
-        case Stage::Frames:    return 0;
+        // Nothing is written while the motion is being measured, so the reel
+        // has nothing to show and the curves have everything.
+        case Stage::Frames:    return dataset_steps()->scanning() ? 6 : 0;
         case Stage::Masks:     return 1;
         case Stage::Features:  return 2;
         case Stage::Matching:  return 3;
@@ -4104,12 +4233,13 @@ bool GuiApp::preview_has_content() const {
 // `height` of 0 asks for the splitter, which is what the one-column layout
 // needs; a column of its own hands its own height down instead.
 void GuiApp::draw_dataset_preview(float height) {
-    // Null where the view is not a reel: the match map and the model.
-    FilmReel* reels[6] = {&_film_frames, &_film_masks, &_film_features,
-                          nullptr, nullptr, &_film_geometry};
-    const bool avail[6] = {_film_frames.has_frames(), _film_masks.has_frames(),
+    // Null where the view is not a reel: the match map, the model, the motion.
+    FilmReel* reels[7] = {&_film_frames, &_film_masks, &_film_features,
+                          nullptr, nullptr, &_film_geometry, nullptr};
+    const bool avail[7] = {_film_frames.has_frames(), _film_masks.has_frames(),
                            _film_features.has_frames(), !_matrix.empty(),
-                           _model_attached, _film_geometry.has_frames()};
+                           _model_attached, _film_geometry.has_frames(),
+                           !dataset_steps()->scan().empty()};
     bool any_avail = false;
     for (bool v : avail) any_avail = any_avail || v;
     if (!any_avail) return;
@@ -4122,15 +4252,16 @@ void GuiApp::draw_dataset_preview(float height) {
     if (dataset_busy() && implied >= 0) _preview_last_stage = implied;
     int tab = _preview_tab >= 0 ? _preview_tab : (implied >= 0 ? implied : 0);
     if (!avail[tab]) {
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < 7; i++)
             if (avail[i]) { tab = i; break; }
     }
 
-    const Msg* names[6] = {&dmsg::view_frames, &dmsg::view_masks,
+    const Msg* names[7] = {&dmsg::view_frames, &dmsg::view_masks,
                            &dmsg::view_features, &dmsg::view_matrix,
-                           &dmsg::view_model, &dmsg::view_geometry};
+                           &dmsg::view_model, &dmsg::view_geometry,
+                           &dmsg::view_motion};
     bool first = true;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         if (!avail[i]) continue;
         if (!first) ImGui::SameLine();
         first = false;
@@ -4143,6 +4274,7 @@ void GuiApp::draw_dataset_preview(float height) {
         }
     }
     if (tab == 3) ui::help_on_hover(dmsg::matrix_help);
+    if (tab == 6) ui::help_on_hover(dmsg::frame_spacing_help);
 
     // In a column of its own the height is the column's; otherwise a splitter,
     // as the log has -- what any of these views is worth depends entirely on
@@ -4165,6 +4297,10 @@ void GuiApp::draw_dataset_preview(float height) {
 
     if (reels[tab]) {
         reels[tab]->draw(h - px(8.0f));
+        return;
+    }
+    if (tab == 6) {
+        draw_scan_view(h - px(8.0f));
         return;
     }
     if (tab == 3) {

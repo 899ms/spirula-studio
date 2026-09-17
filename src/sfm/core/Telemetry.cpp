@@ -190,6 +190,7 @@ struct Movie {
     uint32_t timescale = 0;
     uint64_t duration = 0;
     uint64_t creation_1904 = 0;
+    VideoProjection projection;
     std::vector<Track> tracks;
     double durationSec() const { return timescale ? (double)duration / timescale : 0.0; }
     // 1904-01-01 to 1970-01-01.
@@ -299,6 +300,26 @@ bool parse_trak(const uint8_t* data, size_t size, Track& tk) {
     return true;
 }
 
+// The two `udta` keys this needs: what a GoPro calls the projection, and that
+// projection's own numbers. Nested rather than scanned for, so four bytes
+// spelling PRJT inside somebody's payload cannot answer.
+void gpmf_projection(const uint8_t* p, size_t n, int depth, VideoProjection& out) {
+    for (size_t off = 0; off + 8 <= n;) {
+        const uint32_t key = be32(p + off);
+        const uint8_t type = p[off + 4];
+        const size_t len = (size_t)p[off + 5] * be16(p + off + 6);
+        if (off + 8 + len > n) break;
+        if (key == fourcc("PRJT") && type == 'F' && len >= 4)
+            out.name.assign((const char*)p + off + 8, 4);
+        else if (key == fourcc("PMOD") && type == 'L' && out.mode.empty())
+            for (size_t i = 0; i + 4 <= len && i < 64; i += 4)
+                out.mode.push_back(be32(p + off + 8 + i));
+        else if (type == 0 && depth < 4)
+            gpmf_projection(p + off + 8, len, depth + 1, out);
+        off += 8 + ((len + 3) & ~(size_t)3);
+    }
+}
+
 // Scans the top-level boxes for moov, which may follow mdat, and stops at the
 // first thing that is not a box (an Insta360 trailer, say).
 bool read_movie(const Source& src, Movie& mv, bool& is_mp4, std::string& error) {
@@ -343,6 +364,10 @@ bool read_movie(const Source& src, Movie& mv, bool& is_mp4, std::string& error) 
         } else if (b.type == fourcc("trak")) {
             Track tk;
             if (parse_trak(b.payload, b.payload_size, tk)) mv.tracks.push_back(std::move(tk));
+        } else if (b.type == fourcc("udta")) {
+            Box g;
+            if (find_box(b.payload, b.payload_size, fourcc("GPMF"), g))
+                gpmf_projection(g.payload, g.payload_size, 0, mv.projection);
         }
     });
     return true;
@@ -1167,6 +1192,7 @@ bool read_any(const Source& src, Telemetry& out, std::string& error) {
     if (have_movie) {
         out.video_duration = mv.durationSec();
         out.video_unix_start = mv.unixStart();
+        out.projection = mv.projection;
         for (const Track& tk : mv.tracks)
             if (tk.handler == fourcc("vide") && tk.fps() > 0) { out.video_fps = tk.fps(); break; }
     }
@@ -1297,6 +1323,16 @@ bool telemetry_read(const std::string& path, Telemetry& out, std::string& error)
     FileSource src;
     if (!src.open(path)) { error = "cannot open '" + path + "'"; return false; }
     return read_any(src, out, error);
+}
+
+VideoProjection video_projection(const std::string& path) {
+    FileSource src;
+    if (!src.open(path)) return VideoProjection();
+    Movie mv;
+    bool is_mp4 = false;
+    std::string error;
+    if (!read_movie(src, mv, is_mp4, error)) return VideoProjection();
+    return mv.projection;
 }
 
 bool telemetry_read(const uint8_t* data, size_t size, Telemetry& out, std::string& error) {
@@ -1519,6 +1555,11 @@ std::string telemetry_report(const Telemetry& t, const TelemetryCheck& c) {
         o << "camera       : " << t.camera;
         if (!t.firmware.empty()) o << "  fw " << t.firmware;
         if (!t.serial.empty()) o << "  sn " << t.serial;
+        o << "\n";
+    }
+    if (!t.projection.name.empty()) {
+        o << "projection   : " << t.projection.name;
+        for (uint32_t v : t.projection.mode) o << " " << v;
         o << "\n";
     }
     o << "video        : " << fmt("%.1f s", t.video_duration);

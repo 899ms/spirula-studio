@@ -110,6 +110,27 @@ int main() {
         expect((int)plan.size() >= 10, "cap: the cap is nearly filled");
     }
 
+    // Two clips on one rate: the budget is theirs together, so the one that
+    // moves takes it off the one that does not.
+    {
+        std::vector<app::MotionPlanInput> in(2);
+        for (int k = 0; k < 2; k++) {
+            in[k].cost.assign(600, k == 0 ? 0.002f : 0.06f);
+            in[k].ends = indices(600);
+            in[k].frames = 600;
+            in[k].skip = 15;
+            in[k].window = 3;
+        }
+        const std::vector<std::vector<int64_t>> got = app::plan_by_motion(in, 4.0f);
+        const int a = (int)got[0].size(), b = (int)got[1].size();
+        expect(a + b <= 80 && a + b >= 70,
+               "shared: " + std::to_string(a + b) + " frames for a budget of 80");
+        expect(b > 2 * a, "shared: the clip that moves gets more than twice");
+        // And a rate that is still each clip's own, whatever it spends.
+        expect(a >= 600 / 60, "shared: the still clip keeps its slowest rate");
+        expect(b <= 600 / 3 + 1, "shared: the moving clip keeps its fastest rate");
+    }
+
     // Nothing to plan from.
     expect(app::plan_by_motion({}, {}, 0, 15, 3, 4.0f, 0).empty(),
            "empty: no samples, no plan");

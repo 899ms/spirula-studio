@@ -66,6 +66,11 @@ bool sources_look_equirect(const std::vector<PrepInput>& sources,
 void normalize_source_lenses(std::vector<PrepInput>& sources,
                              std::string& camera_model);
 
+// The same for the kept frame rate, whose "^" is a per-input 0. The first VIDEO
+// row's rate lives in `video_fps` rather than in the row, because that is what
+// a preset saves and what every item of a batch then starts from.
+void normalize_source_fps(std::vector<PrepInput>& sources, float& video_fps);
+
 // One lens for the whole capture, written to every input rather than only the
 // first -- the single "Camera / lens" control speaks for all of them.
 void apply_lens_to_sources(std::vector<PrepInput>& sources, SfmJob& sfm,

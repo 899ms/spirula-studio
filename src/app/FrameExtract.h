@@ -18,6 +18,7 @@
 // fallback for when it is not.
 
 #include "app/FrameLook.h"
+#include "app/FrameMotion.h"
 #include "nn/io/Image.h"
 #include "sam/Masking.h"
 
@@ -51,6 +52,10 @@ struct FrameExtractJob : FrameLook {
     // within `adaptive_range` of it. Costs one extra pass over the first track.
     bool  adaptive = false;
     float adaptive_range = 4.0f;
+    // The spacing to keep, when the caller has already worked it out: several
+    // videos on one rate share a budget, and that plan cannot be made from one
+    // of them. Empty lets the run measure and plan its own.
+    std::vector<int64_t> plan;
 
     // Masking. Empty model = no masks.
     sam::MaskOptions mask;
@@ -72,6 +77,16 @@ struct FrameExtractSinks {
     std::function<void(const std::string&)> log;
     // (frames written so far, frames decoded so far). Called per written frame.
     std::function<void(int64_t, int64_t)> progress;
+    // The adaptive pass, which writes nothing and runs before anything else
+    // does: (frames looked at, frames in the track). Called as it goes.
+    std::function<void(int64_t, int64_t)> scanning;
+    // And the spacing it settled on: the source frame each kept frame ends at,
+    // over a capture that many frames long.
+    std::function<void(const std::vector<int64_t>&, int64_t)> planned;
+    // Each step as it is measured, for a panel drawing the curve live: the
+    // frame it ends at, how many the capture holds, and the view change across
+    // it.
+    std::function<void(int64_t, int64_t, float)> measured;
     // A frame worth showing, RGB8 tightly packed, on the extraction thread with
     // the picture still on the host, and the file it is about to be written to
     // (which the writer pool has not reached yet). Copy what you need and
@@ -110,6 +125,17 @@ sfm::ExifTransform fold_auto_rotate(const std::string& path,
 // returns false with error == "cancelled".
 bool extract_frames(const FrameExtractJob& job, const FrameExtractSinks& sinks,
                     FrameExtractStats& stats, std::string& error);
+
+// The view change across this video's first track, which is what an adaptive
+// plan is made of (app/FrameMotion.h). One decode of that track and nothing
+// else: for a caller planning several videos against one budget.
+bool scan_motion(const FrameExtractJob& job, const FrameExtractSinks& sinks,
+                 MotionPlanInput& out, FrameExtractStats& stats,
+                 std::string& error);
+
+// What a plan came out as: the log line, and `sinks.planned`.
+void report_plan(const FrameExtractSinks& sinks, const std::vector<int64_t>& plan,
+                 int64_t frames, double fps);
 
 // The frames at `indices`, as extract_frames() would write them, served by
 // ONE forward pass -- the decoder cannot seek, so asking one at a time

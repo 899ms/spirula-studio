@@ -442,7 +442,7 @@ reconstruction.
 A caller with no image decoders leaves `probe_image_size` null and gets the
 reconstruction's resolution unchanged; the WebAssembly viewer does exactly that.
 
-## 360 cameras (GoPro MAX `.360`)
+## 360 cameras (GoPro MAX and MAX 2 `.360`)
 
 The ten views of a frame share one file stem under `cam0/` .. `cam9/`, so
 `--rig cam0,cam1,...,cam9` (Spirula Studio: the input's rig row, on by
@@ -467,7 +467,6 @@ two side faces, which is where the two lenses meet:
 
 | mode | track | face | strips | canvas |
 |---|---|---|---|---|
-| 8K   | 5952x1920 | 1920 | 2 x 96 | 5760x3840 |
 | 5.6K | 4096x1344 | 1344 | 2 x 32 | 4032x2688 |
 | 3K   | 2272x736  | 736  | 2 x 32 | 2208x1472 |
 
@@ -483,11 +482,43 @@ face=1344/strip=32 (1.24 against 1.50 for the constants in ffmpeg's
 unmerged `gopromax_opencl` patch, which are wrong). The canvas the filter
 graph builds is bit-identical to the one the in-process path assembles.
 
+### The MAX 2 layout, which is a different thing entirely
+
+A MAX 2 writes 5952x1920 tracks, which the arithmetic above happily reads as
+`face=1920, strip=96` -- and that is wrong. Its tracks are **not** a cube map
+between them. Each one is a whole **equirectangular panorama of the sphere**,
+already stitched, with the sides padded to fill the frame:
+
+```
+5952 = 1008 + 3936 + 1008          3936 px = 360 deg, 10.933 px/deg
+1920 rows out of the 1968 a 2:1 panorama would want: +-87.8 deg of elevation
+```
+
+The two tracks hold the same sphere in different orientations (the second is
+rolled about 90 degrees), so either alone is complete; the first is the one
+standing upright and is the only one read. The 1008 px of side padding repeat
+the far side of the panorama from the other lens, so they are dropped.
+
+Nothing about the frame size says where the panorama sits inside it, so the
+camera's own `PMOD` is what places it -- rows cut, then padding -- and both
+numbers have to agree about where the quarter turn lands or the file is
+refused. `PRJT` is "EACO" on both generations and cannot tell them apart; the
+MAX 2 writes a fourth `PMOD` entry and the MAX does not.
+
+These numbers were measured, not documented: the padding boundaries are the
+only strong column discontinuities in the frame (x=1008 and x=4944), which
+fixes the period at 3936; matching the two tracks against each other as one
+rotated sphere peaks at 175.6 degrees of elevation, which is what 10.933
+px/deg over 1920 rows predicts; and 60 frames of the cropped panorama
+reconstruct at **100% registered, 1.02 px mean reprojection** under the
+fixed-geometry equirectangular camera model, which no wrong projection does.
+
 ### What it is unwrapped into
 
 `--360 faces` (the default) cuts **ten perspective views, five per lens**;
 `--360 equirect` makes one 2:1 panorama; the GUI offers the same two under
-"Unwrap into". Faces are the default because the raw file is **not stitched**:
+"Unwrap into". (A MAX 2 is stitched already, so it gets **six** views instead
+-- see below.) Faces are the default because a MAX file is **not stitched**:
 the two lenses meet at azimuth +-90 degrees -- the centre line of the side
 faces -- with real parallax across that seam, and no single camera model
 describes both sides of it.
@@ -542,6 +573,22 @@ lenses into one spherical camera, seam and all, and reconstruction downsamples
 it to `--max-image-size` (1600 px for the learned front ends at `--quality
 high`) -- about 4.4 px per degree, against 16.7 for a 1504 px face.
 
+### A MAX 2's views
+
+A stitched panorama has no seam to keep views off, so faces mode gives it a
+plain **cube of six** at 100 degrees, and equirect mode hands the panorama
+over as it is. The cube is stood on a corner -- face centres at +-35.26
+degrees of elevation, 120 apart in azimuth -- rather than axis-aligned:
+
+- A panorama's poles are its own weak point, a few rows of source stretched
+  around the whole frame. A face pointed straight up or down is a starburst
+  through most of its area. Stood on a corner, no face centre is near a pole
+  and the smear is confined to face corners.
+- Every face then holds some horizon, which is what carries the features.
+  Measured on 38 frames of an 8K clip: **56% of images registered**
+  axis-aligned, **74%** stood on a corner, at 0.61 px mean reprojection. The
+  two faces that still lag are the ones looking at the operator and the mount.
+
 ### What it cannot do for you
 
 - **Orientation.** A `.360` records nothing about how the camera was mounted,
@@ -560,6 +607,23 @@ One frame every `skip` source frames, the sharpest of a window of `keep`
 around each. Both decode paths choose the same frames (`app/FrameExtract.h`),
 and the GUI's rate is **per input**: a capture shot as several clips is rarely
 shot at one pace, so `PrepInput::fps` overrides the job's for that video.
+
+The rate is a column of the input list rather than a field in the settings, so
+it sits beside the video it describes. The first video's box holds the
+dataset-wide rate -- that is what a preset carries and what every item of a
+batch starts from, and it is why the box is there even for a lone video; every
+row below it shows `^`, the convention the lens column already uses, so a dozen
+clips off one camera stay one decision. Typing the rate above back into a `^`
+row returns it to following (`normalize_source_fps`).
+The rows on one rate are also one **budget** when the rate is adaptive: they
+are measured together and spaced against one view-change-per-frame, so of two
+clips at "2 fps" the one that walks briskly gets the denser frames and the one
+shot from a bench gets fewer. Each still keeps its own rate bounds.
+
+A workspace records what its frames were extracted with (`.spirula-frames`,
+`gui/ReconStamp.h`). A re-run whose answer differs -- a different rate, a
+different unwrap, another clip in the list -- goes back to the video instead of
+keeping them, and drops the features and matches that describe the old ones.
 
 ### Adaptive spacing
 
@@ -590,7 +654,7 @@ The global model depends on what the frames are pictures of:
 | capture | model | coverage |
 |---|---|---|
 | ordinary video | 2D affine, in the image | the frame carried over |
-| `.360` (EAC) | a rotation of the SPHERE, through the packing's own mapping | 0 |
+| `.360` | a rotation of the SPHERE, through the packing's own mapping | 0 |
 | dual fisheye (`.insv`, `.osv`) | a rotation of the sphere, equidistant lens | 0 |
 
 A camera that sees every direction keeps every direction when it turns, so a
@@ -617,7 +681,26 @@ plan cannot be made until the whole cost curve is known.
 Without the built-in decoder the same plan is made from the candidate frames
 ffmpeg already extracts, at `fps x max(window, range)` instead of
 `fps x window` so there are enough of them for the fastest rate it may ask for
-(`gui/FrameSelect.h`).
+(`gui/FrameSelect.h`). That path plans one video at a time -- the candidates of
+a whole group are not on disk at once -- and it numbers the frames it keeps by
+the candidate they were, not by how many it has kept. The stem is what times a
+frame against the video's IMU and GPS (`sfm/map/SensorGauge.h`), and an
+adaptive plan leaves nothing evenly spaced for a frame rate to recover it from.
+
+The pass reports as it goes, in two places. It enters the Frames step itself --
+nothing else has, since a whole rate group is measured before any of it is
+written, and the panel draws no bar at all for a step that is not running -- and
+moves a bar across the group's total length, naming the video it is on. A
+13-minute 1080p clip scans at about 165 frames a second, so without the bar the
+screen sat unchanged for over two minutes with the GPU pinned, which reads as a
+hang.
+
+The **Motion** view beside the run's other previews is the rest of it: one row
+per input, in the order they were given, each drawing the view change along that
+capture as it is measured and, under it, the rate the plan settled on. Every row
+is on ONE scale, because a clip that moves twice as much as its neighbour is
+exactly why it took the frames off it. A folder of photographs is a row that
+says it has no motion rather than a gap in the list.
 
 ## Preprocessing tools
 

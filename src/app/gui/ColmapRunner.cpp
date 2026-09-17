@@ -480,7 +480,7 @@ void ColmapRunner::run(ColmapJob job) {
         const std::string changed =
             recon_stamp_change(read_recon_stamp(ws.string()), now);
         const bool rebuild_for_settings = job.settings_built_model && !changed.empty();
-        const bool reuse_model = prior.model && !job.redo_model && !rebuild_for_settings;
+        bool reuse_model = prior.model && !job.redo_model && !rebuild_for_settings;
         if (prior.model && !job.redo_model && rebuild_for_settings)
             log(spirula::i18n::format(lmsg::sfm_settings_changed, {changed}));
         if (prior.resumable() && !job.resume)
@@ -542,6 +542,14 @@ void ColmapRunner::run(ColmapJob job) {
         const bool have_masks = !prep.mask_dir.empty();
         const std::string mask_dir_cfg = prep.mask_dir_cfg;
         _mask_flipped = prep.mask_dir_flipped;
+        // Frames this run replaced: the database indexes the old ones by name
+        // and would match a keypoint table against a picture that has changed.
+        if (prep.frames_rebuilt) {
+            job.redo_model = true;
+            reuse_model = false;
+            std::error_code fec;
+            fs::remove(ws / "database.db", fec);
+        }
         if (prep.per_folder_cameras && job.camera_mode == 0) {
             log(lmsg::one_camera_per_folder.get());
             job.camera_mode = 1;

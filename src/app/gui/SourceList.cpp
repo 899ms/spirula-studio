@@ -118,15 +118,17 @@ void probe_sources(std::vector<PrepInput>& sources,
     // What a .360 actually holds: the extraction plan and the lens both follow
     // from the packing, not from the extension.
     for (PrepInput& s : sources) {
-        if (!s.is_video || s.eac360.valid() || !is_pano360_path(s.path)) continue;
-        s.eac360 = probe_eac360(ffmpeg_exe, s.path, never);
+        if (!s.is_video || s.pano360.valid() || !is_pano360_path(s.path)) continue;
+        const Pano360Probe p = probe_pano360(ffmpeg_exe, s.path, never);
+        s.pano360 = p.layout;
+        s.pano360_unsupported = p.unsupported;
     }
     // A file with several lenses starts as a rig of its own; the row can
     // still say otherwise.
     for (PrepInput& s : sources) {
         if (!s.is_video || s.video_tracks > 0) continue;
         s.video_tracks = std::max(1, probe_video_tracks(ffmpeg_exe, s.path, never));
-        if (s.eac360.valid() || s.video_tracks >= 2) s.rig = kRigOwn;
+        if (s.pano360.valid() || s.video_tracks >= 2) s.rig = kRigOwn;
     }
 }
 
@@ -215,7 +217,7 @@ std::string default_workspace(const std::vector<PrepInput>& sources) {
 
 bool any_pano360(const std::vector<PrepInput>& sources) {
     for (const PrepInput& s : sources)
-        if (s.eac360.valid()) return true;
+        if (s.pano360.valid()) return true;
     return false;
 }
 
@@ -225,8 +227,8 @@ bool any_pano360(const std::vector<PrepInput>& sources) {
 void reset_pano_size(const std::vector<PrepInput>& sources,
                      app::Pano360Options& pano) {
     for (const PrepInput& s : sources)
-        if (s.eac360.valid()) {
-            pano.size = app::pano360_default_size(s.eac360, pano);
+        if (s.pano360.valid()) {
+            pano.size = app::pano360_default_size(s.pano360, pano);
             return;
         }
 }
@@ -289,6 +291,26 @@ void normalize_source_lenses(std::vector<PrepInput>& sources,
 }
 
 
+void normalize_source_fps(std::vector<PrepInput>& sources, float& video_fps) {
+    float above = 0.0f;
+    bool first = true;
+    for (PrepInput& s : sources) {
+        if (!s.is_video) continue;
+        if (first) {
+            if (s.fps > 0.0f) video_fps = s.fps;
+            if (!(video_fps > 0.0f)) video_fps = 2.0f;
+            s.fps = 0.0f;
+            above = video_fps;
+            first = false;
+        } else if (s.fps == above) {
+            s.fps = 0.0f;
+        } else if (s.fps > 0.0f) {
+            above = s.fps;
+        }
+    }
+}
+
+
 void apply_lens_to_sources(std::vector<PrepInput>& sources, SfmJob& sfm,
                            const std::string& model) {
     sfm.camera_model = model;
@@ -310,7 +332,7 @@ void apply_pano_lens(std::vector<PrepInput>& sources, SfmJob& sfm,
     // lens axis, which is the 90-degree one this halves (build_manifest).
     const float focal = faces ? 0.5f : 0.0f;
     for (PrepInput& s : sources) {
-        if (!s.eac360.valid()) continue;
+        if (!s.pano360.valid()) continue;
         s.camera_model = faces ? "pinhole" : "equirectangular";
         s.focal_factor = focal;
         for (SubCamera& sc : s.subcameras) {
@@ -318,7 +340,7 @@ void apply_pano_lens(std::vector<PrepInput>& sources, SfmJob& sfm,
             sc.focal_factor = 0.0f;
         }
     }
-    if (!sources.empty() && sources[0].eac360.valid())
+    if (!sources.empty() && sources[0].pano360.valid())
         sfm.camera_model = sources[0].camera_model;
     // COLMAP has no spherical model; only the faces can reach that engine.
     if (faces) {
@@ -331,6 +353,7 @@ void apply_pano_lens(std::vector<PrepInput>& sources, SfmJob& sfm,
 
 void apply_capture_defaults(std::vector<PrepInput>& sources, SfmJob& sfm,
                             ColmapJob& colmap) {
+    normalize_source_fps(sources, sfm.prep.video_fps);
     if (sources.empty()) return;
     const bool video = sources[0].is_video;
     const bool fisheye = is_dual_fisheye_path(sources[0].path);
@@ -359,7 +382,7 @@ void apply_capture_defaults(std::vector<PrepInput>& sources, SfmJob& sfm,
         // one focal, one centre, no distortion -- so folder grouping would hand
         // bundle adjustment six copies of it to drift apart.
         bool all = true;
-        for (const PrepInput& s : sources) all = all && s.eac360.valid();
+        for (const PrepInput& s : sources) all = all && s.pano360.valid();
         sfm.camera_mode = all ? 0 : 1;
         colmap.camera_mode = all ? 0 : 1;
         if (sfm.prep.pano.mode == app::Pano360Mode::Off)

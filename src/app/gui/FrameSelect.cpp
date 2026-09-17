@@ -127,8 +127,8 @@ int select_sharpest_frames(const std::string& cand_dir,
         group = std::max<int>(
             group, (int)((files.size() + options.max_frames - 1) / options.max_frames));
 
-    // The motion tracker's frames: the EAC top row is three faces wide and one
-    // tall, with no overlap strips left in a canvas ffmpeg already cut.
+    // The motion tracker's frames. ffmpeg has already cut the canvas, so what
+    // is left of an EAC packing is its top row and of a panorama the whole of it.
     app::MotionOptions mo;
     std::unique_ptr<app::MotionTracker> tracker;
     if (options.adaptive) {
@@ -136,10 +136,15 @@ int select_sharpest_frames(const std::string& cand_dir,
         mo.out_fov = options.out_fov;
         int src_w = 0, src_h = 0;
         if (options.eac.valid()) {
-            mo.eac.face = options.eac.face;
-            mo.eac.strip = 0;
-            mo.eac.track_w = 3 * options.eac.face;
-            mo.eac.track_h = options.eac.face;
+            mo.eac = options.eac;
+            mo.eac.margin = 0;
+            if (options.eac.sphere()) {
+                mo.eac.track_w = options.eac.canvasW();
+            } else {
+                mo.eac.strip = 0;
+                mo.eac.track_w = 3 * options.eac.face;
+                mo.eac.track_h = options.eac.face;
+            }
             src_w = mo.eac.track_w;
             src_h = mo.eac.track_h;
         } else {
@@ -156,6 +161,7 @@ int select_sharpest_frames(const std::string& cand_dir,
     // Score, and measure, in chunks: the tracker has to see the frames in
     // order, and everything before it parallelizes.
     std::vector<double> scores(files.size(), -1.0);
+    size_t reported = 0;
     const bool want_scores = group > 1 || options.adaptive;
     if (want_scores) {
         const unsigned n_threads = std::max(1u, std::thread::hardware_concurrency());
@@ -175,7 +181,8 @@ int select_sharpest_frames(const std::string& cand_dir,
                         // worker thread. An unscored frame loses its group.
                         try {
                             analyze(files[i].string(), tracker ? mo.width : 0,
-                                    tracker ? mo.height : 0, options.eac.valid(),
+                                    tracker ? mo.height : 0,
+                                    options.eac.valid() && !options.eac.sphere(),
                                     got[i - base]);
                         } catch (...) {}
                     }
@@ -184,9 +191,16 @@ int select_sharpest_frames(const std::string& cand_dir,
             if (cancel.load()) return -1;
             for (size_t i = base; i < end; i++) {
                 scores[i] = got[i - base].score;
-                if (tracker && !got[i - base].grey.empty())
-                    tracker->track(got[i - base].grey.data(), (int64_t)i);
+                if (!tracker || got[i - base].grey.empty()) continue;
+                tracker->track(got[i - base].grey.data(), (int64_t)i);
+                if (options.measured)
+                    for (; reported < tracker->costs().size(); reported++)
+                        options.measured(tracker->ends()[reported],
+                                         (int64_t)files.size(),
+                                         tracker->costs()[reported]);
             }
+            if (options.scanning)
+                options.scanning((int64_t)end, (int64_t)files.size());
             const auto now = std::chrono::steady_clock::now();
             if (log && (end == files.size() ||
                         now - last_log > std::chrono::seconds(1))) {
@@ -214,6 +228,7 @@ int select_sharpest_frames(const std::string& cand_dir,
                 if (scores[i] > scores[best]) best = i;
             if (keep.empty() || keep.back() != best) keep.push_back(best);
         }
+        if (options.planned) options.planned(plan, (int64_t)files.size());
     }
     if (keep.empty())
         for (size_t g0 = 0; g0 < files.size(); g0 += (size_t)group) {
@@ -230,7 +245,10 @@ int select_sharpest_frames(const std::string& cand_dir,
     for (size_t best : keep) {
         const std::string ext = files[best].extension().string();
         char name[64];
-        std::snprintf(name, sizeof name, "%s%05d%s", prefix.c_str(), kept,
+        // Numbered by the candidate it is, not by how many were kept: the stem
+        // is what times a frame against the video's IMU, and an adaptive plan
+        // leaves nothing evenly spaced for a rate to recover it from.
+        std::snprintf(name, sizeof name, "%s%05d%s", prefix.c_str(), (int)best,
                       ext.empty() ? ".jpg" : ext.c_str());
         fs::rename(files[best], fs::path(out_dir) / name, ec);
         if (ec) {   // cross-device fallback

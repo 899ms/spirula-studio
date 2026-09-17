@@ -44,10 +44,10 @@ std::string unescape(const std::string& s) {
 
 }  // namespace
 
-ReconStamp read_recon_stamp(const std::string& workspace) {
+ReconStamp read_recon_stamp(const std::string& workspace, const char* file) {
     ReconStamp st;
     if (workspace.empty()) return st;
-    std::ifstream f(fs::path(workspace) / kReconStampFile, std::ios::binary);
+    std::ifstream f(fs::path(workspace) / file, std::ios::binary);
     if (!f) return st;
     std::string s;
     bool first = true;
@@ -64,9 +64,10 @@ ReconStamp read_recon_stamp(const std::string& workspace) {
     return st;
 }
 
-void write_recon_stamp(const std::string& workspace, const ReconStamp& st) {
+void write_recon_stamp(const std::string& workspace, const ReconStamp& st,
+                       const char* file) {
     if (workspace.empty()) return;
-    std::ofstream f(fs::path(workspace) / kReconStampFile,
+    std::ofstream f(fs::path(workspace) / file,
                     std::ios::binary | std::ios::trunc);
     if (!f) return;
     f << escape(st.engine) << '\n';

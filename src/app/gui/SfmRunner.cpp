@@ -717,6 +717,15 @@ void SfmRunner::run(SfmJob job) {
             _sfm_image_dir = prep.image_dir;
             _sfm_mask_dir = prep.mask_dir;
         }
+        // Frames this run replaced: features/ and matches.bin describe the old
+        // ones, and the resume signature is made of settings and cannot see it.
+        if (prep.frames_rebuilt) {
+            job.redo_model = true;
+            remove_tree(ws / "features");
+            remove_tree(ws / sfm::resume::kDir);
+            std::error_code fec;
+            fs::remove(ws / "matches.bin", fec);
+        }
         if (prep.per_folder_cameras && job.camera_mode == 0) {
             log(lmsg::one_camera_per_folder.get());
             job.camera_mode = 1;

@@ -31,7 +31,7 @@ struct FrameLook {
     float scale = 1.0f;
     // A 360 capture is unwrapped rather than turned: the layout is measured in
     // source pixels and the plan turns the sphere itself.
-    Eac360Layout eac;
+    Pano360Layout eac;
     std::vector<Pano360View> views;
     bool pano() const { return eac.valid() && !views.empty(); }
 };

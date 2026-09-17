@@ -350,6 +350,11 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/ReconStamp.cpp)
     ss_configure_app(recon_stamp_test)
 
+    add_executable(frames_stamp_test
+        ${SS_SRC}/app/gui/tests/frames_stamp_test.cpp
+        ${SS_SRC}/app/gui/ReconStamp.cpp)
+    ss_configure_app(frames_stamp_test)
+
     add_executable(command_argv_test
         ${SS_SRC}/app/gui/tests/command_argv_test.cpp
         ${SS_SRC}/app/gui/Subprocess.cpp)

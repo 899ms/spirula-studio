@@ -78,7 +78,7 @@ struct SelectClock {
 // a few tens of kilobytes over the bus. Decoding twice is cheaper than holding
 // a video's worth of pictures until the plan is known.
 bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
-                    int track, int tracks, std::vector<int64_t>& plan,
+                    int track, int tracks, MotionPlanInput& out,
                     FrameExtractStats& t, std::string& error) {
     const double t_start = nn::now_ms();
     video::VideoPipeline pipe;
@@ -88,7 +88,7 @@ bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     MotionOptions mo;
     // A capture that sees the whole sphere: the 360 packing, or the two square
     // tracks every dual-fisheye camera writes.
-    if (o.eac.valid()) mo.view = MotionView::Eac360;
+    if (o.eac.valid()) mo.view = MotionView::Packed360;
     else if (tracks >= 2 && info.width == info.height)
         mo.view = MotionView::Fisheye;
     mo.eac = o.eac;
@@ -113,6 +113,7 @@ bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     std::mutex mu;
     std::condition_variable room, work;
     bool feeding = true;
+    size_t reported = 0;
     std::thread consumer([&] {
         for (;;) {
             Sample s;
@@ -125,6 +126,12 @@ bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
             }
             room.notify_one();
             tracker.track(s.gray.data(), s.index);
+            // Read on the thread that appended them, so the vectors need no
+            // lock of their own; finish() may still revise what is already out.
+            if (sinks.measured)
+                for (; reported < tracker.costs().size(); reported++)
+                    sinks.measured(tracker.ends()[reported], info.frame_count,
+                                   tracker.costs()[reported]);
         }
     });
     auto stop = [&]() {
@@ -164,20 +171,31 @@ bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
             lk.unlock();
             work.notify_one();
             ++t.analyzed;
+            if (sinks.scanning)
+                sinks.scanning(h.index + 1, info.frame_count);
         }
         last = h.index;
         pipe.release(h);
     }
     stop();
     tracker.finish();
-    const int64_t frames = info.frame_count > 0 ? info.frame_count : last + 1;
-    plan = plan_by_motion(tracker.costs(), tracker.ends(), frames, o.skip,
-                          std::max(o.keep, 1), o.adaptive_range, o.max_frames);
+    out.cost = tracker.costs();
+    out.ends = tracker.ends();
+    out.frames = info.frame_count > 0 ? info.frame_count : last + 1;
+    out.skip = o.skip;
+    out.window = std::max(o.keep, 1);
+    out.max_frames = o.max_frames;
+    out.fps = fps;
     t.plan = nn::now_ms() - t_start;
-    if (plan.empty()) {
-        error = "the capture is too short to space frames by motion";
-        return false;
-    }
+    return true;
+}
+
+}  // namespace
+
+// What the plan came out as, for the log and for whatever is drawing it.
+void report_plan(const FrameExtractSinks& sinks, const std::vector<int64_t>& plan,
+                 int64_t frames, double fps) {
+    if (plan.empty()) return;
     int64_t tightest = frames, widest = 0;
     for (size_t i = 1; i < plan.size(); i++) {
         const int64_t gap = plan[i] - plan[i - 1];
@@ -191,8 +209,23 @@ bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     log_line(sinks,
              spirula::i18n::format(lmsg::motion_plan, {(long long)plan.size(),
                                                        rate(widest), rate(tightest)}));
-    return true;
+    if (sinks.planned) sinks.planned(plan, frames);
 }
+
+bool scan_motion(const FrameExtractJob& job, const FrameExtractSinks& sinks,
+                 MotionPlanInput& out, FrameExtractStats& stats,
+                 std::string& error) {
+    const int n = video_track_count(job.input, error);
+    if (n <= 0) {
+        if (error.empty()) error = "no video track in " + job.input;
+        return false;
+    }
+    stats.tracks = n;
+    return measure_motion(job, sinks, job.track >= 0 ? job.track : 0, n, out,
+                          stats, error);
+}
+
+namespace {
 
 // ---------------------------------------------------------------------------
 // Extraction
@@ -467,15 +500,17 @@ bool extract_lockstep(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     return true;
 }
 
-// The two tracks of a 360 file, stitched into the EAC canvas and resampled
-// into every view.
+// A 360 file's tracks, laid out as one canvas and resampled into every view.
 bool extract_pair(const FrameExtractJob& o, const FrameExtractSinks& sinks,
                   const fs::path& image_dir, WriterPool& pool,
                   const std::vector<int64_t>& plan, FrameExtractStats& t,
                   std::string& error) {
+    const std::vector<int> want = pano360_needs_track1(o.eac)
+                                      ? std::vector<int>{0, 1}
+                                      : std::vector<int>{0};
     {
         std::vector<std::pair<int, int>> sizes = video_track_sizes(o.input, error);
-        for (size_t k = 0; k < 2; k++) {
+        for (size_t k = 0; k < want.size(); k++) {
             if (k < sizes.size() && sizes[k].first == o.eac.track_w &&
                 sizes[k].second == o.eac.track_h)
                 continue;
@@ -494,7 +529,9 @@ bool extract_pair(const FrameExtractJob& o, const FrameExtractSinks& sinks,
 
     auto on_frame = [&](std::vector<nn::Image>& track, int64_t index, std::string&) {
         double t0 = nn::now_ms();
-        pano360_canvas(o.eac, track[0].data.data(), track[1].data.data(), canvas.data());
+        pano360_canvas(o.eac, track[0].data.data(),
+                       track.size() > 1 ? track[1].data.data() : nullptr,
+                       canvas.data());
         t.convert += nn::now_ms() - t0;
         char stem[64];
         std::snprintf(stem, sizeof(stem), "%05lld", (long long)index);
@@ -526,7 +563,7 @@ bool extract_pair(const FrameExtractJob& o, const FrameExtractSinks& sinks,
         }
         return true;
     };
-    return extract_lockstep(o, sinks, {0, 1}, video::ConvertOpts{}, plan, t, error,
+    return extract_lockstep(o, sinks, want, video::ConvertOpts{}, plan, t, error,
                             on_frame);
 }
 
@@ -700,11 +737,21 @@ bool extract_frames(const FrameExtractJob& job_in, const FrameExtractSinks& sink
     // One plan for the whole file, measured on its first track: the tracks of
     // a rig see the same motion, and the ones that do not are still one camera
     // moving through one scene.
-    std::vector<int64_t> plan;
-    if (job.adaptive &&
-        !measure_motion(job, sinks, tracks[0], (int)tracks.size(), plan, stats,
-                        error))
-        return false;
+    std::vector<int64_t> plan = job.plan;
+    if (job.adaptive && plan.empty()) {
+        MotionPlanInput mi;
+        if (!measure_motion(job, sinks, tracks[0], (int)tracks.size(), mi, stats,
+                            error))
+            return false;
+        std::vector<std::vector<int64_t>> got =
+            plan_by_motion({mi}, job.adaptive_range);
+        if (!got.empty()) plan = std::move(got[0]);
+        if (plan.empty()) {
+            error = "the capture is too short to space frames by motion";
+            return false;
+        }
+        report_plan(sinks, plan, mi.frames, mi.fps);
+    }
     if (pano) {
         stats.tracks = 2;
         ok = extract_pair(job, sinks, base, pool, plan, stats, error);
@@ -772,7 +819,7 @@ bool extract_frames_at(const std::string& input, const FrameLook& look_in,
         conv.scale = look.scale;
         conv.rotate = look.rotate;
     }
-    const size_t np = pano ? 2 : 1;
+    const size_t np = pano && pano360_needs_track1(look.eac) ? 2 : 1;
     std::vector<std::unique_ptr<video::VideoPipeline>> pipe(np);
     for (size_t k = 0; k < np; k++) {
         pipe[k] = std::make_unique<video::VideoPipeline>();
@@ -815,15 +862,15 @@ bool extract_frames_at(const std::string& input, const FrameLook& look_in,
             on_frame(img[0], index);
             return true;
         }
-        for (size_t k = 0; k < 2; k++)
+        for (size_t k = 0; k < np; k++)
             if (img[k].width != look.eac.track_w ||
                 img[k].height != look.eac.track_h) {
                 error = "track " + std::to_string(k) + " is not the size the"
                         " 360 layout was detected at";
                 return false;
             }
-        pano360_canvas(look.eac, img[0].data.data(), img[1].data.data(),
-                       canvas.data());
+        pano360_canvas(look.eac, img[0].data.data(),
+                       np > 1 ? img[1].data.data() : nullptr, canvas.data());
         nn::Image out;
         out.width = map.width;
         out.height = map.height;

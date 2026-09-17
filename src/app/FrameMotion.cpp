@@ -373,7 +373,7 @@ struct MotionTracker::Impl {
 // How far apart two neighbouring grey pixels point, which is the floor every
 // angular threshold here has to clear.
 float MotionTracker::Impl::rad_per_pixel() const {
-    if (o.view == MotionView::Eac360) {
+    if (o.view == MotionView::Packed360) {
         const float face = (float)o.width * (float)o.eac.face /
                            std::max(1.0f, (float)o.eac.track_w);
         return (float)(kPi * 0.5) / std::max(face, 1.0f);
@@ -382,13 +382,13 @@ float MotionTracker::Impl::rad_per_pixel() const {
 }
 
 bool MotionTracker::Impl::to_direction(float x, float y, Vec3& d) const {
-    if (o.view == MotionView::Eac360) {
+    if (o.view == MotionView::Packed360) {
         // The grey frame is the whole track scaled down, strips and all, so
         // the layout's own coordinates are what the mapping wants back.
         const float sx = x * (float)o.eac.track_w / (float)o.width;
         const float sy = y * (float)o.eac.track_h / (float)o.height;
         float v[3];
-        if (!eac360_direction(o.eac, 0, sx, sy, v)) return false;
+        if (!pano360_direction(o.eac, 0, sx, sy, v)) return false;
         d = {v[0], v[1], v[2]};
         return true;
     }
@@ -631,55 +631,86 @@ void motion_frame_size(MotionView view, int src_w, int src_h, int& w, int& h) {
 // Planning
 // ---------------------------------------------------------------------------
 
-std::vector<int64_t> plan_by_motion(const std::vector<float>& cost,
-                                    const std::vector<int64_t>& ends,
-                                    int64_t frames, int skip, int window,
-                                    float range, int max_frames) {
-    std::vector<int64_t> out;
-    if (cost.empty() || cost.size() != ends.size() || skip < 1) return out;
+namespace {
+
+// One video's running total of view change, and the two gaps its own rate puts
+// bounds on. Built once so that bisecting the step re-walks arithmetic only.
+struct PlanTrack {
+    const MotionPlanInput* in = nullptr;
+    std::vector<double> sum;
+    int64_t min_gap = 1, max_gap = 1, want = 1;
+};
+
+std::vector<int64_t> walk_track(const PlanTrack& t, double step) {
+    const MotionPlanInput& in = *t.in;
+    std::vector<int64_t> got;
+    int64_t last = -1;
+    double last_sum = 0;
+    for (size_t i = 0; i < in.cost.size(); i++) {
+        const int64_t at = in.ends[i];
+        if (at < in.window - 1) continue;
+        size_t pick = i;
+        if (last >= 0) {
+            if (at - last < t.min_gap) continue;
+            if (t.sum[i] - last_sum < step && at - last < t.max_gap) continue;
+            // The step falls BETWEEN two samples, and always taking the one
+            // past it lands the whole plan late.
+            if (i > 0 && t.sum[i] - last_sum > step && in.ends[i - 1] > last &&
+                in.ends[i - 1] - last >= t.min_gap &&
+                in.ends[i - 1] >= in.window - 1 &&
+                (t.sum[i] - last_sum) - step > step - (t.sum[i - 1] - last_sum))
+                pick = i - 1;
+        }
+        got.push_back(in.ends[pick]);
+        last = in.ends[pick];
+        last_sum = t.sum[pick];
+        i = pick;   // the sample stepped over is still the next candidate
+        if (in.max_frames > 0 && (int)got.size() >= in.max_frames) break;
+    }
+    return got;
+}
+
+}  // namespace
+
+std::vector<std::vector<int64_t>> plan_by_motion(
+        const std::vector<MotionPlanInput>& in, float range) {
+    std::vector<std::vector<int64_t>> out(in.size());
     if (range < 1.0f) range = 1.0f;
 
-    std::vector<double> sum(cost.size());
+    std::vector<PlanTrack> tracks;
     double total = 0;
-    for (size_t i = 0; i < cost.size(); i++) {
-        total += std::max(0.0f, cost[i]);
-        sum[i] = total;
-    }
-    int64_t want = std::max<int64_t>(1, frames / skip);
-    if (max_frames > 0) want = std::min<int64_t>(want, max_frames);
-
-    // Never closer than one sharpness window: two windows that overlap can
-    // choose the same frame, and one of the two kept frames then vanishes.
-    const int64_t min_gap = std::max<int64_t>(
-        std::max(1, window), (int64_t)((double)skip / range));
-    const int64_t max_gap =
-        std::max<int64_t>(min_gap, (int64_t)((double)skip * range));
-
-    auto walk = [&](double step) {
-        std::vector<int64_t> got;
-        int64_t last = -1;
-        double last_sum = 0;
-        for (size_t i = 0; i < cost.size(); i++) {
-            const int64_t at = ends[i];
-            if (at < window - 1) continue;
-            size_t pick = i;
-            if (last >= 0) {
-                if (at - last < min_gap) continue;
-                if (sum[i] - last_sum < step && at - last < max_gap) continue;
-                // The step falls BETWEEN two samples, and always taking the one
-                // past it lands the whole plan late.
-                if (i > 0 && sum[i] - last_sum > step && ends[i - 1] > last &&
-                    ends[i - 1] - last >= min_gap && ends[i - 1] >= window - 1 &&
-                    (sum[i] - last_sum) - step > step - (sum[i - 1] - last_sum))
-                    pick = i - 1;
-            }
-            got.push_back(ends[pick]);
-            last = ends[pick];
-            last_sum = sum[pick];
-            i = pick;   // the sample stepped over is still the next candidate
-            if (max_frames > 0 && (int)got.size() >= max_frames) break;
+    int64_t want = 0;
+    for (const MotionPlanInput& m : in) {
+        if (m.cost.empty() || m.cost.size() != m.ends.size() || m.skip < 1) continue;
+        PlanTrack t;
+        t.in = &m;
+        t.sum.resize(m.cost.size());
+        double run = 0;
+        for (size_t i = 0; i < m.cost.size(); i++) {
+            run += std::max(0.0f, m.cost[i]);
+            t.sum[i] = run;
         }
-        return got;
+        total += run;
+        // Never closer than one sharpness window: two windows that overlap can
+        // choose the same frame, and one of the two kept frames then vanishes.
+        t.min_gap = std::max<int64_t>(std::max(1, m.window),
+                                      (int64_t)((double)m.skip / range));
+        t.max_gap = std::max<int64_t>(t.min_gap, (int64_t)((double)m.skip * range));
+        t.want = std::max<int64_t>(1, m.frames / m.skip);
+        if (m.max_frames > 0) t.want = std::min<int64_t>(t.want, m.max_frames);
+        want += t.want;
+        tracks.push_back(std::move(t));
+    }
+    if (tracks.empty()) return out;
+
+    auto walk_all = [&](double step) {
+        std::vector<std::vector<int64_t>> got(tracks.size());
+        int64_t n = 0;
+        for (size_t k = 0; k < tracks.size(); k++) {
+            got[k] = walk_track(tracks[k], step);
+            n += (int64_t)got[k].size();
+        }
+        return std::make_pair(n, std::move(got));
     };
 
     // Bisected rather than total/want, because a burst of motion swallows
@@ -687,20 +718,41 @@ std::vector<int64_t> plan_by_motion(const std::vector<float>& cost,
     // is what stops a still capture being answered with every frame of itself.
     const double floor_step = 0.01;
     double lo = floor_step, hi = std::max(floor_step * 2.0, total);
-    out = walk(lo);
-    if ((int64_t)out.size() > want) {
+    auto best = walk_all(lo);
+    if (best.first > want) {
         for (int it = 0; it < 32; it++) {
             const double mid = 0.5 * (lo + hi);
-            std::vector<int64_t> got = walk(mid);
-            if ((int64_t)got.size() > want) {
+            auto got = walk_all(mid);
+            if (got.first > want) {
                 lo = mid;
             } else {
                 hi = mid;
-                out = std::move(got);
+                best = std::move(got);
             }
         }
     }
+    size_t k = 0;
+    for (size_t i = 0; i < in.size(); i++) {
+        const MotionPlanInput& m = in[i];
+        if (m.cost.empty() || m.cost.size() != m.ends.size() || m.skip < 1) continue;
+        out[i] = std::move(best.second[k++]);
+    }
     return out;
+}
+
+std::vector<int64_t> plan_by_motion(const std::vector<float>& cost,
+                                    const std::vector<int64_t>& ends,
+                                    int64_t frames, int skip, int window,
+                                    float range, int max_frames) {
+    MotionPlanInput in;
+    in.cost = cost;
+    in.ends = ends;
+    in.frames = frames;
+    in.skip = skip;
+    in.window = window;
+    in.max_frames = max_frames;
+    std::vector<std::vector<int64_t>> got = plan_by_motion({in}, range);
+    return got.empty() ? std::vector<int64_t>() : std::move(got[0]);
 }
 
 }  // namespace app

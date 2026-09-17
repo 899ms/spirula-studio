@@ -551,6 +551,21 @@ SS_MSG(using_bundled_masks,
     TR("Fotoğraflarla birlikte gelen maskeler kullanılıyor: {0}"));
 
 // {0} is a whole number of degrees.
+SS_MSG(scanning_motion,
+    EN("Looking at the motion: {0} of {1} frames of {2}"),
+    JA("動きを調べています: {2} の {1} フレーム中 {0} フレーム"),
+    ZH_HANS("正在分析运动：{2} 的 {1} 帧中已看 {0} 帧"),
+    ZH_HANT("正在分析運動：{2} 的 {1} 影格中已看 {0} 影格"),
+    KO("움직임을 살펴보는 중: {2}의 {1}개 프레임 중 {0}개"),
+    DE("Die Bewegung wird angesehen: {0} von {1} Einzelbildern von {2}"),
+    FR("Lecture du mouvement : {0} images sur {1} de {2}"),
+    ES("Mirando el movimiento: {0} de {1} fotogramas de {2}"),
+    PT("A ver o movimento: {0} de {1} quadros de {2}"),
+    IT("Si guarda il movimento: {0} di {1} fotogrammi di {2}"),
+    NL("De beweging wordt bekeken: {0} van {1} beelden van {2}"),
+    RU("Изучается движение: {0} из {1} кадров файла {2}"),
+    TR("Hareket inceleniyor: {2} dosyasının {1} karesinden {0} tanesi"));
+
 SS_MSG(motion_plan,
     EN("Motion analysis: {0} frames planned, between {1} and {2} per second."),
     JA("動き解析: {0} フレームを予定しました（毎秒 {1}〜{2} フレーム）。"),
@@ -2675,6 +2690,21 @@ SS_MSG(err_mask_no_target,
        "istem yazın (\"people; cars\") ya da \"Maskeyi dene\" bölümünü açıp "
        "nesneye tıklayın."));
 
+SS_MSG(err_capture_too_short,
+    EN("the capture is too short to space its frames by motion"),
+    JA("この撮影は短すぎて、動きでフレームを配分できません"),
+    ZH_HANS("这段素材太短，无法按运动分配帧"),
+    ZH_HANT("這段素材太短，無法按運動分配影格"),
+    KO("이 촬영본은 너무 짧아 움직임으로 프레임을 나눌 수 없습니다"),
+    DE("die Aufnahme ist zu kurz, um ihre Einzelbilder nach der Bewegung zu verteilen"),
+    FR("la prise est trop courte pour espacer ses images selon le mouvement"),
+    ES("la toma es demasiado corta para espaciar sus fotogramas según el movimiento"),
+    PT("a captura é curta demais para espaçar os quadros pelo movimento"),
+    IT("la ripresa è troppo corta per distanziarne i fotogrammi in base al movimento"),
+    NL("de opname is te kort om de beelden op beweging te verdelen"),
+    RU("съёмка слишком коротка, чтобы расставить кадры по движению"),
+    TR("çekim, karelerini harekete göre aralamak için fazla kısa"));
+
 SS_MSG(err_no_frames_extracted,
     EN("No frames came out of the video."),
     JA("動画からフレームが 1 枚も取り出せませんでした。"),
@@ -3360,6 +3390,31 @@ SS_MSG(sfm_settings_changed,
        "папке вывода ({0}); она строится заново"),
     TR("çıktı klasöründeki yeniden kurma yapıldığından beri ayarlar değişti "
        "({0}); yeniden kuruluyor"));
+
+SS_MSG(frames_settings_changed,
+    EN("the frames in the output folder were extracted with other settings "
+       "({0}); extracting them again"),
+    JA("出力フォルダのフレームは別の設定で切り出されています（{0}）。"
+       "切り出し直します"),
+    ZH_HANS("输出文件夹里的帧是用别的设置抽取的（{0}），将重新抽取"),
+    ZH_HANT("輸出資料夾裡的影格是用別的設定擷取的（{0}），將重新擷取"),
+    KO("출력 폴더의 프레임은 다른 설정으로 뽑은 것입니다({0}). 다시 뽑습니다"),
+    DE("die Bilder im Ausgabeordner wurden mit anderen Einstellungen "
+       "herausgeholt ({0}); sie werden neu herausgeholt"),
+    FR("les images du dossier de sortie ont été extraites avec d'autres "
+       "réglages ({0}) ; elles sont extraites de nouveau"),
+    ES("los fotogramas de la carpeta de salida se extrajeron con otros ajustes "
+       "({0}); se extraen de nuevo"),
+    PT("os fotogramas da pasta de saída foram extraídos com outras definições "
+       "({0}); vão ser extraídos de novo"),
+    IT("i fotogrammi nella cartella di uscita sono stati estratti con altre "
+       "impostazioni ({0}); vengono estratti di nuovo"),
+    NL("de beelden in de uitvoermap zijn met andere instellingen uitgehaald "
+       "({0}); ze worden opnieuw uitgehaald"),
+    RU("кадры в папке вывода были извлечены с другими настройками ({0}); "
+       "они извлекаются заново"),
+    TR("çıktı klasöründeki kareler başka ayarlarla çıkarılmış ({0}); yeniden "
+       "çıkarılıyor"));
 
 SS_MSG(sfm_reusing_model,
     EN("{0} already holds a reconstruction; keeping it and only adding to it "

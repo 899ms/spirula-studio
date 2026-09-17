@@ -15,9 +15,11 @@
 
 namespace gui {
 
-// In the workspace root. Not a dataset artifact: no parser looks for it, and
-// probe_workspace does not count it as a model.
+// In the workspace root. Not dataset artifacts: no parser looks for them, and
+// probe_workspace counts neither as a model. The frames file is the same idea
+// one step earlier -- what the pictures in images/ were extracted with.
 inline constexpr const char* kReconStampFile = ".spirula-recon";
+inline constexpr const char* kFramesStampFile = ".spirula-frames";
 
 struct ReconStamp {
     bool present = false;
@@ -25,8 +27,10 @@ struct ReconStamp {
     std::vector<std::string> args;   // the reconstruction's own flags, in order
 };
 
-ReconStamp read_recon_stamp(const std::string& workspace);
-void write_recon_stamp(const std::string& workspace, const ReconStamp& st);
+ReconStamp read_recon_stamp(const std::string& workspace,
+                            const char* file = kReconStampFile);
+void write_recon_stamp(const std::string& workspace, const ReconStamp& st,
+                       const char* file = kReconStampFile);
 
 // The flag whose value moved since `prior` was written, for the line that says
 // why a model is being rebuilt. Empty when nothing moved, and for a workspace

@@ -13,6 +13,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace gui {
 
@@ -25,15 +26,22 @@ struct FrameSelectOptions {
     float range = 4.0f;
     int   window = 3;
     app::MotionView view = app::MotionView::Planar;
-    // Set when the candidates are EAC canvases: only the top row is measured,
-    // which is half the sphere and all a rotation needs.
-    app::Eac360Layout eac;
+    // Set when the candidates are 360 canvases. An EAC one is measured on its
+    // top row alone, which is half the sphere and all a rotation needs.
+    app::Pano360Layout eac;
     float out_fov = 1.5708f;
+    // (candidates scored, candidates in all), and the spacing settled on: the
+    // candidate each kept frame ends at, out of that many. Both optional.
+    std::function<void(int64_t, int64_t)> scanning;
+    std::function<void(const std::vector<int64_t>&, int64_t)> planned;
+    // Each candidate's view change as it is measured, for a live curve:
+    // the candidate it ends at, how many there are, and the change.
+    std::function<void(int64_t, int64_t, float)> measured;
 };
 
 // Scores every image in cand_dir (sorted by filename) across all hardware
-// threads and MOVES the keepers to out_dir as <prefix>NNNNN.<ext>, contiguously
-// numbered; the losers are deleted. -1 on error or cancellation.
+// threads and MOVES the keepers to out_dir as <prefix>NNNNN.<ext>, numbered by
+// their place in cand_dir; the losers are deleted. -1 on error or cancellation.
 int select_sharpest_frames(const std::string& cand_dir,
                            const std::string& out_dir,
                            const std::string& prefix,
