@@ -15,7 +15,9 @@
 #include "core/ExrImage.h"
 #include "core/ImageOrient.h"
 #include "sfm/core/Exif.h"
+#ifdef SS_TOOL_SFM
 #include "sfm/core/Telemetry.h"
+#endif
 #include "external/stb_image.h"      // stbi_info (image size probe), stbi_load
 #include "external/stb_image_write.h"  // stbi_write_jpg (the photo re-encode)
 
@@ -736,11 +738,14 @@ Pano360Probe probe_pano360(const std::string& ffmpeg_exe,
             tracks = facts.tracks;
     }
     if (tracks.size() != 2 || tracks[0] != tracks[1]) return out;
+    app::Pano360Meta meta;
+#ifdef SS_TOOL_SFM
     // What the camera says it wrote beats what the frame size suggests: two
     // GoPro generations pack 5952x1920 differently and only the tag tells them
     // apart.
     const sfm::VideoProjection pr = sfm::video_projection(path);
-    const app::Pano360Meta meta{pr.name, pr.mode};
+    meta = app::Pano360Meta{pr.name, pr.mode};
+#endif
     const int w = tracks[0].first, h = tracks[0].second;
     if (!app::pano360_detect(2, w, h, meta, out.layout))
         out.unsupported = app::pano360_unsupported(2, w, h, meta);

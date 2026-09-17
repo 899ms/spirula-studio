@@ -28,7 +28,9 @@
 #include "i18n/catalog/SamHelp.h"
 #include "nn/core/Log.h"
 #include "sam/Masking.h"
+#ifdef SS_TOOL_SFM
 #include "sfm/core/Telemetry.h"
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -270,8 +272,11 @@ int sam_cli_extract(int argc, char** argv) {
         std::string err;
         const std::vector<std::pair<int, int>> tracks =
             app::video_track_sizes(o.input, err);
+        app::Pano360Meta meta;
+#ifdef SS_TOOL_SFM
         const sfm::VideoProjection pr = sfm::video_projection(o.input);
-        const app::Pano360Meta meta{pr.name, pr.mode};
+        meta = app::Pano360Meta{pr.name, pr.mode};
+#endif
         if (tracks.size() == 2 && tracks[0] == tracks[1] &&
             app::pano360_detect(2, tracks[0].first, tracks[0].second, meta,
                                 job.eac)) {
