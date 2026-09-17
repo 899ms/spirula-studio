@@ -3137,7 +3137,14 @@ private:
         // A frame another lens already placed says where this one is; a frame
         // with no lens placed yet registers as one thing.
         Pose rig_pose;
-        if (rigPredictedPose(img, rig_pose)) return registerFromRig(img, rig_pose);
+        if (rigPredictedPose(img, rig_pose)) {
+            // The rest of the frame comes with it, and is placed on the same
+            // pose rather than a lens at a time.
+            const uint32_t placed = completeFrame(rigs_->slot(img), img);
+            const bool self = rec_.images.at(img).registered;
+            frame_regs_ += placed - (self ? 1 : 0);
+            return self;
+        }
         if (registerFrame(img)) return true;
         // Gather 2D-3D correspondences (one 3D point per feature: the first seen).
         std::vector<Vec3> X;
@@ -3365,19 +3372,17 @@ private:
         return newly;
     }
 
-    // Where the rig puts `img`, from a registered rig-mate whose member is
-    // calibrated (the one with the most points, when several are).
-    bool rigPredictedPose(uint32_t img, Pose& out) const {
-        if (!rigs_ || rec_.rig_detached.count(img)) return false;
-        const RigSlot sl = rigs_->slot(img);
-        if (!sl.valid() || sl.rig >= rec_.rigs.size()) return false;
+    // Where the rig puts the whole frame, from a registered member whose
+    // extrinsic is calibrated (the one with the most points, when several are).
+    bool rigPredictedFrame(const RigSlot& sl, Pose& out,
+                           uint32_t exclude = UINT32_MAX) const {
+        if (!rigs_ || !sl.valid() || sl.rig >= rec_.rigs.size()) return false;
         const RigCalib& c = rec_.rigs[sl.rig];
-        if (!c.usable(sl.member)) return false;
         const std::vector<uint32_t>& fr = rigs_->frameOf(sl);
         int best = -1;
         uint32_t best_pts = 0;
         for (uint32_t m = 0; m < fr.size(); m++) {
-            if (m == sl.member || fr[m] == kNoImage || !c.usable(m)) continue;
+            if (m == exclude || fr[m] == kNoImage || !c.usable(m)) continue;
             if (rec_.rig_detached.count(fr[m])) continue;
             auto it = rec_.images.find(fr[m]);
             if (it == rec_.images.end() || !it->second.registered) continue;
@@ -3385,13 +3390,26 @@ private:
             if (best < 0 || n > best_pts) { best = (int)m; best_pts = n; }
         }
         if (best < 0) return false;
-        out = c.predict((uint32_t)best, sl.member, rec_.images.at(fr[best]).pose);
+        out = c.rigFromWorld((uint32_t)best, rec_.images.at(fr[best]).pose);
+        return true;
+    }
+
+    // ... and where that puts one of its lenses.
+    bool rigPredictedPose(uint32_t img, Pose& out) const {
+        if (!rigs_ || rec_.rig_detached.count(img)) return false;
+        const RigSlot sl = rigs_->slot(img);
+        if (!sl.valid() || sl.rig >= rec_.rigs.size()) return false;
+        const RigCalib& c = rec_.rigs[sl.rig];
+        if (!c.usable(sl.member)) return false;
+        Pose frame;
+        if (!rigPredictedFrame(sl, frame, sl.member)) return false;
+        out = c.camFromWorld(sl.member, frame);
         return true;
     }
 
     // A frame none of whose lenses is placed yet, registered as one thing:
-    // a member's own P3P proposes the frame's pose, the consensus over every
-    // member's correspondences picks and refines it, and all are placed.
+    // ransacRigPnP draws its sample from every member's correspondences and
+    // scores it on all of them, so lenses too weak alone still place it (D78).
     bool registerFrame(uint32_t img) {
         if (!rigs_ || rec_.rig_detached.count(img)) return false;
         const RigSlot sl = rigs_->slot(img);
@@ -3435,28 +3453,14 @@ private:
             }
             return n;
         };
-        // Hypotheses from each member that can pose itself at all; the frame
-        // keeps the one most correspondences of every member agree with.
-        Pose best;
-        int best_n = 0, from = -1;
-        for (size_t i = 0; i < ms.size(); i++) {
-            const Member& e = ms[i];
-            if (e.X.size() < 4) continue;
-            const PnPResult r = ransacPnP(e.X, e.br, camOf(e.img).focal(), errPx(e.img));
-            if (!r.success) continue;
-            const Pose F = c.rigFromWorld(e.m, r.pose);
-            const int n = consensus(F);
-            if (n > best_n) {
-                best_n = n;
-                best = F;
-                from = (int)i;
-            }
-        }
-        if (best_n < opt_.min_num_pnp_inliers) return false;
-        consensus(best);
-        std::vector<FrameMember> fm;
-        for (Member& e : ms) fm.push_back({&e.X, &e.br, &e.inl, c.cam_from_rig[e.m]});
-        refineFramePose(fm, best);
+        std::vector<RigPnPMember> gm;
+        gm.reserve(ms.size());
+        for (Member& e : ms)
+            gm.push_back({&e.X, &e.br, c.cam_from_rig[e.m],
+                          camOf(e.img).errRad(opt_.max_reproj_error)});
+        const RigPnPResult r = ransacRigPnP(gm);
+        if (!r.success || r.num_inliers < opt_.min_num_pnp_inliers) return false;
+        Pose best = r.rig_from_world;
         const int n = consensus(best);
         size_t pool = 0;
         for (Member& e : ms) {
@@ -3464,12 +3468,16 @@ private:
             pool += e.pool;
         }
         const bool ok = n >= opt_.min_num_pnp_inliers && ratioOk(n, pool);
-        if (rig_dump_)
+        if (rig_dump_) {
+            std::string per;
+            for (Member& e : ms)
+                per += (per.empty() ? "" : " ") + std::to_string(e.n) + "/" +
+                       std::to_string(e.X.size());
             slog::diag(slog::Tag::Map,
-                       "[rig] frame of %s: %zu members, pose from %s, %d/%zu inliers (%zu "
-                       "visible) -> %s", db_.images[img].name.c_str(), ms.size(),
-                       db_.images[ms[(size_t)from].img].name.c_str(), n, total, pool,
+                       "[rig] frame of %s: %zu members, %d/%zu inliers (%zu visible) [%s] -> %s",
+                       db_.images[img].name.c_str(), ms.size(), n, total, pool, per.c_str(),
                        ok ? "placed together" : "REFUSED");
+        }
         if (!ok) return false;
         for (Member& e : ms) {
             if (e.X.empty() && !opt_.rig_complete_blind) continue;
@@ -3507,61 +3515,143 @@ private:
         return std::max(s, sum);
     }
 
-    // Register `img` where its rig puts it. With enough correspondences of
-    // its own the prediction is refined on them and kept when it stays near;
-    // otherwise the rig's word stands, so a frame is never half placed.
-    bool registerFromRig(uint32_t img, const Pose& pred) {
-        std::vector<Vec3> X, br;
-        std::vector<uint32_t> feat;
-        std::vector<uint64_t> pid;
-        gatherCorrespondences(img, X, br, feat, pid);
-        if ((int)X.size() < opt_.min_num_pnp_inliers && !opt_.rig_complete_blind) {
-            reg_fail_.few_corr++;
-            return false;
-        }
-        const double thr = camOf(img).errRad(opt_.max_reproj_error);
-        std::vector<char> inlier(X.size(), 0);
-        auto count = [&](const Pose& p, double t) {
+    // Every lens of a frame the rig reaches and nothing has placed, put down
+    // together: one frame pose refined on all their correspondences at once,
+    // then a bounded correction for a lens with enough of its own (D78).
+    uint32_t completeFrame(const RigSlot& sl, uint32_t caller_triangulates) {
+        if (!rigs_ || !sl.valid() || sl.rig >= rec_.rigs.size()) return 0;
+        const RigCalib& c = rec_.rigs[sl.rig];
+        Pose pred;
+        if (!rigPredictedFrame(sl, pred)) return 0;
+
+        struct Pending {
+            uint32_t img = 0, m = 0;
+            std::vector<Vec3> X, br;
+            std::vector<uint32_t> feat;
+            std::vector<uint64_t> pid;
+            std::vector<char> inl;
+            double thr = 0;
             int n = 0;
-            for (size_t k = 0; k < X.size(); k++)
-                n += (inlier[k] = pnpResidualSq(p, X[k], br[k]) < t * t) ? 1 : 0;
-            return n;
+            size_t pool = 0;
         };
-        Pose pose = pred;
+        std::vector<Pending> ps;
+        size_t total = 0;
+        for (uint32_t m = 0; m < rigs_->frameOf(sl).size(); m++) {
+            const uint32_t j = rigs_->frameOf(sl)[m];
+            if (j == kNoImage || !c.usable(m) || rec_.rig_detached.count(j) || !allowed(j))
+                continue;
+            if (rec_.images.at(j).registered) continue;
+            Pending e;
+            e.img = j;
+            e.m = m;
+            e.thr = camOf(j).errRad(opt_.max_reproj_error);
+            gatherCorrespondences(j, e.X, e.br, e.feat, e.pid);
+            if ((int)e.X.size() < opt_.min_num_pnp_inliers && !opt_.rig_complete_blind) {
+                reg_fail_.few_corr++;
+                continue;
+            }
+            e.inl.assign(e.X.size(), 0);
+            total += e.X.size();
+            ps.push_back(std::move(e));
+        }
+        if (ps.empty()) return 0;
+
+        // `scale` widens every lens's radius by the same factor, which is how
+        // the prediction is judged: it carries the placed lens's error plus the
+        // calibration's, and that is more than a lens's own inlier radius.
+        auto consensus = [&](const Pose& F, double scale) {
+            int sum = 0;
+            for (Pending& e : ps) {
+                const Pose p = c.camFromWorld(e.m, F);
+                const double t = scale * e.thr;
+                e.n = 0;
+                for (size_t k = 0; k < e.X.size(); k++)
+                    e.n += (e.inl[k] = pnpResidualSq(p, e.X[k], e.br[k]) < t * t) ? 1 : 0;
+                sum += e.n;
+            }
+            return sum;
+        };
+        auto visible = [&](const Pose& F) {
+            size_t sum = 0;
+            for (Pending& e : ps) {
+                e.pool = visiblePool(e.img, e.X, e.br, c.camFromWorld(e.m, F));
+                sum += e.pool;
+            }
+            return sum;
+        };
+
+        Pose frame = pred;
         bool own = false;
         int inl = 0;
-        size_t pool = 0;
-        // The prediction carries its rig-mate's error plus the calibration's;
-        // a factor of the radius admits that before the refinement decides on
-        // the image's own terms.
-        if ((int)X.size() >= opt_.min_num_pnp_inliers &&
-            count(pred, 3.0 * thr) >= opt_.min_num_pnp_inliers) {
+        size_t vis = 0;
+        double moved = 0;
+        if (consensus(pred, 3.0) >= opt_.min_num_pnp_inliers) {
             Pose refined = pred;
-            refinePose(X, br, inlier, refined);
-            const int n = count(refined, thr);
-            const size_t vis = visiblePool(img, X, br, refined);
-            const double moved = rotationAngleDeg(mul(refined.R, transpose(pred.R)));
-            own = n >= opt_.min_num_pnp_inliers && ratioOk(n, vis) && moved <= rigMoveTolDeg(img);
-            if (own) {
-                pose = refined;
-                inl = n;
-                pool = vis;
+            std::vector<FrameMember> fm;
+            for (Pending& e : ps)
+                fm.push_back({&e.X, &e.br, &e.inl, c.cam_from_rig[e.m], 1.0 / e.thr});
+            if (refineFramePose(fm, refined)) {
+                inl = consensus(refined, 1.0);
+                vis = visible(refined);
+                moved = rotationAngleDeg(mul(refined.R, transpose(pred.R)));
+                double tol = 0;
+                for (const Pending& e : ps) tol = std::max(tol, rigMoveTolDeg(e.img));
+                own = inl >= opt_.min_num_pnp_inliers && ratioOk(inl, vis) && moved <= tol;
+                if (own) frame = refined;
             }
-            if (rig_dump_)
-                slog::diag(slog::Tag::Map,
-                           "[rig] %s: predicted pose refined by %.2f deg, %d/%zu inliers "
-                           "(%zu visible) -> %s", db_.images[img].name.c_str(), moved, n,
-                           X.size(), vis, own ? "refined" : "the rig's word");
         }
         if (!own) {
-            inl = count(pred, thr);
-            pool = visiblePool(img, X, br, pred);
+            inl = consensus(pred, 1.0);
+            vis = visible(pred);
         }
-        if (inl == 0) reg_rig_word_++;
-        focal_known_.insert(rec_.images[img].camera_id);
-        commitPose(img, pose, feat, pid, inlier, inl, pool);
-        reg_by_rig_++;
-        return true;
+        if (rig_dump_)
+            slog::diag(slog::Tag::Map,
+                       "[rig] frame of %s: %zu lens(es) to place, predicted pose refined by "
+                       "%.2f deg, %d/%zu inliers (%zu visible) -> %s",
+                       db_.images[ps.front().img].name.c_str(), ps.size(), moved, inl, total,
+                       vis, own ? "refined" : "the rig's word");
+
+        uint32_t placed = 0;
+        for (Pending& e : ps) {
+            Pose pose = c.camFromWorld(e.m, frame);
+            // A lens with enough of its own refines on top of the frame's pose,
+            // bounded by what the calibration is worth: the extrinsics are
+            // estimated, and a lens that sees better than they know may say so.
+            std::vector<char> mask(e.X.size(), 0);
+            int wide = 0;
+            for (size_t k = 0; k < e.X.size(); k++)
+                wide += (mask[k] = pnpResidualSq(pose, e.X[k], e.br[k]) <
+                                   9.0 * e.thr * e.thr) ? 1 : 0;
+            if (wide >= opt_.min_num_pnp_inliers) {
+                Pose alone = pose;
+                if (refinePose(e.X, e.br, mask, alone)) {
+                    int n = 0;
+                    for (size_t k = 0; k < e.X.size(); k++)
+                        n += (mask[k] = pnpResidualSq(alone, e.X[k], e.br[k]) <
+                                        e.thr * e.thr) ? 1 : 0;
+                    const size_t v = visiblePool(e.img, e.X, e.br, alone);
+                    const double mv = rotationAngleDeg(mul(alone.R, transpose(pose.R)));
+                    if (n > e.n && ratioOk(n, v) && mv <= rigMoveTolDeg(e.img)) {
+                        pose = alone;
+                        e.n = n;
+                        e.pool = v;
+                        e.inl.swap(mask);
+                    }
+                }
+            }
+            if (e.n == 0) reg_rig_word_++;
+            focal_known_.insert(rec_.images[e.img].camera_id);
+            commitPose(e.img, pose, e.feat, e.pid, e.inl, e.n, e.pool);
+            reg_by_rig_++;
+            placed++;
+            if (e.img == caller_triangulates) continue;
+            {
+                ProfTimer pt(g_map_prof.tri);
+                triangulateForImage(e.img);
+            }
+            recent_regs_.push_back(e.img);
+        }
+        return placed;
     }
 
     // How far a refined pose may move from the rig's prediction and still be
@@ -3576,24 +3666,7 @@ private:
 
     // Register the unregistered rig-mates of `img`'s frame. Returns how many.
     uint32_t completeFrameOf(uint32_t img) {
-        if (!rigs_) return 0;
-        const RigSlot sl = rigs_->slot(img);
-        if (!sl.valid()) return 0;
-        uint32_t n = 0;
-        for (uint32_t j : rigs_->frameOf(sl)) {
-            if (j == kNoImage || j == img || !allowed(j)) continue;
-            if (rec_.images.at(j).registered) continue;
-            Pose pose;
-            if (!rigPredictedPose(j, pose)) continue;
-            if (!registerFromRig(j, pose)) continue;
-            {
-                ProfTimer pt(g_map_prof.tri);
-                triangulateForImage(j);
-            }
-            recent_regs_.push_back(j);
-            n++;
-        }
-        return n;
+        return rigs_ ? completeFrame(rigs_->slot(img), kNoImage) : 0;
     }
 
     // ... of every registered frame, once a calibration is there to do it with.
@@ -4375,7 +4448,7 @@ private:
     const RigTable* rigs_ = nullptr;  // null = no rigs, or --no-use-rigs
     uint32_t reg_by_rig_ = 0;         // registrations the rig placed, summed over the run
     uint32_t reg_rig_word_ = 0;       // ... of them with no inlier of their own
-    uint32_t frame_regs_ = 0;         // rig-mates registerFrame placed beside the candidate
+    uint32_t frame_regs_ = 0;         // rig-mates placed beside the candidate
     uint32_t rig_refined_at_ = 0;     // model size at the last extrinsic refinement
 
     // A refined member costs every one of its observations six more columns,

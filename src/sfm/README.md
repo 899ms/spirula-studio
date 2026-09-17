@@ -550,24 +550,47 @@ What the run does with it, in the order it happens:
   frames agree within three times that -- the two `.insv` tracks extracted
   frame by frame do this, since each track kept its own sharpest frame, and
   agree on only 55-80% of frames -- and its images register as they always did.
-- **Frames register as one thing** (`Mapper::registerFrame`). Once a member
-  is calibrated, a candidate whose frame has no lens placed yet brings the
-  whole frame: every calibrated member offers its 2D-3D correspondences, each
-  member with enough of them proposes the frame's pose from its own P3P, the
-  proposal most correspondences of *all* members agree with wins, one
-  refinement over all of them settles it (`refineFramePose`), and the inlier
-  and ratio gates judge the frame's total. Every member is then placed, a
-  lens with nothing of its own to offer on the rig's word alone (`--no-rig-blind`
-  turns that off), which is how ten lenses that barely overlap -- each too
-  weak to register alone -- or a lens on the sky get a pose at all. The
-  ranking that picks the next candidate counts a frame's correspondences
-  together for the same reason.
-- **Frames stay whole.** A frame with a lens already placed places the
-  others, always: the rig's pose is refined on the image's own correspondences
-  when it has enough and the refinement stays within the calibration's spread
-  (floor 1 deg), and stands as predicted otherwise. The summary line counts
-  the images placed with no inlier of their own. Every de-registration pass
-  judges a frame by its members' points together and drops it whole, and
+- **Frames register as one thing** (`Mapper::registerFrame`). Once a member is
+  calibrated, a candidate whose frame has no lens placed yet brings the whole
+  frame, and the frame -- not a lens -- is what the PnP estimates: every
+  calibrated member's 2D-3D correspondences go into one pool, and one LO-RANSAC
+  over that pool solves for the frame's pose (`ransacRigPnP`,
+  `geometry/AbsolutePose.h`). A minimal sample is three correspondences drawn
+  from the pool, scored against **all** the members, so a hypothesis that
+  explains one lens and contradicts the other nine loses to one that explains
+  the frame. Three rays that meet at a lens's optical centre solve as P3P;
+  three that do not -- because the lens that supplied one of them was too small
+  to fill the sample -- solve as a generalized camera (`geometry/GP3P.h`,
+  gp3p), so a frame can be posed that no single lens could pose. The local
+  optimization refines the frame pose over every member's inliers
+  (`refineFramePose`), and the inlier and ratio gates judge the frame's total.
+  Every member is then placed, a lens with nothing of its own to offer on the
+  rig's word alone (`--no-rig-blind` turns that off), which is how ten lenses
+  that barely overlap -- each too weak to register alone -- or a lens on the
+  sky get a pose at all. The ranking that picks the next candidate counts a
+  frame's correspondences together for the same reason.
+
+  The sample is drawn from one lens whenever the lens the first draw landed on
+  can fill it. Three rays of one lens are exact whatever the calibration is
+  worth, while a sample spanning lenses carries the calibration's own error --
+  and a rig estimated from the reconstruction is good to a fraction of a
+  degree, not to a pixel. Measured on a `.360` capture and on a dual-fisheye
+  one, drawing across lenses regardless cost coverage; drawing within one and
+  scoring across all of them is what the numbers in
+  `docs/notes/sfm-rig-constraints.md` were taken on.
+- **Frames stay whole.** A frame with a lens already placed places the others,
+  always, and places them together (`Mapper::completeFrame`). The lens that is
+  there predicts the frame's pose; that one pose is then refined on **all** the
+  waiting lenses' correspondences at once (`refineFramePose`) and kept when it
+  explains enough of them and stays within the calibration's spread (floor 1
+  deg), and stands as predicted otherwise. A lens with a workable set of its own
+  may then take a correction on top of the frame's pose, under the same bound
+  and only when it explains more than the frame's pose did -- because the
+  extrinsics are estimated rather than exact, and a lens that sees better than
+  they know should say so. So the frame pose carries the lenses that have little
+  to say, and the ones that have plenty are not held back by it. The summary line
+  counts the images placed with no inlier of their own. Every de-registration
+  pass judges a frame by its members' points together and drops it whole, and
   every refinement ends by placing the mates of whatever is registered, so no
   lens of a placed frame is ever left out.
 - **Bundle adjustment** (`map/Bundle.h`, `ba/README.md` "Rigs"). A frame is one
