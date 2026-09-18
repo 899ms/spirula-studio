@@ -47,8 +47,12 @@ build_develop.bat [cmake args...]
 
 Both run codegen first (skipped gracefully if `python3` is missing — the
 generated files are committed), then the [lints](#lints), then configure +
-build into `build/`. `build_develop.bash` additionally caps the job count by
-available RAM (~750 MB/job).
+build into the tree `SS_BACKEND` names: `build_cuda/` or `build_vulkan/`.
+macOS has one backend and uses a single `build/`. The scripts pick the
+directory themselves — a `-B` of your own reaches CMake but not the build step
+that follows, so select the tree with `SS_BACKEND`, not with `-B`.
+`build_develop.bash` additionally caps the job count by available RAM
+(~750 MB/job).
 
 ## The matrix
 
@@ -60,8 +64,8 @@ available RAM (~750 MB/job).
 | parity tests | add `-DSS_BUILD_BACKEND_TESTS=ON` (Vulkan builds them unconditionally) |
 | Vulkan GUI, everything on | `bash build_develop.bash -DSS_BACKEND=vulkan -DSS_ENABLE_PATENTED=ON` |
 
-Keep the two backends in **separate build directories** so you can test both
-without reconfiguring, e.g. `-B build_cuda` and `-B build`.
+The two backends land in **separate trees**, so both can be built and tested
+from one checkout and neither reconfigures the other.
 
 ## Options
 
@@ -131,8 +135,8 @@ a block.
 ```bash
 python3 tools/check_comment_length.py          # what the build will say
 python3 tools/check_comment_length.py --all    # the whole tree, for cleanup
-SS_SKIP_COMMENT_CHECK=1 ninja -C build         # skip it for one build
-cmake -B build -DSS_CHECK_COMMENTS=OFF         # or for a whole build tree
+SS_SKIP_COMMENT_CHECK=1 ninja -C build_vulkan  # skip it for one build
+cmake -B build_vulkan -DSS_CHECK_COMMENTS=OFF  # or for a whole build tree
 ```
 
 Neither escape hatch is a fix: the comment is still over budget, and the next
@@ -271,7 +275,7 @@ Keep it global: one translation unit built without it is one crash. A quick
 check on a built binary --
 
 ```bash
-dumpbin /imports build/spirula.exe | findstr _Mtx_init_in_situ
+dumpbin /imports build_vulkan/spirula.exe | findstr _Mtx_init_in_situ
 ```
 
 -- must print a line. If it does not, the define did not reach the build.
@@ -360,8 +364,8 @@ apart:
   that should have gone through `ss_write_if_different()`.
 - `stored deps info out of date for ...`, on *every* object, with a
   `ninja: warning: premature end of file; recovering` near the top — a corrupt
-  `build/.ninja_deps`. Ninja's recovery truncates the log but not past the bad
+  `<build dir>/.ninja_deps`. Ninja's recovery truncates the log but not past the bad
   record, so the log never heals on its own: each build's header dependencies
   are discarded when the next build loads it back. The build scripts detect
   this and repair it with `ninja -t recompact`; by hand,
-  `cmake --build build -- -t recompact` (or just delete `build/.ninja_deps`).
+  `cmake --build <build dir> -- -t recompact` (or just delete its `.ninja_deps`).

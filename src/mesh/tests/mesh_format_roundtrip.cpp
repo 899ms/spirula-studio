@@ -1,7 +1,7 @@
 // mesh_format_roundtrip -- every format the mesher writes reads back, and a
 // run asking for several colors writes each of them exactly once.
 //
-//   ./build/mesh_format_roundtrip
+//   ./build_vulkan/mesh_format_roundtrip
 //
 // The writers and the reader are two hand-written implementations of the same
 // five container formats; nothing but a round trip keeps them honest.

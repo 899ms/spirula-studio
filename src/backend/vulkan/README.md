@@ -257,7 +257,7 @@ in registers, and measure on Apple either way.
 MoltenVK translates our SPIR-V to Metal Shading Language through
 SPIRV-Cross, and two of its habits turn correct SPIR-V into wrong or
 uncompilable MSL. Both are invisible on every other driver, and both were
-found the same way: `spirv-cross --msl --stage comp build/spirv/<blob>.spv`
+found the same way: `spirv-cross --msl --stage comp build_vulkan/spirv/<blob>.spv`
 prints exactly what the Metal compiler will see, so read that before
 guessing.
 

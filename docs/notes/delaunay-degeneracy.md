@@ -131,7 +131,7 @@ out 4.8 s *faster* than before. Every gram of this is for the lattice column.
 
 ## Reproducing
 
-`build/delaunay_degenerate` builds both clouds in process and runs them under a
+`delaunay_degenerate` builds both clouds in process and runs them under a
 watchdog, since the failure is a walk that never returns rather than a wrong
 answer. The lattice case is the one that hangs the unfixed code; the surface
 case is the shape a trained scene converges to and must stay fast.

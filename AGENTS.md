@@ -166,17 +166,17 @@ src/
 Always use the dev scripts; they run codegen first and pick a sane job count.
 
 ```bash
-# Linux
-bash build_develop.bash -DSS_BACKEND=cuda
-bash build_develop.bash -DSS_BACKEND=vulkan   # separate build dir advised
+# Linux -- one tree per backend, so both can live in one checkout
+bash build_develop.bash -DSS_BACKEND=cuda     # -> build_cuda/
+bash build_develop.bash -DSS_BACKEND=vulkan   # -> build_vulkan/
 # Windows (cmd)
-build_develop.bat -DSS_BACKEND=vulkan
+build_develop.bat -DSS_BACKEND=vulkan         # -> build_vulkan\
 ```
 
 Use
 `build_develop.bash`; it runs codegen first and picks a RAM-aware job count.
 
-Everything builds into **one executable**, `build/spirula`: no arguments opens
+Everything builds into **one executable**, `<build dir>/spirula`: no arguments opens
 the GUI (`-DSS_BUILD_GUI=OFF` leaves a headless binary that needs neither a
 display nor GL), `spirula sfm|train|sam|mesh` are the command-line tools, and
 a symlink named `spirula-sfm` runs that tool directly (`src/app/Tools.h`);
@@ -185,8 +185,9 @@ reconstruction and that estimation by re-running itself as a child process, so
 there is no sibling binary to keep next to it. `-DSS_SEPARATE_TOOLS=ON` also builds the old
 per-tool executables.
 
-Backends build into different trees; keep them separate (`-B build_cuda`,
-`-B build`) so you can test both without reconfiguring. Options:
+The dev scripts put each backend in its own tree -- `build_cuda/` or
+`build_vulkan/`, and `build/` on macOS, which has one backend -- so testing
+both needs no reconfiguring and no `-B`. Options:
 `SS_BACKEND` (`cuda`|`vulkan`), `SS_BUILD_GUI`,
 `SS_BUILD_BACKEND_TESTS`, `SS_DEBUG_SYMBOLS`,
 `SS_BUILD_SFM`, `SS_BUILD_SAM`, `SS_ENABLE_PATENTED`,
@@ -293,7 +294,7 @@ before touching anything under `backend/vulkan/`.
 
 ```bash
 # native parity tests (CUDA build)
-bash build_develop.bash -DSS_BUILD_BACKEND_TESTS=ON && ./build/<test_name>
+bash build_develop.bash -DSS_BUILD_BACKEND_TESTS=ON && ./build_cuda/<test_name>
 # the Vulkan build produces the same test binaries unconditionally
 ```
 
@@ -560,8 +561,8 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   read-only: `engine_scene_*` keeps several splat SETS resident and binds one
   per render, which is how the GUI shows four models side by side
   (`docs/notes/compare-view.md`).
-- **`build/_deps` on WSL drvfs** may need `git config safe.directory` entries
-  for the FetchContent'd GLFW/imgui.
+- **`_deps` in the build tree, on WSL drvfs**, may need `git config
+  safe.directory` entries for the FetchContent'd GLFW/imgui.
 - **A static library whose only content is a static initializer is not
   linked.** The generated SPIR-V blob tables are archive members that nothing
   references, so registration is an explicit call at each library's entry point
@@ -607,14 +608,14 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   until it is added.** `DatasetPreset.cpp` and `MeshPreset.cpp` each carry one
   `X(key, member)` row per setting; a field added to `SfmJob`, `ColmapJob` or
   `MeshJob` and not added there saves, loads, and quietly runs at its default.
-  `build/preset_roundtrip_test` is the guard: it moves every field the table
+  `preset_roundtrip_test` is the guard: it moves every field the table
   names off its default and compares after a round trip.
 - **A mesh format lives in four places and reads back in two.** `kMeshFormats`
   (`app/gui/MeshJob.h`) is the GUI's list, `parse_one_mesh_format` and
   `write_mesh` (`mesh/MeshExport.cpp`) are the writer, `check_export_support`
   decides which colors it can carry, and `mesh/MeshImport.cpp` plus
   `viewer/src/viewer.cpp` are the two readers that have to open it.
-  `build/mesh_format_roundtrip` writes every format and reads it back, which is
+  `mesh_format_roundtrip` writes every format and reads it back, which is
   the only thing keeping the two writers' idea of a file and the two readers'
   from drifting.
 - **One meshing run can be asked for several colors**, and the texture atlas

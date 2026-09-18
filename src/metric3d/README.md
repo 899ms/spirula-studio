@@ -215,9 +215,9 @@ not the ViT.
 ## Testing
 
 ```bash
-./build/nn_ops_test                 # the general ops, vs a scalar CPU reference
-./build/metric3d_test               # cached checkpoints, or SKIP
-./build/metric3d_test --model M --image IMG.jpg --max-size 1064 --repeat 3
+./build_vulkan/nn_ops_test                 # the general ops, vs a scalar CPU reference
+./build_vulkan/metric3d_test               # cached checkpoints, or SKIP
+./build_vulkan/metric3d_test --model M --image IMG.jpg --max-size 1064 --repeat 3
 spirula geometry --check            # the camera round trip, no network in it
 ```
 
@@ -232,7 +232,7 @@ The gate that matters is parity against onnxruntime:
 ```bash
 pip install onnx onnxruntime numpy
 SS_METRIC3D_F32_WEIGHTS=1 SS_METRIC3D_DUMP=/tmp/ours \
-    ./build/metric3d_test --model model.onnx --image IMG.jpg --max-size 616
+    ./build_vulkan/metric3d_test --model model.onnx --image IMG.jpg --max-size 616
 python3 tools/metric3d/compare_ort.py --onnx model.onnx --ours /tmp/ours
 ```
 

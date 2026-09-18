@@ -8,7 +8,7 @@ test needs no python and no OpenEXR at run time.
 
     pip install OpenEXR
     python tools/gen_exr_cases.py /tmp/exr_cases
-    ./build/exr_decode /tmp/exr_cases
+    ./build_vulkan/exr_decode /tmp/exr_cases
 
 Cases whose name starts with `err_` must be REFUSED by the reader; every other
 case must decode bit-exactly to its .f32 companion.

@@ -48,12 +48,12 @@ regenerates the minimax transcendental coefficients in `df.slang` /
 
 ```bash
 bash build_develop.bash -DSS_BACKEND=vulkan
-./build/spirula sfm ba /path/to/bal/problem-16-22106-pre.txt --real double
-./build/spirula sfm ba problem.txt --real df --loss huber --loss-param 1.0 --ply out
-./build/spirula sfm ba /path/to/sparse/0 -o refined/       # a COLMAP model
-./build/spirula sfm ba /path/to/sparse/0 --real cpu        # ... on the host
-./build/sfm_cholesky_test 500 --real df          # dense solver unit test
-./build/sfm_ba_cpu_test                          # host solver vs a written-out reference
+./build_vulkan/spirula sfm ba /path/to/bal/problem-16-22106-pre.txt --real double
+./build_vulkan/spirula sfm ba problem.txt --real df --loss huber --loss-param 1.0 --ply out
+./build_vulkan/spirula sfm ba /path/to/sparse/0 -o refined/       # a COLMAP model
+./build_vulkan/spirula sfm ba /path/to/sparse/0 --real cpu        # ... on the host
+./build_vulkan/sfm_cholesky_test 500 --real df          # dense solver unit test
+./build_vulkan/sfm_ba_cpu_test                          # host solver vs a written-out reference
 ```
 
 Given a *directory* rather than a BAL file, `ba` reads a COLMAP sparse model and

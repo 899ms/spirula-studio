@@ -35,7 +35,7 @@ is dump-then-compare:
 # on the CUDA machine
 ./build_cuda/projection_parity dump ref.bin
 # on the target machine / device
-./build/projection_parity compare ref.bin
+./build_vulkan/projection_parity compare ref.bin
 ```
 
 Inputs are deterministic, and comparison is tolerance-based — fast-math
@@ -89,12 +89,13 @@ of guessing.
 
 ```bash
 # CUDA branch: opt-in
-bash build_develop.bash -B build_cuda -DSS_BACKEND=cuda -DSS_BUILD_BACKEND_TESTS=ON
+bash build_develop.bash -DSS_BACKEND=cuda -DSS_BUILD_BACKEND_TESTS=ON
 # Vulkan branch: built unconditionally
 bash build_develop.bash -DSS_BACKEND=vulkan
 ```
 
-Each `.cpp` becomes an executable of the same base name in the build dir.
+Each `.cpp` becomes an executable of the same base name in that backend's
+build tree -- `build_cuda/` or `build_vulkan/` (`build/` on macOS).
 
 ### Cross-machine / cross-vendor runs
 
@@ -185,10 +186,10 @@ expectation, one executable. Neither exists yet.
 | training-loop logic | `TrainerCore.cpp` — `build_step_config()` is the only place it lives |
 | build system | every mode in [build.md](build.md) |
 | a comment you wrote | `python3 tools/check_comment_length.py` — the build runs it anyway ([lints](build.md#lints)) |
-| `SS_FILE` or `SS_SOURCE_ROOT` | `./build/source_path` on each toolchain — MSVC, GCC and nvcc spell `__FILE__` differently |
-| a mesh format, or which colors it carries | `./build/mesh_format_roundtrip` — writes every format and reads it back through the other implementation |
-| a preset field, or a batch row's shape | `./build/preset_roundtrip_test` |
-| what a typed-in command line becomes, or what a message may carry into it | `./build/command_argv_test` — the message stays one argument and stays JSON-safe |
+| `SS_FILE` or `SS_SOURCE_ROOT` | `source_path` on each toolchain — MSVC, GCC and nvcc spell `__FILE__` differently |
+| a mesh format, or which colors it carries | `mesh_format_roundtrip` — writes every format and reads it back through the other implementation |
+| a preset field, or a batch row's shape | `preset_roundtrip_test` |
+| what a typed-in command line becomes, or what a message may carry into it | `command_argv_test` — the message stays one argument and stays JSON-safe |
 | a per-cell optimizer launcher (Vulkan) | `SS_OPTIM_SLICE_CELLS=2048` on `optim_parity` / `optimgeo_parity`, which forces the multi-slice path only an SH buffer past ~24M splats would otherwise take ([SH layouts](notes/sh-quant-layout.md)) |
 | anything | one short training run per backend on a public scene |
 
@@ -217,8 +218,8 @@ hold to ~1%, so they can be A/B'd from a training run directly; for the rest
 use the benchmark tools, which fix the workload:
 
 ```bash
-./build/raster_bench [num_splats] [iters] [macro_log2]   # raster fwd/bwd, binning
-./build/fpbo_bench   [num_splats] [iters]                # fused projection bwd + optimizer
+./build_vulkan/raster_bench [num_splats] [iters] [macro_log2]   # raster fwd/bwd, binning
+./build_vulkan/fpbo_bench   [num_splats] [iters]                # fused projection bwd + optimizer
 ```
 
 A run that trains also prints a VRAM breakdown after the timing table: pool

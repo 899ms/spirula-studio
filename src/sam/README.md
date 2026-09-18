@@ -376,8 +376,8 @@ Faithful to the reference numerics; what changed is the execution model.
 ## Tests
 
 ```bash
-./build/nn_ops_test        # every GPU kernel vs an independent CPU reference
-./build/sam_pipeline_test  # the whole library over a synthetic checkpoint
+./build_vulkan/nn_ops_test        # every GPU kernel vs an independent CPU reference
+./build_vulkan/sam_pipeline_test  # the whole library over a synthetic checkpoint
 ```
 
 `sam_pipeline_test` writes real, format-correct checkpoints at a shrunken

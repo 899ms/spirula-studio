@@ -59,15 +59,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            build/slang-*
-            build/Vulkan-Headers-*
+            build_vulkan/slang-*
+            build_vulkan/Vulkan-Headers-*
           key: fetched-linux-${{ hashFiles('cmake/SsSlang.cmake', 'cmake/SsVulkan.cmake') }}
 
       - name: Build
         run: bash build_develop.bash -DSS_BACKEND=vulkan -DSS_ENABLE_PATENTED=ON
 
       - name: Smoke
-        run: ./build/spirula train --help
+        run: ./build_vulkan/spirula train --help
 
   macos:
     runs-on: macos-15
@@ -124,4 +124,4 @@ jobs:
 
       - name: Smoke
         shell: cmd
-        run: build\spirula.exe train --help
+        run: build_vulkan\spirula.exe train --help
