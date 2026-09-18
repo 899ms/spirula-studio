@@ -257,6 +257,7 @@ enum class SaveClass : uint8_t {
   X(EngBgSkyImage                  , "eng.bg_sky.image",                  Appearance, Never) \
   X(EngBgSkyRgbPost                , "eng.bg_sky.rgb_post",               Appearance, Never) \
   X(EngBgSkyVTsScratch             , "eng.bg_sky.v_Ts_scratch",           Appearance, Never) \
+  X(EngBgExponentByCam             , "eng.bg.exponent_by_cam",            Appearance, Never) \
   X(EngBgSkyVBg                    , "eng.bg_sky.v_bg",                   Appearance, Never) \
   X(EngBgSkyVSh                    , "eng.bg_sky.v_sh",                   Appearance, Never) \
   /* ---- PPISP ---- */ \

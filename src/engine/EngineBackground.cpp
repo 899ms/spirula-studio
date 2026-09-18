@@ -122,6 +122,21 @@ static unsigned _bg_block_px(const EngineBackground& bg, int H, int W) {
     return base << (std::mt19937(bg.cur_seed)() % levels);
 }
 
+// The per-image power table for the blend kernels, or null for the plain
+// draw. Decided by the forward and reused by the backward.
+struct BgLumaViews {
+    const float*   exponent = nullptr;
+    const int32_t* cams = nullptr;
+};
+
+static BgLumaViews _bg_luma_views(const EngineBackground& bg) {
+    BgLumaViews v;
+    if (!bg.cur_match_luma) return v;
+    v.exponent = bg.exponent_by_cam.data_ptr();
+    v.cams = engine().bilagrid_cur_cam_indices.data_ptr();
+    return v;
+}
+
 static void _ensure_bg_sh_optim_state() {
     auto& bg = engine().background;
     if (bg.sh_optim_initialized) return;
@@ -199,6 +214,12 @@ void _engine_background_forward() {
     int W       = engine().camera.width;
     if (C_batch <= 0) return;
 
+    // One-shot, so a viewer render between steps keeps the plain draw.
+    bg.cur_match_luma = bg.match_luma_pending &&
+                        bg.exponent_by_cam.size() > 0 &&
+                        engine().bilagrid_cur_cam_indices.size() >= C_batch;
+    bg.match_luma_pending = false;
+
     auto& fwd_rgb_tensor = std::get<0>(engine().fwd.renders);
     auto& fwd_Ts_tensor  = engine().fwd.render_Ts;
     if (fwd_rgb_tensor.data_ptr() == nullptr || fwd_Ts_tensor.data_ptr() == nullptr)
@@ -221,12 +242,14 @@ void _engine_background_forward() {
 
     if (bg.mode != EngineBackground::Mode::Sh) {
         bg.cur_block_px = _bg_block_px(bg, H, W);
+        const BgLumaViews lv = _bg_luma_views(bg);
         blend_background_noise_forward(
             bg.splat_transfer, bg.splat_is_linear,
             bg.mode == EngineBackground::Mode::Pseudorandom,
             bg.cur_block_px,
             bg.fwd_pre_blend_rgb, Ts_in,
             bg.cur_randomize_weight, bg.cur_seed,
+            lv.exponent, lv.cams,
             post_rgb);
         fwd_rgb_tensor = post_rgb;
         return;
@@ -298,12 +321,14 @@ void _engine_background_backward_hook(
                 overexposure_reg_weight,
                 v_out, v_rgb, v_Ts_scratch_dt);
         } else {
+            const BgLumaViews lv = _bg_luma_views(bg);
             blend_background_noise_backward(
                 bg.splat_transfer, bg.splat_is_linear,
                 bg.mode == EngineBackground::Mode::Pseudorandom,
                 bg.cur_block_px,
                 bg.fwd_pre_blend_rgb, Ts_in,
                 bg.cur_randomize_weight, bg.cur_seed,
+                lv.exponent, lv.cams,
                 overexposure_reg_weight,
                 v_out, v_rgb, v_Ts_scratch_dt);
         }

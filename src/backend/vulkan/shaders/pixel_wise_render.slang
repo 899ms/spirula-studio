@@ -114,10 +114,12 @@ float3 _bg_sample(uint blocky, uint block_px, uint seed, uint gid, uint bid,
                   float(hash_uint3(seed + 2, cid, bid)) * exp2(-31.0f) - 1.0f);
 }
 
-struct BlendBgNoiseParams {  // 56 bytes: pushed directly
+struct BlendBgNoiseParams {  // 80 bytes: pushed directly
     float* rgb;            // [B,H,W,3]
     float* transmittance;  // [B,H,W,1]
     float* out_rgb;        // [B,H,W,3]
+    float* exponent_by_cam; // power per camera slot, read when match_luma != 0
+    int* cam_indices;      // [B] slot per image
     float randomize_weight;
     uint32_t seed;
     uint32_t HW;           // H*W (hash uses per-image pixel id + batch id)
@@ -126,7 +128,14 @@ struct BlendBgNoiseParams {  // 56 bytes: pushed directly
     uint32_t W;
     uint32_t blocky;
     uint32_t block_px;
+    uint32_t match_luma;
 };
+
+// Mirrors _bg_exponent in kernels/pixelwise/ImageColorOps.cu.
+float _bg_exponent(uint bid, uint match_luma, float* exponent_by_cam,
+                   int* cam_indices) {
+    return match_luma != 0u ? exponent_by_cam[uint(cam_indices[bid])] : 1.0f;
+}
 
 [shader("compute")]
 [numthreads(128, 1, 1)]
@@ -144,6 +153,8 @@ void blend_background_noise_fwd(uint3 wg: SV_GroupID,
 
     float3 background = _bg_sample(p.blocky, p.block_px, p.seed, gid, bid, p.W);
     background = 0.5f + 0.5f * p.randomize_weight * background;
+    background = background_apply_exponent(background,
+        _bg_exponent(bid, p.match_luma, p.exponent_by_cam, p.cam_indices));
     background = display_to_working3(background, kTransfer, kIsLinear != 0);
 
     rgb = blend_background(rgb, T, background);

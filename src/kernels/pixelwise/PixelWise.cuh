@@ -211,6 +211,8 @@ void blend_background_noise_forward(
     DeviceTensor3D<float>  transmittance, // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    const float* exponent_by_cam,         // power per camera slot; null = 1
+    const int32_t* cam_indices,           // [B] slot per image
     DeviceTensor3D<float3> out_rgb        // [B, H, W, 3]
 );
 
@@ -224,6 +226,8 @@ void blend_background_noise_backward(
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    const float* exponent_by_cam,            // as in the forward
+    const int32_t* cam_indices,
     float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]

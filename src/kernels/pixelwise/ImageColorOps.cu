@@ -169,13 +169,21 @@ __device__ __forceinline__ float3 _bg_sample(bool blocky, unsigned block_px,
     return u;
 }
 
+// Per-image power on the display draw; 1 (identity) without a table.
+__device__ __forceinline__ float _bg_exponent(unsigned bid,
+                                              const float* exponent_by_cam,
+                                              const int32_t* cam_indices) {
+    return exponent_by_cam ? exponent_by_cam[cam_indices[bid]] : 1.0f;
+}
+
 template<int Transfer, bool IsLinear>
 __device__ __forceinline__ float3 _bg_color(bool blocky, unsigned block_px,
                                             uint32_t seed, unsigned bid,
                                             unsigned x, unsigned y, unsigned W,
-                                            float randomize_weight) {
+                                            float randomize_weight, float p) {
     float3 background = _bg_sample(blocky, block_px, seed, bid, x, y, W);
     background = 0.5 + 0.5*randomize_weight * background;
+    background = SlangPixelWise::background_apply_exponent(background, p);
     return SlangPixelWise::display_to_working3(background, Transfer, IsLinear);
 }
 
@@ -187,6 +195,8 @@ __global__ void blend_background_noise_forward_kernel(
     const uint32_t seed,
     const bool blocky,
     const unsigned block_px,
+    const float* __restrict__ exponent_by_cam,
+    const int32_t* __restrict__ cam_indices,
     TensorView<float, 4> out_rgb
 ) {
     unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -201,7 +211,8 @@ __global__ void blend_background_noise_forward_kernel(
     float transmittance = in_transmittance.load1(bid, y, x);
 
     float3 background = _bg_color<Transfer, IsLinear>(
-        blocky, block_px, seed, bid, x, y, W, randomize_weight);
+        blocky, block_px, seed, bid, x, y, W, randomize_weight,
+        _bg_exponent(bid, exponent_by_cam, cam_indices));
 
     rgb = SlangPixelWise::blend_background(rgb, transmittance, background);
 
@@ -216,6 +227,8 @@ __global__ void blend_background_noise_backward_kernel(
     const uint32_t seed,
     const bool blocky,
     const unsigned block_px,
+    const float* __restrict__ exponent_by_cam,
+    const int32_t* __restrict__ cam_indices,
     const float overexposure_scale,
     const TensorView<float, 4> v_out_rgb,
     TensorView<float, 4> v_in_rgb,
@@ -233,7 +246,8 @@ __global__ void blend_background_noise_backward_kernel(
     float transmittance = in_transmittance.load1(bid, y, x);
 
     float3 background = _bg_color<Transfer, IsLinear>(
-        blocky, block_px, seed, bid, x, y, W, randomize_weight);
+        blocky, block_px, seed, bid, x, y, W, randomize_weight,
+        _bg_exponent(bid, exponent_by_cam, cam_indices));
 
     float3 v_out = v_out_rgb.load3(bid, y, x);
 
@@ -258,6 +272,8 @@ void blend_background_noise_forward(
     DeviceTensor3D<float>  transmittance, // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    const float* exponent_by_cam,         // power per camera slot; null = 1
+    const int32_t* cam_indices,           // [B] slot per image
     DeviceTensor3D<float3> out_rgb        // [B, H, W, 3]
 ) {
     long b = rgb.size<0>(), h = rgb.size<1>(), w = rgb.size<2>();
@@ -266,6 +282,7 @@ void blend_background_noise_forward(
     <<<_LAUNCH_ARGS_2D(h*w, b, 256, 1)>>>(
         _dt3d_to_tv4<float>(rgb), _dt3d_to_tv4<float>(transmittance),
         randomize_weight, seed, blocky, block_px,
+        exponent_by_cam, cam_indices,
         _dt3d_to_tv4<float>(out_rgb)
     );
     CHECK_DEVICE_ERROR(cudaGetLastError());
@@ -281,6 +298,8 @@ void blend_background_noise_backward(
     DeviceTensor3D<float>  transmittance,    // [B, H, W, 1]
     float randomize_weight,
     uint32_t seed,
+    const float* exponent_by_cam,            // as in the forward
+    const int32_t* cam_indices,
     float overexposure_weight,               // fused image-space reg, 0 = off
     DeviceTensor3D<float3> v_out_rgb,        // [B, H, W, 3]
     DeviceTensor3D<float3> v_rgb,            // [B, H, W, 3]
@@ -292,6 +311,7 @@ void blend_background_noise_backward(
     <<<_LAUNCH_ARGS_2D(h*w, b, 256, 1)>>>(
         _dt3d_to_tv4<float>(rgb), _dt3d_to_tv4<float>(transmittance),
         randomize_weight, seed, blocky, block_px,
+        exponent_by_cam, cam_indices,
         _overexposure_scale(b, h, w, overexposure_weight),
         _dt3d_to_tv4<float>(v_out_rgb),
         _dt3d_to_tv4<float>(v_rgb), _dt3d_to_tv4<float>(v_transmittance)

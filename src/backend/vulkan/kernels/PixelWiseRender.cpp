@@ -20,11 +20,11 @@ static_assert(sizeof(BlendBgParams) == 4 * 8 + 2 * 4, "layout");
 
 // Mirrors BlendBgNoiseParams.
 struct BlendBgNoiseParams {
-    uint64_t rgb, transmittance, out_rgb;
+    uint64_t rgb, transmittance, out_rgb, exponent_by_cam, cam_indices;
     float randomize_weight;
-    uint32_t seed, HW, total, wgs_per_row, W, blocky, block_px;
+    uint32_t seed, HW, total, wgs_per_row, W, blocky, block_px, match_luma;
 };
-static_assert(sizeof(BlendBgNoiseParams) == 3 * 8 + 8 * 4, "layout");
+static_assert(sizeof(BlendBgNoiseParams) == 5 * 8 + 9 * 4 + 4 /*pad*/, "layout");
 
 // Mirrors BlendBgColorParams.
 struct BlendBgColorParams {
@@ -82,6 +82,8 @@ void blend_background_noise_forward(
     DeviceTensor3D<float> transmittance,
     float randomize_weight,
     uint32_t seed,
+    const float* exponent_by_cam,
+    const int32_t* cam_indices,
     DeviceTensor3D<float3> out_rgb
 ) {
     const int64_t hw = rgb.size<1>() * rgb.size<2>();
@@ -90,6 +92,9 @@ void blend_background_noise_forward(
     p.rgb = (uint64_t)rgb.data_ptr();
     p.transmittance = (uint64_t)transmittance.data_ptr();
     p.out_rgb = (uint64_t)out_rgb.data_ptr();
+    p.exponent_by_cam = (uint64_t)exponent_by_cam;
+    p.cam_indices = (uint64_t)cam_indices;
+    p.match_luma = exponent_by_cam ? 1u : 0u;
     p.randomize_weight = randomize_weight;
     p.seed = seed;
     p.HW = (uint32_t)hw;

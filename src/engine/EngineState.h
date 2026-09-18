@@ -417,6 +417,15 @@ struct EngineBackground {
     // Resolved by the forward (it knows this batch's H/W) and read again by
     // the backward, which must reconstruct the same background.
     unsigned cur_block_px         = 0;
+
+    // Per post-split camera slot: the reference image's mean display luma and
+    // the power the randomized draw is raised to. Armed per training forward
+    // (never for a viewer render), consumed into cur_match_luma for the bwd.
+    std::vector<float>  luma_by_cam_host;
+    std::vector<float>  exponent_by_cam_host;
+    DeviceVector<float> exponent_by_cam;
+    bool match_luma_pending = false;
+    bool cur_match_luma     = false;
 };
 
 // Linear / wide-gamut color space conversion.

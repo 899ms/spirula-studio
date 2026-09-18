@@ -60,7 +60,7 @@ struct LossConfig {
     // Divide the photometric weights (RGB / YUV supervision and SSIM) by
     // 0.5 / max(mean sRGB luma of this step's reference pixels, 1/255), so a
     // dark capture pulls on the splats as hard as a bright one.
-    bool  normalize_by_luminance = false;
+    float luminance_normalization = 0.0f;   // power on 0.5 / mean luma; 0 = off
     // Image-space overexposure regularization weight. When non-zero, a
     // dedicated kernel adds dL/dx of L = w * mean(max(-x, x-1, 0)^2) directly
     // into v_render_rgb (in the pre-bilagrid / pre-PPISP / pre-color-space
@@ -265,6 +265,7 @@ struct BackgroundStepConfig {
     float    lr_sh           = 0.0f;
     float    randomize_weight = 0.0f;
     uint32_t seed             = 0;
+    bool     match_luminance  = false;   // randomized draw ^ per-image power
 };
 
 

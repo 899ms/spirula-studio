@@ -2744,6 +2744,70 @@ SS_MSG(background_noise_warmup_help,
     TR("Arka plan gürültüsünün tam güce ulaşması için gereken adım sayısı. Yalnızca "
        "`noise` / `pseudorandom` / `random` arka planlarıyla kullanılır."));
 
+SS_MSG(background_match_luminance,
+    EN("Match background to image brightness"), JA("背景を画像の明るさに合わせる"),
+    ZH_HANS("背景亮度匹配图像"), ZH_HANT("背景亮度匹配圖像"),
+    KO("배경을 이미지 밝기에 맞춤"), DE("Hintergrund an Bildhelligkeit anpassen"),
+    FR("Adapter le fond à la luminosité de l'image"),
+    ES("Ajustar el fondo al brillo de la imagen"),
+    PT("Ajustar o fundo ao brilho da imagem"),
+    IT("Adatta lo sfondo alla luminosità dell'immagine"),
+    NL("Achtergrond aan beeldhelderheid aanpassen"),
+    RU("Подогнать фон под яркость снимка"),
+    TR("Arka planı görüntü parlaklığına uydur"));
+SS_MSG(background_match_luminance_help,
+    EN("Raises the randomized background to a power so its typical brightness lands "
+       "on each photo's mean brightness, corrected for that photo's exposure. Keeps "
+       "dark scenes from being plugged with haze to hide a bright background. Only "
+       "used with the `noise` / `pseudorandom` / `random` backgrounds."),
+    JA("ランダム背景をべき乗して、その典型的な明るさが各写真の平均の明るさ（露出補正済み）"
+       "になるようにします。暗いシーンで明るい背景を隠すためにもやが詰め込まれるのを防ぎ"
+       "ます。背景が `noise` / `pseudorandom` / `random` のときだけ使われます。"),
+    ZH_HANS("对随机背景做幂运算，使其典型亮度落在每张照片的平均亮度上（已按该照片的曝光"
+            "校正）。避免暗场景为了遮住明亮背景而被雾状泼溅填满。仅在背景为 `noise` / "
+            "`pseudorandom` / `random` 时使用。"),
+    ZH_HANT("對隨機背景做冪運算，使其典型亮度落在每張照片的平均亮度上（已按該照片的曝光"
+            "校正）。避免暗場景為了遮住明亮背景而被霧狀潑濺填滿。僅在背景為 `noise` / "
+            "`pseudorandom` / `random` 時使用。"),
+    KO("무작위 배경을 거듭제곱하여 그 전형적인 밝기가 각 사진의 평균 밝기(노출 보정 후)에 "
+       "오도록 합니다. 어두운 장면이 밝은 배경을 가리려고 안개로 채워지는 것을 막습니다. "
+       "배경이 `noise` / `pseudorandom` / `random`일 때만 쓰입니다."),
+    DE("Potenziert den zufälligen Hintergrund, sodass seine typische Helligkeit auf "
+       "der mittleren Helligkeit jedes Fotos landet, um dessen Belichtung korrigiert. "
+       "Verhindert, dass dunkle Szenen mit Dunst zugesetzt werden, um einen hellen "
+       "Hintergrund zu verbergen. Wird nur mit den Hintergründen `noise` / "
+       "`pseudorandom` / `random` verwendet."),
+    FR("Élève le fond aléatoire à une puissance pour que sa luminosité typique tombe "
+       "sur la luminosité moyenne de chaque photo, corrigée de son exposition. Évite "
+       "que les scènes sombres se remplissent de brume pour cacher un fond clair. "
+       "Utilisé uniquement avec les arrière-plans `noise` / `pseudorandom` / `random`."),
+    ES("Eleva el fondo aleatorio a una potencia para que su brillo típico coincida con "
+       "el brillo medio de cada foto, corregido por su exposición. Evita que las "
+       "escenas oscuras se rellenen de neblina para ocultar un fondo claro. Solo se "
+       "usa con los fondos `noise` / `pseudorandom` / `random`."),
+    PT("Eleva o fundo aleatório a uma potência para que o seu brilho típico caia no "
+       "brilho médio de cada foto, corrigido pela exposição dela. Evita que cenas "
+       "escuras sejam preenchidas com névoa para esconder um fundo claro. Só é usado "
+       "com os fundos `noise` / `pseudorandom` / `random`."),
+    IT("Eleva lo sfondo casuale a una potenza così che la sua luminosità tipica "
+       "coincida con la luminosità media di ogni foto, corretta per la sua "
+       "esposizione. Evita che le scene scure si riempiano di foschia per nascondere "
+       "uno sfondo chiaro. Usato solo con gli sfondi `noise` / `pseudorandom` / "
+       "`random`."),
+    NL("Verheft de willekeurige achtergrond tot een macht zodat zijn typische "
+       "helderheid op de gemiddelde helderheid van elke foto valt, gecorrigeerd voor "
+       "de belichting ervan. Voorkomt dat donkere scènes met waas worden dichtgezet om "
+       "een lichte achtergrond te verbergen. Wordt alleen bij de achtergronden "
+       "`noise` / `pseudorandom` / `random` gebruikt."),
+    RU("Возводит случайный фон в степень, чтобы его типичная яркость совпала со "
+       "средней яркостью каждого снимка с поправкой на его экспозицию. Не даёт тёмным "
+       "сценам забиваться дымкой, скрывающей яркий фон. Используется только с фонами "
+       "`noise` / `pseudorandom` / `random`."),
+    TR("Rastgele arka planı bir kuvvete yükselterek tipik parlaklığının her "
+       "fotoğrafın pozlamasına göre düzeltilmiş ortalama parlaklığına denk gelmesini "
+       "sağlar. Karanlık sahnelerin parlak bir arka planı gizlemek için pusla "
+       "dolmasını önler. Yalnızca `noise` / `pseudorandom` / `random` arka "
+       "planlarıyla kullanılır."));
 SS_MSG(background_noise_pre_warmup,
     EN("Initial background noise"), JA("最初の背景ノイズの強さ"),
     ZH_HANS("初始背景噪声强度"), ZH_HANT("初始背景雜訊強度"),
@@ -5391,73 +5455,86 @@ SS_MSG(loss_saturation_threshold_help,
        "ikisi de kırpılmıştır, oradaki hata gerçek değildir. Negatif (varsayılan) "
        "her pikseli tutar."));
 
-SS_MSG(normalize_loss_by_luminance,
-    EN("Scale color error by brightness"), JA("明るさで色の誤差を調整"),
-    ZH_HANS("按亮度缩放颜色误差"), ZH_HANT("依亮度縮放顏色誤差"),
-    KO("밝기로 색 오차 조정"),
-    DE("Farbfehler nach Helligkeit skalieren"),
-    FR("Mettre l'erreur de couleur à l'échelle de la luminosité"),
-    ES("Escalar el error de color según el brillo"),
-    PT("Escalar o erro de cor pelo brilho"),
-    IT("Scalare l'errore di colore con la luminosità"),
-    NL("Kleurfout schalen met de helderheid"),
-    RU("Масштабировать ошибку цвета по яркости"),
-    TR("Renk hatasını parlaklığa göre ölçekle"));
-SS_MSG(normalize_loss_by_luminance_help,
-    EN("Scales the color-error weights (L1, L2 and SSIM) by twice the mean "
-       "brightness of the photo, measured in sRGB, so a dark capture counts for "
-       "as much as a bright one. It is meant for training in linear light, where "
+SS_MSG(loss_luminance_normalization,
+    EN("Brightness normalization of color error"), JA("色の誤差の明るさ正規化"),
+    ZH_HANS("颜色误差的亮度归一化"), ZH_HANT("顏色誤差的亮度正規化"),
+    KO("색 오차의 밝기 정규화"),
+    DE("Helligkeitsnormierung des Farbfehlers"),
+    FR("Normalisation de l'erreur de couleur par la luminosité"),
+    ES("Normalización del error de color por el brillo"),
+    PT("Normalização do erro de cor pelo brilho"),
+    IT("Normalizzazione dell'errore di colore per luminosità"),
+    NL("Helderheidsnormalisatie van de kleurfout"),
+    RU("Нормировка ошибки цвета по яркости"),
+    TR("Renk hatasının parlaklık normalizasyonu"));
+SS_MSG(loss_luminance_normalization_help,
+    EN("Divides the color-error weights (L1, L2 and SSIM) by twice the photo's "
+       "mean brightness, measured in sRGB, raised to this power: 0 leaves them "
+       "alone, 1 makes a dark capture count for as much as a bright one, and "
+       "values in between soften that. Meant for training in linear light, where "
        "the display curve already makes a dark pixel push harder."),
     JA("色の誤差の重み（L1, L2, SSIM）を, sRGB で測った写真の平均的な明るさの二"
-       "倍で調整します。暗い写真も明るい写真と同じだけ効くようになります。線形"
-       "の光での学習を想定しています。そこでは表示曲線のせいで暗い画素のほうが"
-       "強く効いてしまいます。"),
-    ZH_HANS("把颜色误差的权重（L1、L2 和 SSIM）乘以照片在 sRGB 下平均亮度的两"
-            "倍，让偏暗的照片和明亮的照片起同样的作用。它是为线性光下的训练准备"
-            "的：在那里显示曲线本来就让暗像素推得更用力。"),
-    ZH_HANT("把顏色誤差的權重（L1、L2 和 SSIM）乘以照片在 sRGB 下平均亮度的兩"
-            "倍，讓偏暗的照片和明亮的照片起同樣的作用。它是為線性光下的訓練準備"
-            "的：在那裡顯示曲線本來就讓暗像素推得更用力。"),
-    KO("색 오차 가중치(L1, L2, SSIM)에 sRGB로 잰 사진의 평균 밝기의 두 배를 곱"
-       "합니다. 어두운 사진도 밝은 사진만큼 힘을 냅니다. 선형 광에서 학습할 때"
-       "를 위한 것으로, 거기서는 표시 곡선 때문에 어두운 픽셀이 더 세게 밀어붙"
-       "입니다."),
-    DE("Skaliert die Gewichte des Farbfehlers (L1, L2 und SSIM) mit der "
-       "doppelten mittleren Helligkeit des Fotos, gemessen in sRGB, sodass eine "
-       "dunkle Aufnahme so viel zählt wie eine helle. Gedacht für das Training "
-       "in linearem Licht, wo die Anzeigekurve ein dunkles Pixel ohnehin stärker "
-       "drücken lässt."),
-    FR("Met les poids de l'erreur de couleur (L1, L2 et SSIM) à l'échelle du "
-       "double de la luminosité moyenne de la photo, mesurée en sRGB, pour qu'une "
-       "prise sombre compte autant qu'une prise claire. Prévu pour "
-       "l'entraînement en lumière linéaire, où la courbe d'affichage fait déjà "
-       "pousser un pixel sombre plus fort."),
-    ES("Escala los pesos del error de color (L1, L2 y SSIM) por el doble del "
-       "brillo medio de la foto, medido en sRGB, para que una toma oscura cuente "
-       "tanto como una clara. Está pensado para el entrenamiento en luz lineal, "
-       "donde la curva de pantalla ya hace que un píxel oscuro empuje más fuerte."),
-    PT("Escala os pesos do erro de cor (L1, L2 e SSIM) pelo dobro do brilho "
-       "médio da foto, medido em sRGB, para que uma captura escura conte tanto "
-       "quanto uma clara. Destina-se ao treino em luz linear, onde a curva de "
-       "exibição já faz um pixel escuro empurrar com mais força."),
-    IT("Scala i pesi dell'errore di colore (L1, L2 e SSIM) per il doppio della "
-       "luminosità media della foto, misurata in sRGB, così uno scatto scuro "
-       "conta quanto uno chiaro. È pensato per l'addestramento in luce lineare, "
-       "dove la curva di visualizzazione fa già spingere di più un pixel scuro."),
-    NL("Schaalt de gewichten van de kleurfout (L1, L2 en SSIM) met tweemaal de "
-       "gemiddelde helderheid van de foto, gemeten in sRGB, zodat een donkere "
-       "opname net zo zwaar telt als een lichte. Bedoeld voor training in "
-       "lineair licht, waar de weergavecurve een donkere pixel toch al harder "
+       "倍のこの値乗で割ります。0 では何もせず, 1 では暗い写真も明るい写真と同"
+       "じだけ効き, その間の値ではそれを弱めます。線形の光での学習を想定してい"
+       "ます。そこでは表示曲線のせいで暗い画素のほうが強く効いてしまいます。"),
+    ZH_HANS("把颜色误差的权重（L1、L2 和 SSIM）除以照片在 sRGB 下平均亮度两倍的"
+            "此值次幂：0 不做处理，1 让偏暗的照片和明亮的照片起同样的作用，中间"
+            "的值则减弱这种效果。它是为线性光下的训练准备的：在那里显示曲线本来"
+            "就让暗像素推得更用力。"),
+    ZH_HANT("把顏色誤差的權重（L1、L2 和 SSIM）除以照片在 sRGB 下平均亮度兩倍的"
+            "此值次冪：0 不做處理，1 讓偏暗的照片和明亮的照片起同樣的作用，中間"
+            "的值則減弱這種效果。它是為線性光下的訓練準備的：在那裡顯示曲線本來"
+            "就讓暗像素推得更用力。"),
+    KO("색 오차 가중치(L1, L2, SSIM)를 sRGB로 잰 사진의 평균 밝기의 두 배를 이 "
+       "값으로 거듭제곱한 수로 나눕니다. 0은 아무것도 하지 않고, 1은 어두운 사진"
+       "도 밝은 사진만큼 힘을 내게 하며, 그 사이 값은 이를 완화합니다. 선형 광에"
+       "서 학습할 때를 위한 것으로, 거기서는 표시 곡선 때문에 어두운 픽셀이 더 "
+       "세게 밀어붙입니다."),
+    DE("Teilt die Gewichte des Farbfehlers (L1, L2 und SSIM) durch die doppelte "
+       "mittlere Helligkeit des Fotos, gemessen in sRGB, hoch diesen Wert: 0 lässt "
+       "sie unverändert, 1 lässt eine dunkle Aufnahme so viel zählen wie eine "
+       "helle, Werte dazwischen mildern das. Gedacht für das Training in linearem "
+       "Licht, wo die Anzeigekurve ein dunkles Pixel ohnehin stärker drücken "
+       "lässt."),
+    FR("Divise les poids de l'erreur de couleur (L1, L2 et SSIM) par le double de "
+       "la luminosité moyenne de la photo, mesurée en sRGB, élevé à cette "
+       "puissance : 0 ne change rien, 1 fait compter une prise sombre autant "
+       "qu'une prise claire, et les valeurs intermédiaires adoucissent cela. Prévu "
+       "pour l'entraînement en lumière linéaire, où la courbe d'affichage fait "
+       "déjà pousser un pixel sombre plus fort."),
+    ES("Divide los pesos del error de color (L1, L2 y SSIM) por el doble del "
+       "brillo medio de la foto, medido en sRGB, elevado a esta potencia: 0 no "
+       "cambia nada, 1 hace que una toma oscura cuente tanto como una clara, y los "
+       "valores intermedios lo suavizan. Está pensado para el entrenamiento en luz "
+       "lineal, donde la curva de pantalla ya hace que un píxel oscuro empuje más "
+       "fuerte."),
+    PT("Divide os pesos do erro de cor (L1, L2 e SSIM) pelo dobro do brilho médio "
+       "da foto, medido em sRGB, elevado a esta potência: 0 não muda nada, 1 faz "
+       "uma captura escura contar tanto quanto uma clara, e valores intermédios "
+       "suavizam isso. Destina-se ao treino em luz linear, onde a curva de exibição "
+       "já faz um pixel escuro empurrar com mais força."),
+    IT("Divide i pesi dell'errore di colore (L1, L2 e SSIM) per il doppio della "
+       "luminosità media della foto, misurata in sRGB, elevato a questa potenza: 0 "
+       "non cambia nulla, 1 fa contare uno scatto scuro quanto uno chiaro, e i "
+       "valori intermedi lo attenuano. È pensato per l'addestramento in luce "
+       "lineare, dove la curva di visualizzazione fa già spingere di più un pixel "
+       "scuro."),
+    NL("Deelt de gewichten van de kleurfout (L1, L2 en SSIM) door tweemaal de "
+       "gemiddelde helderheid van de foto, gemeten in sRGB, tot deze macht "
+       "verheven: 0 verandert niets, 1 laat een donkere opname net zo zwaar tellen "
+       "als een lichte, en waarden ertussen verzachten dat. Bedoeld voor training "
+       "in lineair licht, waar de weergavecurve een donkere pixel toch al harder "
        "laat duwen."),
-    RU("Масштабирует веса ошибки цвета (L1, L2 и SSIM) на удвоенную среднюю "
-       "яркость снимка, измеренную в sRGB, чтобы тёмный кадр значил столько же, "
-       "сколько светлый. Предназначено для обучения в линейном свете, где кривая "
+    RU("Делит веса ошибки цвета (L1, L2 и SSIM) на удвоенную среднюю яркость "
+       "снимка, измеренную в sRGB, в этой степени: 0 ничего не меняет, 1 делает "
+       "тёмный кадр столь же весомым, как светлый, промежуточные значения "
+       "смягчают это. Предназначено для обучения в линейном свете, где кривая "
        "отображения и так заставляет тёмный пиксель давить сильнее."),
-    TR("Renk hatası ağırlıklarını, fotoğrafın sRGB'de ölçülen ortalama "
-       "parlaklığının iki katıyla ölçekler (L1, L2 ve SSIM); böylece karanlık bir "
-       "çekim aydınlık olan kadar sayılır. Doğrusal ışıkta eğitim için "
-       "düşünülmüştür; orada görüntüleme eğrisi karanlık pikseli zaten daha sert "
-       "ittirir."));
+    TR("Renk hatası ağırlıklarını (L1, L2 ve SSIM), fotoğrafın sRGB'de ölçülen "
+       "ortalama parlaklığının iki katının bu kuvvetine böler: 0 hiçbir şey "
+       "değiştirmez, 1 karanlık bir çekimi aydınlık olan kadar saydırır, aradaki "
+       "değerler bunu yumuşatır. Doğrusal ışıkta eğitim için düşünülmüştür; orada "
+       "görüntüleme eğrisi karanlık pikseli zaten daha sert ittirir."));
 
 
 // ===========================================================================

@@ -24,12 +24,12 @@ static_assert(sizeof(BlendBgBwdParams) == 7 * 8 + 3 * 4 + 4 /*pad*/,
 
 // Mirrors BlendBgNoiseBwdParams.
 struct BlendBgNoiseBwdParams {
-    uint64_t rgb, transmittance, v_out_rgb, v_rgb, v_transmittance;
+    uint64_t rgb, transmittance, v_out_rgb, v_rgb, v_transmittance,
+             exponent_by_cam, cam_indices;
     float overexposure_scale, randomize_weight;
-    uint32_t seed, HW, total, wgs_per_row, W, blocky, block_px;
+    uint32_t seed, HW, total, wgs_per_row, W, blocky, block_px, match_luma;
 };
-static_assert(sizeof(BlendBgNoiseBwdParams) == 5 * 8 + 9 * 4 + 4 /*pad*/,
-              "layout");
+static_assert(sizeof(BlendBgNoiseBwdParams) == 7 * 8 + 10 * 4, "layout");
 
 // Mirrors BlendBgColorBwdParams.
 struct BlendBgColorBwdParams {
@@ -138,6 +138,8 @@ void blend_background_noise_backward(
     DeviceTensor3D<float> transmittance,
     float randomize_weight,
     uint32_t seed,
+    const float* exponent_by_cam,
+    const int32_t* cam_indices,
     float overexposure_weight,
     DeviceTensor3D<float3> v_out_rgb,
     DeviceTensor3D<float3> v_rgb,
@@ -146,6 +148,9 @@ void blend_background_noise_backward(
     const int64_t hw = rgb.size<1>() * rgb.size<2>();
     const int64_t total = rgb.size<0>() * hw;
     BlendBgNoiseBwdParams p{};
+    p.exponent_by_cam = (uint64_t)exponent_by_cam;
+    p.cam_indices = (uint64_t)cam_indices;
+    p.match_luma = exponent_by_cam ? 1u : 0u;
     p.overexposure_scale = overexposure_scale(
         rgb.size<0>(), rgb.size<1>(), rgb.size<2>(), overexposure_weight);
     p.rgb = (uint64_t)rgb.data_ptr();

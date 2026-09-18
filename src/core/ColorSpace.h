@@ -131,7 +131,7 @@ inline float tone_encode(float x, Transfer t) {
         return linear_to_srgb(std::min(tone_uncharted2(x), 1.0f));
     case Transfer::SrgbClamped:
         return linear_to_srgb(std::min(std::max(x, 0.0f), 1.0f));
-    default:                    return linear_to_srgb(x);
+    default:                    return linear_to_srgb(std::max(x, 0.0f));
     }
 }
 

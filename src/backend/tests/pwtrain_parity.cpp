@@ -107,11 +107,36 @@ int main(int argc, char** argv) {
         float* d_vt = fresh1();
         blend_background_noise_backward(xf, lin != 0, blocky != 0, block_px,
                                         t3(d_rgb), t1(d_T), 0.7f,
-                                        1234u + xf, over, t3(d_vout),
+                                        1234u + xf, nullptr, nullptr,
+                                        over, t3(d_vout),
                                         t3(d_vr), t1(d_vt));
         backend::device_synchronize();
         readback_f(acc, d_vr, PIX * 3);
         readback_f(acc, d_vt, PIX);
+    }
+
+    // ---- the luma-matched draw: a per-slot power table and slot indices
+    {
+        const float* d_exp = upload<float>({1.0f, 3.9f, 0.6f, 6.5f});
+        const int32_t* d_cams = upload<int32_t>({3, 1});
+        for (int xf : {0, 4}) for (int lin = 0; lin < 2; lin++)
+        for (int blocky = 0; blocky < 2; blocky++)
+        for (unsigned block_px : {0u, 4u}) {
+            float* d_out = fresh3();
+            blend_background_noise_forward(xf, lin != 0, blocky != 0, block_px,
+                                           t3(d_rgb), t1(d_T), 0.7f, 77u + xf,
+                                           d_exp, d_cams, t3(d_out));
+            float* d_vr = fresh3();
+            float* d_vt = fresh1();
+            blend_background_noise_backward(xf, lin != 0, blocky != 0, block_px,
+                                            t3(d_rgb), t1(d_T), 0.7f, 77u + xf,
+                                            d_exp, d_cams, 0.0f, t3(d_vout),
+                                            t3(d_vr), t1(d_vt));
+            backend::device_synchronize();
+            readback_f(acc, d_out, PIX * 3);
+            readback_f(acc, d_vr, PIX * 3);
+            readback_f(acc, d_vt, PIX);
+        }
     }
 
     // ---- blend_background_color_backward (reg off, then the fused one) ----

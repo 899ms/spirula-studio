@@ -165,36 +165,54 @@ static float _sampled_mean_luma(uint64_t base, int64_t n_px, int64_t width,
 }
 
 
-// LossConfig::normalize_by_luminance: the photometric weights divided by
-// 0.5 / max(mean sRGB luma, 1/255). Leaves them alone when the step carries
-// no reference image to measure.
-static void _normalize_weights_by_luminance(LossConfig& loss, const TrainStep& stp) {
+static bool _sub_has_gt_rgb(const DecodedBatch& sub) {
+    const auto& shape = std::get<2>(sub.rgb_view);
+    return std::get<0>(sub.rgb_view) != 0 && shape.size() == 4 &&
+           shape[3] == 3 && shape[1] * shape[2] > 0;
+}
+
+// Mean display luma of row `j` of a sub-batch's reference images, through the
+// per-camera cache when the rows are whole input images (indices per row).
+static float _gt_row_luma(const DecodedBatch& sub, int64_t j) {
+    const TorchTensorView& rgb = sub.rgb_view;
+    const auto& shape = std::get<2>(rgb);
+    const int64_t px = shape[1] * shape[2];
+    const uint32_t elem = std::get<1>(rgb);
+    auto compute = [&] {
+        return _sampled_mean_luma(std::get<0>(rgb) + (uint64_t)(j * px) * 3 * elem,
+                                  px, shape[2], elem);
+    };
+    if ((int64_t)sub.indices.size() != shape[0]) return compute();
+    const int32_t id = sub.indices[(size_t)j];
+    if (id < 0) return compute();
     std::vector<float>& cache = engine().gt_mean_luma;
+    if ((size_t)id >= cache.size())
+        cache.resize((size_t)id + 1, std::numeric_limits<float>::quiet_NaN());
+    if (std::isnan(cache[(size_t)id])) cache[(size_t)id] = compute();
+    return cache[(size_t)id];
+}
+
+// LossConfig::luminance_normalization: the photometric weights times
+// 1 - factor (1 - (0.5 / max(mean sRGB luma, 1/255))). Leaves them alone when the step
+// carries no reference image to measure.
+static void _normalize_weights_by_luminance(LossConfig& loss, const TrainStep& stp,
+                                            float factor) {
     double sum = 0.0, total_px = 0.0;
     for (const auto& sub : stp.subs) {
-        const TorchTensorView& rgb = sub->rgb_view;
-        const auto& shape = std::get<2>(rgb);
-        const uint64_t base = std::get<0>(rgb);
-        if (base == 0 || shape.size() != 4 || shape[3] != 3) continue;
+        if (!_sub_has_gt_rgb(*sub)) continue;
+        const auto& shape = std::get<2>(sub->rgb_view);
         const int64_t B = shape[0], px = shape[1] * shape[2];
-        if (px <= 0 || (int64_t)sub->indices.size() != B) continue;
-        const uint32_t elem = std::get<1>(rgb);
-
+        if ((int64_t)sub->indices.size() != B) continue;
         for (int64_t j = 0; j < B; j++) {
-            const int32_t id = sub->indices[(size_t)j];
-            if (id < 0) continue;
-            if ((size_t)id >= cache.size())
-                cache.resize((size_t)id + 1, std::numeric_limits<float>::quiet_NaN());
-            if (std::isnan(cache[(size_t)id]))
-                cache[(size_t)id] = _sampled_mean_luma(
-                    base + (uint64_t)(j * px) * 3 * elem, px, shape[2], elem);
-            sum += (double)cache[(size_t)id] * (double)px;
+            if (sub->indices[(size_t)j] < 0) continue;
+            sum += (double)_gt_row_luma(*sub, j) * (double)px;
             total_px += (double)px;
         }
     }
     if (total_px <= 0.0) return;
 
-    const float scale = (float)(0.5 / std::max(sum / total_px, 1.0 / 255.0));
+    const float scale =
+        1.0f - factor * (1.0f - 0.5f / std::max((float)(sum / total_px), 1.0f / 255.0f));
     constexpr LossWeightIndex photometric[] = {
         LossWeightIndex::RgbSupL1, LossWeightIndex::RgbSupL2,
         LossWeightIndex::YSupL1,   LossWeightIndex::YSupL2,
@@ -202,6 +220,62 @@ static void _normalize_weights_by_luminance(LossConfig& loss, const TrainStep& s
     };
     for (LossWeightIndex i : photometric) loss.weights[(int)i] *= scale;
     loss.w_ssim *= scale;
+}
+
+
+// 0.5^p = luma / gain: the draw's median lands on the image's mean luma ahead
+// of PPISP, whose 2^e scales display values, or linear light (2^(e/2.2) in
+// display) when it runs before the encode. Clamped to [1/255, 1]: p in [0, 8].
+static float _bg_luma_exponent(float luma, float exposure_log2,
+                               bool ppisp_before_color_space) {
+    const double e = ppisp_before_color_space ? exposure_log2 / 2.2 : exposure_log2;
+    const double target = std::min(std::max((double)luma * std::exp2(-e), 1.0 / 255.0), 1.0);
+    return (float)-std::log2(target);
+}
+
+// BackgroundStepConfig::match_luminance: the per-slot power table the blend
+// kernels read, recomputed for this step's slots from the cached luma and the
+// current PPISP exposure, and re-uploaded whole (it is tiny).
+static void _update_background_exponents(const TrainStep& stp,
+                                         bool ppisp_before_color_space) {
+    auto& bg = engine().background;
+    std::vector<float>& luma = bg.luma_by_cam_host;
+    std::vector<float>& expo = bg.exponent_by_cam_host;
+
+    const auto& pp = engine().ppisp;
+    const int P = pp.num_params;
+    std::vector<float> ppisp_host;
+    if (pp.enabled && pp.params.data_ptr() && P > 0) {
+        ppisp_host.resize((size_t)pp.params.size<0>() * P);
+        backend::memcpy_sync(ppisp_host.data(), pp.params.data_ptr(),
+                             ppisp_host.size() * sizeof(float),
+                             backend::MemcpyKind::DeviceToHost);
+    }
+
+    bool any = false;
+    for (const auto& sub : stp.subs) {
+        if (!_sub_has_gt_rgb(*sub)) continue;
+        const int64_t B = std::get<2>(sub->rgb_view)[0];
+        const int K = std::max(sub->K, 1);
+        if ((int64_t)sub->post_offsets.size() * K < B) continue;
+        for (int64_t j = 0; j < B; j++) {
+            const size_t slot = (size_t)sub->post_offsets[(size_t)(j / K)] + (size_t)(j % K);
+            if (slot >= luma.size()) {
+                luma.resize(slot + 1, std::numeric_limits<float>::quiet_NaN());
+                expo.resize(slot + 1, 1.0f);   // the plain draw for slots never seen
+            }
+            luma[slot] = _gt_row_luma(*sub, j);
+            const float e = (slot + 1) * (size_t)P <= ppisp_host.size()
+                                ? ppisp_host[slot * (size_t)P] : 0.0f;
+            expo[slot] = _bg_luma_exponent(luma[slot], e, ppisp_before_color_space);
+            any = true;
+        }
+    }
+    if (!any) return;
+    if (bg.exponent_by_cam.size() != (int64_t)expo.size())
+        bg.exponent_by_cam.resize(PoolSlot::EngBgExponentByCam, (int64_t)expo.size());
+    backend::memcpy_sync(bg.exponent_by_cam.data_ptr(), expo.data(),
+                         expo.size() * sizeof(float), backend::MemcpyKind::HostToDevice);
 }
 
 
@@ -229,8 +303,11 @@ std::map<std::string, float> engine_train_step_managed(
     if (stp.subs.empty())
         throw std::runtime_error("engine_train_step_managed: empty training step");
 
-    if (cfg.loss.normalize_by_luminance)
-        _normalize_weights_by_luminance(cfg.loss, stp);
+    if (cfg.loss.luminance_normalization > 0.0f)
+        _normalize_weights_by_luminance(cfg.loss, stp, cfg.loss.luminance_normalization);
+    if (cfg.background.match_luminance && engine().background.enabled)
+        _update_background_exponents(
+            stp, cfg.ppisp.run_before_color_space && engine().color_space.splat_enabled);
 
     // Build a POST-split bilagrid cam-index buffer for one sub-batch.
     // bilagrid_cam_indices must be the POST-split camera id, not the input
