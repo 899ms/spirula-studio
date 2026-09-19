@@ -46,7 +46,12 @@ The three implementations differ in where that state lives, which is why they
 share an interface rather than code:
 
 - **H.264** mutates its DPB in place: sliding-window or MMCO marking, with POC
-  types 0/1/2 all in play. `H264Decoder.cpp`
+  types 0/1/2 all in play. `H264Decoder.cpp`. It also shifts the `FrameNum`s it
+  hands the driver so that no reference's exceeds the current picture's:
+  NVIDIA 595 builds RefPicList0 without FrameNumWrap. A 16-frame `frame_num`
+  cycle with four references went wrong 17 frames into every 158-frame GOP and
+  stayed wrong to the next IDR; ffmpeg's Vulkan hwaccel does the same on that
+  driver, while its NVDEC path does not.
 - **H.265** rebuilds the reference picture set from scratch for every picture,
   so most of that file is `st_ref_pic_set()` and the POC bookkeeping around it.
   `H265Decoder.cpp`
