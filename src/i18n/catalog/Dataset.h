@@ -7551,6 +7551,120 @@ SS_MSG(sfm_sensor_gauge_help,
        "da sensörsüz çekimde yalnızca daha azı kalır. Kapalı, telemetrisi "
        "yanlış olduğu bilinen bir dosya içindir."));
 
+SS_MSG(sfm_exif_attitude,
+    EN("Photo attitude"),
+    JA("写真の姿勢"),
+    ZH_HANS("照片姿态"),
+    ZH_HANT("相片姿態"),
+    KO("사진의 자세"),
+    DE("Lage der Fotos"),
+    FR("Attitude des photos"),
+    ES("Actitud de las fotos"),
+    PT("Atitude das fotos"),
+    IT("Assetto delle foto"),
+    NL("Stand van de foto's"),
+    RU("Ориентация фотографий"),
+    TR("Fotoğrafların duruşu"));
+
+SS_MSG(sfm_exif_attitude_auto,
+    EN("Up and north"),
+    JA("上方向と北"),
+    ZH_HANS("上方向与北向"),
+    ZH_HANT("上方向與北向"),
+    KO("위쪽 방향과 북쪽"),
+    DE("Oben und Norden"),
+    FR("Haut et nord"),
+    ES("Vertical y norte"),
+    PT("Vertical e norte"),
+    IT("Verticale e nord"),
+    NL("Boven en noord"),
+    RU("Верх и север"),
+    TR("Yukarı yönü ve kuzey"));
+
+SS_MSG(sfm_exif_attitude_help,
+    EN("Use the camera attitude a drone writes into each photo -- its gimbal's "
+       "yaw, pitch and roll -- to decide which way is up, and where north is. "
+       "Without it, up is guessed from how the cameras were held, which fails "
+       "for a camera looking down or one its gimbal turned upside down. Photos "
+       "that disagree with the reconstruction are outvoted, and a set it "
+       "contradicts is not used. Ignore is for a camera known to write wrong "
+       "angles."),
+    JA("ドローンが写真ごとに書き込むカメラ姿勢 (ジンバルのヨー・ピッチ・ロール) を"
+       "使い、上方向と北を決めます。これがないと上方向はカメラの構え方から推測"
+       "しますが、真下を向いたカメラやジンバルで上下逆になったカメラでは外れます。"
+       "再構成と食い違う写真は多数決で除かれ、全体が矛盾する場合は使いません。"
+       "「使わない」は角度を誤って書くカメラ向けです。"),
+    ZH_HANS("使用无人机写入每张照片的相机姿态 (云台的偏航、俯仰、横滚) 来确定上方向"
+            "和北向。没有它时，上方向要根据相机的持握方式推测，而相机朝正下方、或被"
+            "云台翻转过来时这种推测会失效。与重建不符的照片会在投票中被排除，整体"
+            "矛盾时则不使用。“不使用”适用于已知会写错角度的相机。"),
+    ZH_HANT("使用無人機寫入每張相片的相機姿態 (雲台的偏航、俯仰、橫滾) 來確定上方向"
+            "和北向。沒有它時，上方向要依相機的持握方式推測，而相機朝正下方、或被"
+            "雲台翻轉過來時這種推測會失效。與重建不符的相片會在投票中被排除，整體"
+            "矛盾時則不使用。「不使用」適用於已知會寫錯角度的相機。"),
+    KO("드론이 사진마다 기록하는 카메라 자세 (짐벌의 요·피치·롤) 로 위 방향과 "
+       "북쪽을 정합니다. 이것이 없으면 위 방향은 카메라를 든 방식으로 추측하는데, "
+       "바로 아래를 보는 카메라나 짐벌이 위아래로 뒤집은 카메라에서는 틀립니다. "
+       "재구성과 맞지 않는 사진은 다수결로 빠지고, 전체가 모순되면 쓰지 않습니다. "
+       "사용 안 함은 각도를 잘못 기록하는 카메라를 위한 것입니다."),
+    DE("Nutzt die Kameralage, die eine Drohne in jedes Foto schreibt -- Gier-, "
+       "Nick- und Rollwinkel des Gimbals --, um oben und Norden zu bestimmen. "
+       "Ohne sie wird oben aus der Haltung der Kameras geschätzt, was bei einer "
+       "senkrecht nach unten blickenden Kamera oder einer vom Gimbal auf den Kopf "
+       "gedrehten versagt. Fotos, die der Rekonstruktion widersprechen, werden "
+       "überstimmt, und ein Satz, dem sie widerspricht, wird nicht verwendet. "
+       "Ignorieren ist für eine Kamera, die bekanntermaßen falsche Winkel "
+       "schreibt."),
+    FR("Utilise l'attitude de caméra qu'un drone écrit dans chaque photo -- "
+       "lacet, tangage et roulis de la nacelle -- pour fixer le haut et le nord. "
+       "Sans elle, le haut est deviné d'après la tenue des caméras, ce qui échoue "
+       "pour une caméra tournée vers le sol ou retournée par sa nacelle. Les "
+       "photos en désaccord avec la reconstruction sont mises en minorité, et un "
+       "ensemble qu'elle contredit n'est pas utilisé. Ignorer convient à une "
+       "caméra connue pour écrire de faux angles."),
+    ES("Usa la actitud de cámara que un dron escribe en cada foto -- guiñada, "
+       "cabeceo y alabeo del gimbal -- para fijar la vertical y el norte. Sin "
+       "ella, la vertical se adivina por cómo se sostuvieron las cámaras, lo que "
+       "falla con una cámara que mira hacia abajo o que su gimbal puso boca "
+       "abajo. Las fotos que no concuerdan con la reconstrucción quedan en "
+       "minoría, y un conjunto que ella contradice no se usa. Ignorar es para una "
+       "cámara que se sabe que escribe ángulos erróneos."),
+    PT("Usa a atitude de câmera que um drone escreve em cada foto -- guinada, "
+       "arfagem e rolamento do gimbal -- para fixar a vertical e o norte. Sem "
+       "ela, a vertical é adivinhada pela forma como as câmeras foram seguras, o "
+       "que falha com uma câmera virada para baixo ou que o gimbal pôs de cabeça "
+       "para baixo. As fotos que não concordam com a reconstrução ficam em "
+       "minoria, e um conjunto que ela contradiz não é usado. Ignorar é para uma "
+       "câmera que se sabe escrever ângulos errados."),
+    IT("Usa l'assetto della fotocamera che un drone scrive in ogni foto -- "
+       "imbardata, beccheggio e rollio del gimbal -- per stabilire la verticale "
+       "e il nord. Senza, la verticale si indovina da come erano tenute le "
+       "fotocamere, il che fallisce con una fotocamera rivolta verso il basso o "
+       "capovolta dal gimbal. Le foto in disaccordo con la ricostruzione vengono "
+       "messe in minoranza, e un insieme che essa contraddice non viene usato. "
+       "Ignora serve per una fotocamera nota per scrivere angoli sbagliati."),
+    NL("Gebruikt de camerastand die een drone in elke foto schrijft -- gier-, "
+       "stamp- en rolhoek van de gimbal -- om boven en noord te bepalen. Zonder "
+       "die wordt boven geraden uit hoe de camera's werden vastgehouden, wat "
+       "mislukt bij een camera die recht naar beneden kijkt of die de gimbal op "
+       "z'n kop heeft gedraaid. Foto's die de reconstructie tegenspreken worden "
+       "weggestemd, en een set die zij tegenspreekt wordt niet gebruikt. Negeren "
+       "is voor een camera waarvan bekend is dat hij foute hoeken schrijft."),
+    RU("Использует ориентацию камеры, которую дрон записывает в каждый снимок, "
+       "— рыскание, тангаж и крен подвеса, — чтобы задать верх и север. Без неё "
+       "верх угадывается по тому, как держали камеры, а это не срабатывает для "
+       "камеры, смотрящей вниз, или перевёрнутой подвесом. Снимки, расходящиеся "
+       "с реконструкцией, остаются в меньшинстве, а набор, которому она "
+       "противоречит, не используется. «Не использовать» — для камеры, которая "
+       "заведомо пишет неверные углы."),
+    TR("Bir dronun her fotoğrafa yazdığı kamera duruşunu -- gimbalın sapma, "
+       "yunuslama ve yatış açılarını -- kullanarak yukarıyı ve kuzeyi belirler. "
+       "Bu olmadan yukarı, kameraların nasıl tutulduğundan tahmin edilir; bu da "
+       "aşağı bakan ya da gimbalın ters çevirdiği bir kamerada başarısız olur. "
+       "Yeniden yapılandırmayla çelişen fotoğraflar oylamada azınlıkta kalır ve "
+       "onun çeliştiği bir küme kullanılmaz. Yok say, açıları yanlış yazdığı "
+       "bilinen bir kamera içindir."));
+
 SS_MSG(sensors_reading,
     EN("reading sensors..."),
     JA("センサーを読み取り中..."),
@@ -7613,6 +7727,87 @@ SS_MSG(sensors_photo_gps,
     NL("gps in {0}/{1}"),
     RU("GPS в {0}/{1}"),
     TR("{0}/{1} dosyada GPS"));
+
+SS_MSG(sensors_photo_gps_attitude,
+    EN("GPS + attitude in {0}/{1}"),
+    JA("GPS・姿勢あり {0}/{1}"),
+    ZH_HANS("{0}/{1} 张有 GPS 与姿态"),
+    ZH_HANT("{0}/{1} 張有 GPS 與姿態"),
+    KO("GPS·자세 {0}/{1}장"),
+    DE("GPS + Lage in {0}/{1}"),
+    FR("GPS + attitude dans {0}/{1}"),
+    ES("GPS + actitud en {0}/{1}"),
+    PT("GPS + atitude em {0}/{1}"),
+    IT("GPS + assetto in {0}/{1}"),
+    NL("gps + stand in {0}/{1}"),
+    RU("GPS + ориентация в {0}/{1}"),
+    TR("{0}/{1} dosyada GPS + duruş"));
+
+SS_MSG(sensors_photo_gps_attitude_split,
+    EN("GPS in {0}/{2}, attitude in {1}/{2}"),
+    JA("GPSあり {0}/{2}、姿勢あり {1}/{2}"),
+    ZH_HANS("{0}/{2} 张有 GPS，{1}/{2} 张有姿态"),
+    ZH_HANT("{0}/{2} 張有 GPS，{1}/{2} 張有姿態"),
+    KO("GPS {0}/{2}장, 자세 {1}/{2}장"),
+    DE("GPS in {0}/{2}, Lage in {1}/{2}"),
+    FR("GPS dans {0}/{2}, attitude dans {1}/{2}"),
+    ES("GPS en {0}/{2}, actitud en {1}/{2}"),
+    PT("GPS em {0}/{2}, atitude em {1}/{2}"),
+    IT("GPS in {0}/{2}, assetto in {1}/{2}"),
+    NL("gps in {0}/{2}, stand in {1}/{2}"),
+    RU("GPS в {0}/{2}, ориентация в {1}/{2}"),
+    TR("{0}/{2} dosyada GPS, {1}/{2} dosyada duruş"));
+
+SS_MSG(sensors_photo_attitude,
+    EN("attitude in {0}/{1}"),
+    JA("姿勢あり {0}/{1}"),
+    ZH_HANS("{0}/{1} 张有姿态"),
+    ZH_HANT("{0}/{1} 張有姿態"),
+    KO("자세 {0}/{1}장"),
+    DE("Lage in {0}/{1}"),
+    FR("attitude dans {0}/{1}"),
+    ES("actitud en {0}/{1}"),
+    PT("atitude em {0}/{1}"),
+    IT("assetto in {0}/{1}"),
+    NL("stand in {0}/{1}"),
+    RU("ориентация в {0}/{1}"),
+    TR("{0}/{1} dosyada duruş"));
+
+SS_MSG(sensors_photo_attitude_help,
+    EN("Attitude is which way the camera pointed -- the yaw, pitch and roll a "
+       "drone records with each photo. The reconstruction takes which way is "
+       "up, and north, from it."),
+    JA("姿勢とは、ドローンが写真ごとに記録するカメラの向き (ヨー・ピッチ・ロール) "
+       "です。再構成はここから上方向と北を決めます。"),
+    ZH_HANS("姿态是无人机随每张照片记录的相机朝向 (偏航、俯仰、横滚)。重建由它确定"
+            "上方向和北向。"),
+    ZH_HANT("姿態是無人機隨每張相片記錄的相機朝向 (偏航、俯仰、橫滾)。重建由它確定"
+            "上方向和北向。"),
+    KO("자세는 드론이 사진마다 기록하는 카메라의 방향 (요·피치·롤) 입니다. 재구성은 "
+       "이것으로 위 방향과 북쪽을 정합니다."),
+    DE("Die Lage ist, wohin die Kamera zeigte -- Gier-, Nick- und Rollwinkel, wie "
+       "eine Drohne sie zu jedem Foto aufzeichnet. Die Rekonstruktion nimmt "
+       "daraus, wo oben und wo Norden ist."),
+    FR("L'attitude est l'orientation de la caméra -- lacet, tangage et roulis -- "
+       "telle qu'un drone l'enregistre avec chaque photo. La reconstruction en "
+       "tire le haut et le nord."),
+    ES("La actitud es hacia dónde apuntaba la cámara -- guiñada, cabeceo y "
+       "alabeo -- tal como un dron la registra con cada foto. La reconstrucción "
+       "toma de ella la vertical y el norte."),
+    PT("A atitude é para onde a câmera apontava -- guinada, arfagem e rolamento "
+       "-- tal como um drone a regista com cada foto. A reconstrução tira dela a "
+       "vertical e o norte."),
+    IT("L'assetto è dove puntava la fotocamera -- imbardata, beccheggio e rollio "
+       "-- come un drone lo registra con ogni foto. La ricostruzione ne ricava la "
+       "verticale e il nord."),
+    NL("De stand is waar de camera heen wees -- gier-, stamp- en rolhoek, zoals "
+       "een drone die bij elke foto vastlegt. De reconstructie haalt er boven en "
+       "noord uit."),
+    RU("Ориентация — куда смотрела камера: рыскание, тангаж и крен, как дрон "
+       "записывает их с каждым снимком. Реконструкция берёт из неё верх и север."),
+    TR("Duruş, kameranın nereye baktığıdır -- bir dronun her fotoğrafla kaydettiği "
+       "sapma, yunuslama ve yatış açıları. Yeniden yapılandırma yukarıyı ve "
+       "kuzeyi buradan alır."));
 
 SS_MSG(sensors_carrier_tooltip,
     EN("Telemetry format: {0}"),

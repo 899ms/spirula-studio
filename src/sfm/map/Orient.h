@@ -81,9 +81,9 @@ inline Mat3 rotationUpToZ(const Vec3& up) {
     return R;
 }
 
-// The similarity taking `rec` into the frame where `up` is +Z, centred on the
-// cameras and unit-sized. Identity with under two registered images.
-inline Sim3 normalizingTransform(const Reconstruction& rec, Vec3 up) {
+// The similarity turning `rec` by `R`, centred on the cameras and unit-sized.
+// Identity with under two registered images.
+inline Sim3 normalizingTransform(const Reconstruction& rec, const Mat3& R) {
     Sim3 T;
     std::vector<Vec3> centers;
     Vec3 mid{0, 0, 0};
@@ -96,10 +96,6 @@ inline Sim3 normalizingTransform(const Reconstruction& rec, Vec3 up) {
     }
     if (centers.size() < 2) return T;
     mid = mid * (1.0 / (double)centers.size());
-    const double un = up.norm();
-    if (!(un > 1e-12)) return T;
-    up = up * (1.0 / un);
-    const Mat3 R = rotationUpToZ(up);
 
     // Scale so the furthest camera coordinate lands on 1. Per component, not
     // by norm: that is what the trainer does, and the point of doing this here
@@ -115,6 +111,13 @@ inline Sim3 normalizingTransform(const Reconstruction& rec, Vec3 up) {
     T.R = R;
     T.t = mul(R, mid) * -T.scale;
     return T;
+}
+
+// The same, turned so that `up` is +Z. Identity when `up` is zero.
+inline Sim3 normalizingTransform(const Reconstruction& rec, const Vec3& up) {
+    const double un = up.norm();
+    if (!(un > 1e-12)) return Sim3{};
+    return normalizingTransform(rec, rotationUpToZ(up * (1.0 / un)));
 }
 
 // Orientation tags for models that did not come from this run's features --

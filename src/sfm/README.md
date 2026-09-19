@@ -192,6 +192,8 @@ core/        types shared by every stage, no Vulkan:
                Pose                   Rigid3, Sim3, angle-axis conversions
                Image / ImageLoader    decode, grayscale, the batch decode pool
                Exif                   focal prior + camera identity from headers
+               Attitude               the gimbal yaw / pitch / roll a drone writes
+                                        into each photo's XMP
                Telemetry              the IMU / GPS a video carries (GPMF, Insta360,
                                         DJI, CAMM), read by content; unconsumed --
                                         docs/notes/imu-gps-for-sfm.md
@@ -420,6 +422,37 @@ and fits cameras to the turned frame, `none` ignores it. A training run over
 the model must be given the SAME value — `docs/datasets.md`, "EXIF
 orientation", has the table and the mirrored-tag compromise.
 
+`--exif-attitude` (`auto` by default) replaces the cameras' mean up axis with
+a measurement wherever the images carry one: a drone writes its gimbal's yaw, pitch and roll
+into every photo (DJI's `drone-dji:Gimbal*Degree` XMP, `core/Attitude.h`).
+Each registered image votes for up with its pitch and roll and, under `auto`,
+for north with its yaw (`map/AttitudeGauge.h`). A vote more than 10 degrees
+from the consensus counts against the set, and a set with more of those than
+agreeing votes is refused with a warning, so a wrong convention or a stale
+tag cannot tilt a model; scattered headings alone leave the model level and
+north unset. `up` takes the tilt alone, `none` ignores the tags, and
+`--no-orient` turns it off with the rest.
+
+It matters where the mean camera up axis is no answer at all: a camera looking
+down, or a gimbal pitched past the nadir so that every other frame is upside
+down. Measured against the vertical and heading of a full similarity fitted to
+RTK camera positions (centimetre altitude), on three flights of one DJI M4E:
+
+| capture | cameras' mean up | attitude: votes agree to | attitude: tilt | heading |
+|---|---|---|---|---|
+| 200 frames of a five-direction oblique survey (pitch -45, -55 rolled 180, -90) | 40.8 deg | 1.05 deg | 0.32 deg | 0.57 deg |
+| the whole survey, 1271 frames | 2.0 deg | 1.04 deg | 0.04 deg | 0.45 deg |
+| 136 frames flown by hand, pitch +7 to -88 | 7.4 deg | 0.28 deg | 0.17 deg | 0.55 deg |
+| 100 frames at pitch 0 | 0.13 deg | 0.34 deg | 0.13 deg | 1.11 deg |
+
+Over a whole survey the four oblique directions nearly cancel in the mean; a
+part of one -- a flight cut short, a subset, a model the mapper split off --
+is where the guess fails. On the 200 frames that is also the difference
+between `--metric-gps horizontal` fitting (200/200 cameras within 5 m, 0.04 m
+RMS) and being refused (64/200), since the horizontal fit takes its tilt from
+whatever levelled the model; on the hand-flown flight, 0.05 m RMS against
+2.0 m.
+
 `--metric-positions FILE` and `--metric-gps` fix that same gauge from an
 outside measurement instead, so the model is written **in metres**. The first
 reads per-image camera positions in COLMAP's `model_aligner --ref_images_path`
@@ -434,8 +467,9 @@ picks 5 for GPS, 0.5 for a positions file).
 `horizontal` or `full`, and the difference is the altitude.
 `full` fits all seven parameters, so the reference's
 vertical sets the model's tilt; `horizontal` fits only scale, heading and place,
-against latitude and longitude, and leaves which way is up to the cameras' own
-mean up axis — the same claim `--orient` makes. A phone's altitude is the worst
+against latitude and longitude, and leaves which way is up to the recorded
+attitude where the images carry one and to the cameras' own mean up axis where
+they do not — the same claims `--orient` makes. A phone's altitude is the worst
 component it reports, and over a capture wider than it is tall the fit converts
 that error into tilt: on an 850-image walk around a city square (150 m across,
 level ground) `full` came out **5.05 degrees off vertical**, spreading the
@@ -502,11 +536,13 @@ takes 0.3 s; a metric reference the user passes still outranks an upright-only
 sensor frame. `docs/notes/imu-gps-for-sfm.md` records what the files carry
 and what was measured.
 
-The sources run in that order and read each other: `gauge.txt`'s two bits are
-the state as well as the record, so a reference is not fitted over a model the
-sensors already made metric, `horizontal` skips its own upright pre-transform
-where the sensors already levelled the model, and the mean-camera-up fallback
-runs in exactly one place, over models nothing measured. A gauge a sensor
+The sources run in order -- the video's sensors, the recorded attitude, a
+metric reference, the fallback -- and read each other: `gauge.txt`'s two bits
+are the state as well as the record, so a reference is not fitted over a model
+the sensors already made metric, the attitude does not re-level a model the
+sensors levelled, `horizontal` skips its own upright pre-transform where either
+already levelled the model, and the mean-camera-up fallback runs in exactly one
+place, over models nothing measured. A gauge a sensor
 settled is never overwritten by the guess it was consulted to replace.
 
 Whatever settled a model's gauge, `sparse/N/gauge.txt` records it beside the
@@ -694,6 +730,7 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_cholesky_test` | dense GPU Cholesky vs a CPU reference | yes |
 | `sfm_geometry_test` | F, H, E, P3P, triangulation, RANSAC, SVD/eigen kernels | no |
 | `sfm_merge_test` | Sim(3) algebra, model alignment, track splicing, fold detection | no |
+| `sfm_attitude_test` | the XMP attitude, its angle convention, the gauge's vote and refusals | no |
 | `sfm_mask_test` | mask uv sampling, decode, file discovery | no |
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
 

@@ -2426,19 +2426,19 @@ SS_MSG(merge_need_two,
     TR("birleştirme en az iki model ister, burada {0} tane var"));
 
 SS_MSG(merge_metric_only,
-    EN("one model: nothing to merge, fixing its metric gauge alone"),
-    JA("モデルは 1 つ: 統合するものはなく、メートル座標系だけを合わせます"),
-    ZH_HANS("只有一个模型: 没有可合并的内容，只确定米制坐标系"),
-    ZH_HANT("只有一個模型: 沒有可合併的內容，只確定公尺座標系"),
-    KO("모델이 1개: 병합할 것이 없어 미터 좌표계만 맞춥니다"),
-    DE("ein Modell: nichts zu vereinen, nur der metrische Rahmen wird gesetzt"),
-    FR("un seul modèle : rien à fusionner, seul le repère métrique est fixé"),
-    ES("un solo modelo: nada que fusionar, solo se fija el marco métrico"),
-    PT("um só modelo: nada a fundir, só se fixa o referencial métrico"),
-    IT("un solo modello: niente da fondere, si fissa solo il sistema metrico"),
-    NL("één model: niets samen te voegen, alleen het metrische stelsel wordt gezet"),
-    RU("одна модель: сливать нечего, задаётся только метрическая система"),
-    TR("tek model: birleştirilecek bir şey yok, yalnızca metrik çerçeve belirlenir"));
+    EN("one model: nothing to merge, fixing its gauge alone"),
+    JA("モデルは 1 つ: 統合するものはなく、座標系だけを合わせます"),
+    ZH_HANS("只有一个模型: 没有可合并的内容，只确定坐标系"),
+    ZH_HANT("只有一個模型: 沒有可合併的內容，只確定座標系"),
+    KO("모델이 1개: 병합할 것이 없어 좌표계만 맞춥니다"),
+    DE("ein Modell: nichts zu vereinen, nur der Rahmen wird gesetzt"),
+    FR("un seul modèle : rien à fusionner, seul le repère est fixé"),
+    ES("un solo modelo: nada que fusionar, solo se fija el marco"),
+    PT("um só modelo: nada a fundir, só se fixa o referencial"),
+    IT("un solo modello: niente da fondere, si fissa solo il sistema di riferimento"),
+    NL("één model: niets samen te voegen, alleen het stelsel wordt gezet"),
+    RU("одна модель: сливать нечего, задаётся только система координат"),
+    TR("tek model: birleştirilecek bir şey yok, yalnızca çerçeve belirlenir"));
 
 SS_MSG(merge_summary,
     EN("merged {0} models into {1} in {2} (merges: {3}, refused: {4})"),
@@ -3394,6 +3394,131 @@ SS_MSG(sensor_untimed,
     NL("Model {0}: {1} van de {2} geregistreerde beelden pasten bij geen telemetrie"),
     RU("Модель {0}: {1} из {2} зарегистрированных кадров не сопоставились ни с какой телеметрией"),
     TR("Model {0}: kayıtlı {2} görüntüden {1} tanesi hiçbir telemetriyle eşleşmedi"));
+
+// ===========================================================================
+// The recorded camera attitude (map/AttitudeGauge.h)
+// ===========================================================================
+
+SS_MSG(attitude_up,
+    EN("Model {0}: up from the camera attitude {1}/{2} images record; they agree to {3} deg, "
+       "{4} outliers; the cameras' mean up axis was {5} deg off"),
+    JA("モデル {0}: {1}/{2} 枚の画像が記録したカメラ姿勢から上方向を決定。一致 {3} 度、"
+       "外れ値 {4}。カメラの平均上方向は {5} 度ずれていました"),
+    ZH_HANS("模型 {0}: 由 {1}/{2} 张图像记录的相机姿态确定上方向; 一致到 {3} 度，外点 {4} 个; "
+            "相机平均上方向偏了 {5} 度"),
+    ZH_HANT("模型 {0}: 由 {1}/{2} 張影像記錄的相機姿態確定上方向; 一致到 {3} 度，外點 {4} 個; "
+            "相機平均上方向偏了 {5} 度"),
+    KO("모델 {0}: 이미지 {1}/{2} 장이 기록한 카메라 자세로 위 방향을 정했습니다. 일치 {3} 도, "
+       "이상치 {4} 개. 카메라 평균 위 방향은 {5} 도 어긋나 있었습니다"),
+    DE("Modell {0}: oben aus der Kameralage, die {1}/{2} Bilder aufzeichnen; sie stimmen auf "
+       "{3} Grad überein, {4} Ausreißer; die mittlere Hochachse der Kameras lag {5} Grad daneben"),
+    FR("Modèle {0} : verticale d'après l'attitude de caméra enregistrée par {1}/{2} images ; "
+       "cohérentes à {3} degrés, {4} aberrantes ; l'axe vertical moyen des caméras était décalé "
+       "de {5} degrés"),
+    ES("Modelo {0}: vertical a partir de la actitud de cámara que registran {1}/{2} imágenes; "
+       "coherentes hasta {3} grados, {4} atípicas; el eje vertical medio de las cámaras se "
+       "desviaba {5} grados"),
+    PT("Modelo {0}: vertical a partir da atitude de câmera que {1}/{2} imagens registam; "
+       "coerentes até {3} graus, {4} atípicas; o eixo vertical médio das câmeras desviava "
+       "{5} graus"),
+    IT("Modello {0}: verticale dall'assetto della fotocamera registrato da {1}/{2} immagini; "
+       "coerenti a {3} gradi, {4} anomale; l'asse verticale medio delle fotocamere era fuori di "
+       "{5} gradi"),
+    NL("Model {0}: omhoog uit de camerastand die {1}/{2} beelden vastleggen; ze komen tot {3} "
+       "graden overeen, {4} uitschieters; de gemiddelde omhoog-as van de camera's zat er {5} "
+       "graden naast"),
+    RU("Модель {0}: верх по ориентации камеры, записанной в {1}/{2} снимках; сходятся до {3} "
+       "град., выбросов {4}; средняя ось верха камер отклонялась на {5} град."),
+    TR("Model {0}: {1}/{2} görüntünün kaydettiği kamera duruşundan yukarı; {3} dereceye kadar "
+       "uyuşuyor, {4} aykırı; kameraların ortalama yukarı ekseni {5} derece sapmıştı"));
+
+SS_MSG(attitude_north,
+    EN("Model {0}: north from the recorded heading; {1} images agree to {2} deg, {3} outliers"),
+    JA("モデル {0}: 記録された方位から北を決定。{1} 枚の一致 {2} 度、外れ値 {3}"),
+    ZH_HANS("模型 {0}: 由记录的航向确定北向; {1} 张图像一致到 {2} 度，外点 {3} 个"),
+    ZH_HANT("模型 {0}: 由記錄的航向確定北向; {1} 張影像一致到 {2} 度，外點 {3} 個"),
+    KO("모델 {0}: 기록된 방위로 북쪽을 정했습니다. 이미지 {1} 장 일치 {2} 도, 이상치 {3} 개"),
+    DE("Modell {0}: Norden aus der aufgezeichneten Richtung; {1} Bilder stimmen auf {2} Grad "
+       "überein, {3} Ausreißer"),
+    FR("Modèle {0} : nord d'après le cap enregistré ; {1} images cohérentes à {2} degrés, {3} "
+       "aberrantes"),
+    ES("Modelo {0}: norte a partir del rumbo registrado; {1} imágenes coherentes hasta {2} "
+       "grados, {3} atípicas"),
+    PT("Modelo {0}: norte a partir do rumo registado; {1} imagens coerentes até {2} graus, {3} "
+       "atípicas"),
+    IT("Modello {0}: nord dalla direzione registrata; {1} immagini coerenti a {2} gradi, {3} "
+       "anomale"),
+    NL("Model {0}: noord uit de vastgelegde koers; {1} beelden komen tot {2} graden overeen, {3} "
+       "uitschieters"),
+    RU("Модель {0}: север по записанному курсу; {1} снимков сходятся до {2} град., выбросов {3}"),
+    TR("Model {0}: kaydedilen yönden kuzey; {1} görüntü {2} dereceye kadar uyuşuyor, {3} aykırı"));
+
+SS_MSG(attitude_declined,
+    EN("Model {0}: the recorded camera attitude disagrees with the reconstruction ({1} of {2} "
+       "images more than 10 deg off) and was not used"),
+    JA("モデル {0}: 記録されたカメラ姿勢が再構成と食い違うため使いませんでした ({2} 枚中 {1} "
+       "枚が 10 度超ずれ)"),
+    ZH_HANS("模型 {0}: 记录的相机姿态与重建不符 ({2} 张中 {1} 张偏差超过 10 度)，未使用"),
+    ZH_HANT("模型 {0}: 記錄的相機姿態與重建不符 ({2} 張中 {1} 張偏差超過 10 度)，未使用"),
+    KO("모델 {0}: 기록된 카메라 자세가 재구성과 맞지 않아 쓰지 않았습니다 ({2} 장 중 {1} 장이 "
+       "10 도 넘게 어긋남)"),
+    DE("Modell {0}: die aufgezeichnete Kameralage widerspricht der Rekonstruktion ({1} von {2} "
+       "Bildern mehr als 10 Grad daneben) und wurde nicht verwendet"),
+    FR("Modèle {0} : l'attitude de caméra enregistrée contredit la reconstruction ({1} images "
+       "sur {2} à plus de 10 degrés) et n'a pas été utilisée"),
+    ES("Modelo {0}: la actitud de cámara registrada contradice la reconstrucción ({1} de {2} "
+       "imágenes a más de 10 grados) y no se usó"),
+    PT("Modelo {0}: a atitude de câmera registada contradiz a reconstrução ({1} de {2} imagens "
+       "a mais de 10 graus) e não foi usada"),
+    IT("Modello {0}: l'assetto della fotocamera registrato contraddice la ricostruzione ({1} "
+       "immagini su {2} oltre 10 gradi) e non è stato usato"),
+    NL("Model {0}: de vastgelegde camerastand spreekt de reconstructie tegen ({1} van {2} "
+       "beelden meer dan 10 graden ernaast) en is niet gebruikt"),
+    RU("Модель {0}: записанная ориентация камеры противоречит реконструкции ({1} из {2} "
+       "снимков отклоняются больше чем на 10 град.) и не использована"),
+    TR("Model {0}: kaydedilen kamera duruşu yeniden yapılandırmayla çelişiyor ({2} görüntünün "
+       "{1} tanesi 10 dereceden fazla sapıyor) ve kullanılmadı"));
+
+SS_MSG(attitude_north_declined,
+    EN("Model {0}: the recorded headings disagree ({1} of {2} images more than 10 deg off); "
+       "north not set"),
+    JA("モデル {0}: 記録された方位が食い違うため北は決めませんでした ({2} 枚中 {1} 枚が 10 度超"
+       "ずれ)"),
+    ZH_HANS("模型 {0}: 记录的航向互相不符 ({2} 张中 {1} 张偏差超过 10 度)，未确定北向"),
+    ZH_HANT("模型 {0}: 記錄的航向互相不符 ({2} 張中 {1} 張偏差超過 10 度)，未確定北向"),
+    KO("모델 {0}: 기록된 방위가 서로 맞지 않아 북쪽은 정하지 않았습니다 ({2} 장 중 {1} 장이 "
+       "10 도 넘게 어긋남)"),
+    DE("Modell {0}: die aufgezeichneten Richtungen widersprechen sich ({1} von {2} Bildern mehr "
+       "als 10 Grad daneben); Norden nicht gesetzt"),
+    FR("Modèle {0} : les caps enregistrés se contredisent ({1} images sur {2} à plus de 10 "
+       "degrés) ; nord non fixé"),
+    ES("Modelo {0}: los rumbos registrados no concuerdan ({1} de {2} imágenes a más de 10 "
+       "grados); norte sin fijar"),
+    PT("Modelo {0}: os rumos registados não concordam ({1} de {2} imagens a mais de 10 graus); "
+       "norte não fixado"),
+    IT("Modello {0}: le direzioni registrate non concordano ({1} immagini su {2} oltre 10 "
+       "gradi); nord non fissato"),
+    NL("Model {0}: de vastgelegde koersen spreken elkaar tegen ({1} van {2} beelden meer dan 10 "
+       "graden ernaast); noord niet vastgelegd"),
+    RU("Модель {0}: записанные курсы не согласуются ({1} из {2} снимков отклоняются больше чем "
+       "на 10 град.); север не задан"),
+    TR("Model {0}: kaydedilen yönler uyuşmuyor ({2} görüntünün {1} tanesi 10 dereceden fazla "
+       "sapıyor); kuzey belirlenmedi"));
+
+SS_MSG(attitude_vs_gps,
+    EN("GPS north against the recorded heading: {0} deg"),
+    JA("GPS の北と記録された方位の差: {0} 度"),
+    ZH_HANS("GPS 北向与记录航向相差: {0} 度"),
+    ZH_HANT("GPS 北向與記錄航向相差: {0} 度"),
+    KO("GPS 북쪽과 기록된 방위의 차이: {0} 도"),
+    DE("GPS-Norden gegen die aufgezeichnete Richtung: {0} Grad"),
+    FR("Nord GPS contre le cap enregistré : {0} degrés"),
+    ES("Norte GPS frente al rumbo registrado: {0} grados"),
+    PT("Norte GPS contra o rumo registado: {0} graus"),
+    IT("Nord GPS contro la direzione registrata: {0} gradi"),
+    NL("GPS-noord tegen de vastgelegde koers: {0} graden"),
+    RU("Север по GPS против записанного курса: {0} град."),
+    TR("GPS kuzeyi ile kaydedilen yön arasındaki fark: {0} derece"));
 
 SS_MSG(result_not_metric,
     EN("RESULT: NOT METRIC -- the model is sound but the metric frame could not be fitted; "

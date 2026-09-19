@@ -50,6 +50,7 @@
 #include "sfm/feature/Verification.h"
 #include "sfm/geometry/TwoView.h"
 #include "sfm/map/Assemble.h"
+#include "sfm/map/AttitudeGauge.h"
 #include "sfm/map/Mapper.h"
 #include "sfm/map/MetricGauge.h"
 #include "sfm/map/Orient.h"
@@ -338,9 +339,9 @@ void reportSensorGauge(size_t i, const SensorGaugeResult& r,
             L::num(r.tilt_sigma_deg, 2)});
 }
 
-// The gauge every finished model is written in: the video's sensors when
-// named and the fit holds, else a metric reference when given and fitted,
-// else the orient frame. False when a metric frame was asked for and missed.
+// The gauge each model is written in: the video's sensors, else the attitude
+// the images record, then a metric reference, else the orient frame -- each
+// where it fits. False when a metric frame was asked for and missed.
 bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
                      const std::string& imagedir, bool verbose,
                      std::vector<ModelGauge>& gauge) {
@@ -383,6 +384,42 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
                 gauge[i].scale_sigma = r.scale_sigma;
             }
         }
+    }
+
+    // ---- the attitude each image records ---------------------------------
+    // A model the video's sensors levelled keeps their answer. `north` is what
+    // a horizontal fit's heading is compared against.
+    std::vector<char> north(models.size(), 0);
+    const bool attitude = cfg.orient && cfg.exif_attitude != "none" && !imagedir.empty();
+    for (size_t i = 0; i < models.size() && attitude; i++) {
+        if (gauge[i].oriented) continue;
+        const AttitudeRef ref =
+            attitudeRefFromImages(models[i], imagedir, cfg.exif_orientation == "apply");
+        if (ref.image_ids.empty()) continue;
+        const AttitudeFit fit = fitAttitudeGauge(models[i], ref, cfg.exif_attitude == "auto");
+        const long long model = (long long)i;
+        if (!fit.ok) {
+            if (fit.reason == AttitudeFail::Disagree)
+                L::warn(Tag::Orient, M::attitude_declined,
+                        {model, (long long)fit.up.outliers, (long long)fit.up.votes});
+            continue;
+        }
+        const double guess_deg = extrinsic_detail::angleDeg(
+            fit.up.up, meanCameraUp(models[i], exif_up));
+        L::out(Tag::Orient, M::attitude_up,
+               {model, (long long)ref.image_ids.size(), (long long)ref.registered,
+                L::num(fit.up.spread_deg, 2), (long long)fit.up.outliers, L::num(guess_deg, 1)});
+        if (fit.north)
+            L::out(Tag::Orient, M::attitude_north,
+                   {model, (long long)fit.heading.votes, L::num(fit.heading.spread_deg, 2),
+                    (long long)fit.heading.outliers});
+        else if (fit.north_reason == AttitudeFail::Disagree)
+            L::err(Tag::Orient, M::attitude_north_declined,
+                   {model, (long long)fit.heading.outliers, (long long)fit.heading.votes});
+        applySim3(models[i], fit.T);
+        gauge[i].oriented = true;
+        gauge[i].up = "attitude";
+        north[i] = fit.north;
     }
 
     // ---- an outside metric reference --------------------------------------
@@ -451,6 +488,9 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
                 (long long)fit.n, L::num(fit.rms, 4), L::num(fit.scale_unc, 3),
                 L::num(fit.rot_unc_deg, 3)});
         if (!verbose) continue;
+        if (flat && north[i])
+            L::err(Tag::Orient, M::attitude_vs_gps,
+                   {L::num(std::atan2(fit.T.R[3], fit.T.R[0]) * 180.0 / M_PI, 2)});
         // A drifting altitude offset is absorbed by the rotation as a tilt and
         // leaves the RMS looking fine; these two numbers are what show it.
         double e = 0, n = 0, u = 0;

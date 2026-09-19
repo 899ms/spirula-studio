@@ -89,6 +89,7 @@ namespace {
     X("sfm_matcher",                sfm.matcher)                              \
     X("sfm_metric_gps",             sfm.metric_gps)                           \
     X("sfm_sensor_gauge",           sfm.sensor_gauge)                         \
+    X("sfm_exif_attitude",          sfm.exif_attitude)                        \
     X("sfm_keep_intermediate",      sfm.keep_intermediate)                    \
     X("sfm_ba_cpu",                 sfm.ba_cpu)                               \
     X("sfm_subprocess",             sfm.subprocess)                           \
@@ -231,6 +232,7 @@ void sanitize_dataset_settings(DatasetSettings& s) {
     clamp_to(j.matcher, 0, 1);
     clamp_to(j.metric_gps, 0, 2);
     clamp_to(j.sensor_gauge, 0, 2);
+    clamp_to(j.exif_attitude, 0, 2);
     clamp_to(j.max_features, 0, 1000000);
     clamp_to(j.max_image_size, 0, 32768);
     j.init_focal_px = std::max(0.0f, j.init_focal_px);

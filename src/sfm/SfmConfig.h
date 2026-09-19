@@ -152,6 +152,9 @@ struct SfmConfig {
     // tilt left to the cameras) or "full" (altitude as well).
     std::string metric_gps = "none";
     double metric_max_error = 0;        // metres; 0 resolves per source
+    // The camera attitude each image records (map/AttitudeGauge.h): "auto"
+    // takes up and north, "up" the tilt alone, "none" ignores it.
+    std::string exif_attitude = "auto";
     // The video's own IMU and GPS (map/SensorGauge.h). `telemetry` names one
     // file covering every image; the manifest lists several. "auto" takes
     // up, scale and place from whatever passes, "up" the orientation alone.
@@ -404,6 +407,8 @@ struct SfmConfig {
       "mapper", 0, 0, "", metric_positions)                                                        \
     F(metric_gps, "metric-gps", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, 0,    \
       "none|horizontal|full", metric_gps)                                                          \
+    F(exif_attitude, "exif-attitude", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, \
+      0, "auto|up|none", exif_attitude)                                                            \
     F(metric_max_error, "metric-max-error", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced,        \
       "mapper", 0, 1000000, "", metric_max_error)                                                  \
     F(metric_max_error_frac, "metric-max-error-frac", CMD_AUTO | CMD_MAP | CMD_MERGE,              \

@@ -240,10 +240,13 @@ inline ExifData parseExifTiff(const uint8_t* data, size_t size) {
     return out;
 }
 
-// A JPEG's APP1 Exif segment, "Exif\0\0" and the TIFF block after it; empty
-// when there is none. The marker chain is SEEKED -- a dataset parse asks every
-// image for its Orientation, and a fixed prefix would read megabytes per image.
-inline std::vector<uint8_t> readExifSegment(const std::string& path) {
+namespace detail {
+
+// The first APP1 segment whose payload starts with `sig`, `sig` included. The
+// marker chain is SEEKED -- a dataset parse asks every image for its
+// Orientation, and a fixed prefix would read megabytes per image.
+inline std::vector<uint8_t> readApp1Segment(const std::string& path, const char* sig,
+                                            size_t sig_len) {
     std::vector<uint8_t> seg_buf;
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return seg_buf;
@@ -266,12 +269,18 @@ inline std::vector<uint8_t> readExifSegment(const std::string& path) {
         if (!at(o + 2, hdr, 2)) break;
         const size_t seg = (size_t)(hdr[0] << 8 | hdr[1]);
         if (seg < 2) break;
-        // APP1 also carries XMP, so a segment that is not Exif keeps the walk
-        // going rather than ending it.
-        if (marker == 0xE1 && seg >= 8) {
-            seg_buf.resize(seg - 2);
-            if (!at(o + 4, seg_buf.data(), seg_buf.size())) break;
-            if (std::memcmp(seg_buf.data(), "Exif\0\0", 6) == 0) { fclose(f); return seg_buf; }
+        // APP1 carries both Exif and XMP, so a segment of the other kind keeps
+        // the walk going rather than ending it.
+        if (marker == 0xE1 && seg >= 2 + sig_len) {
+            seg_buf.resize(sig_len);
+            if (!at(o + 4, seg_buf.data(), sig_len)) break;
+            if (std::memcmp(seg_buf.data(), sig, sig_len) == 0) {
+                seg_buf.resize(seg - 2);
+                const bool whole = at(o + 4, seg_buf.data(), seg_buf.size());
+                fclose(f);
+                if (!whole) seg_buf.clear();
+                return seg_buf;
+            }
             seg_buf.clear();
         }
         o += 2 + (long)seg;
@@ -279,6 +288,23 @@ inline std::vector<uint8_t> readExifSegment(const std::string& path) {
     fclose(f);
     seg_buf.clear();
     return seg_buf;
+}
+
+}  // namespace detail
+
+// A JPEG's APP1 Exif segment, "Exif\0\0" and the TIFF block after it; empty
+// when there is none.
+inline std::vector<uint8_t> readExifSegment(const std::string& path) {
+    return detail::readApp1Segment(path, "Exif\0\0", 6);
+}
+
+// A JPEG's XMP packet, the text after the namespace header; empty when there
+// is none.
+inline std::string readXmpPacket(const std::string& path) {
+    static const char kSig[] = "http://ns.adobe.com/xap/1.0/";   // the NUL is part of it
+    const std::vector<uint8_t> seg = detail::readApp1Segment(path, kSig, sizeof kSig);
+    if (seg.size() <= sizeof kSig) return {};
+    return std::string((const char*)seg.data() + sizeof kSig, seg.size() - sizeof kSig);
 }
 
 // Read EXIF from an image file. Anything without one comes back invalid, which

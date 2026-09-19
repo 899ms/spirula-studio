@@ -139,6 +139,9 @@ struct SfmJob {
     // The video's own IMU and GPS track: 0 off, 1 orientation only, 2 (the
     // default) orientation and whatever metric scale passes its own checks.
     int sensor_gauge = 2;
+    // The camera attitude a drone writes into each photo: 0 off, 1 orientation
+    // only, 2 (the default) orientation and north.
+    int exif_attitude = 2;
     // Keep features/, matches.bin and .resume/ after a finished run. On by
     // default and remembered between sessions: they are what makes a cancelled
     // or failed reconstruction resumable (sfm/core/Resume.h).

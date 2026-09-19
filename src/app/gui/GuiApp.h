@@ -654,6 +654,9 @@ private:
     std::vector<PrepInput> _sources;
     // Keep the committed source stable while a path is edited.
     std::vector<std::string> _source_path_edits;
+    // What an input row draws after its path box, as last measured: the
+    // buttons, then the label and sensor badge. 0 before any row was drawn.
+    float _source_controls_w = 0.0f, _source_info_w = 0.0f;
     // Video headers are read off the UI thread; the results are applied in
     // pump_source_probes().
     SourceProbe _source_probe;

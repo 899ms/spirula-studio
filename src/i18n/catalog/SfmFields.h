@@ -3634,6 +3634,41 @@ SS_MSG(telemetry_help,
        "adları çıkarıcının yazdığı kaynak kare indeksini taşımalı. Bir manifest kamera grubu başına "
        "bir tane listeler"));
 
+SS_MSG(exif_attitude_help,
+    EN("Fix the model's up, and north, from the camera attitude each image records (a DJI "
+       "drone's gimbal angles): `auto` takes both, `up` the tilt alone, `none` ignores it"),
+    JA("各画像が記録したカメラ姿勢 (DJI ドローンのジンバル角) からモデルの上方向と北を決めます。"
+       "`auto` は両方、`up` は傾きだけを取り、`none` は無視します"),
+    ZH_HANS("由各图像记录的相机姿态 (DJI 无人机的云台角度) 确定模型的上方向和北向: `auto` 两者都取，"
+            "`up` 只取倾斜，`none` 忽略"),
+    ZH_HANT("由各影像記錄的相機姿態 (DJI 無人機的雲台角度) 確定模型的上方向和北向: `auto` 兩者都取，"
+            "`up` 只取傾斜，`none` 忽略"),
+    KO("각 이미지가 기록한 카메라 자세 (DJI 드론의 짐벌 각도) 로 모델의 위 방향과 북쪽을 정합니다. "
+       "`auto` 는 둘 다, `up` 은 기울기만 취하고, `none` 은 무시합니다"),
+    DE("Oben und Norden des Modells aus der Kameralage bestimmen, die jedes Bild aufzeichnet "
+       "(die Gimbalwinkel einer DJI-Drohne): `auto` nimmt beides, `up` nur die Neigung, `none` "
+       "ignoriert sie"),
+    FR("Fixer la verticale et le nord du modèle d'après l'attitude de caméra que chaque image "
+       "enregistre (les angles de nacelle d'un drone DJI) : `auto` prend les deux, `up` "
+       "l'inclinaison seule, `none` l'ignore"),
+    ES("Fijar la vertical y el norte del modelo a partir de la actitud de cámara que registra "
+       "cada imagen (los ángulos del gimbal de un dron DJI): `auto` toma ambos, `up` solo la "
+       "inclinación, `none` la ignora"),
+    PT("Fixar a vertical e o norte do modelo a partir da atitude de câmera que cada imagem "
+       "regista (os ângulos do gimbal de um drone DJI): `auto` toma ambos, `up` só a "
+       "inclinação, `none` ignora-a"),
+    IT("Fissare la verticale e il nord del modello dall'assetto della fotocamera che ogni "
+       "immagine registra (gli angoli del gimbal di un drone DJI): `auto` prende entrambi, `up` "
+       "solo l'inclinazione, `none` lo ignora"),
+    NL("Omhoog en noord van het model vastleggen uit de camerastand die elk beeld vastlegt (de "
+       "gimbalhoeken van een DJI-drone): `auto` neemt beide, `up` alleen de helling, `none` "
+       "negeert hem"),
+    RU("Задать верх и север модели по ориентации камеры, записанной в каждом снимке (углы "
+       "подвеса дрона DJI): `auto` берёт оба, `up` только наклон, `none` игнорирует её"),
+    TR("Modelin yukarı ve kuzey yönünü her görüntünün kaydettiği kamera duruşundan belirle (bir "
+       "DJI dronunun gimbal açıları): `auto` ikisini de, `up` yalnızca eğimi alır, `none` yok "
+       "sayar"));
+
 SS_MSG(sensor_gauge_help,
     EN("What the telemetry fixes: `auto` takes up, scale and place from whatever passes its checks, "
        "`up` the orientation alone, `none` ignores the sensors"),

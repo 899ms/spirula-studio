@@ -121,6 +121,7 @@ static void test_dataset_preset() {
     s.sfm.matcher = 1;
     s.sfm.metric_gps = 2;
     s.sfm.sensor_gauge = 1;
+    s.sfm.exif_attitude = 1;
     s.sfm.keep_intermediate = false;
     s.sfm.ba_cpu = true;
     s.sfm.subprocess = true;
@@ -233,6 +234,7 @@ static void test_dataset_preset() {
     CHECK_EQ(b.sfm.matcher, s.sfm.matcher);
     CHECK_EQ(b.sfm.metric_gps, s.sfm.metric_gps);
     CHECK_EQ(b.sfm.sensor_gauge, s.sfm.sensor_gauge);
+    CHECK_EQ(b.sfm.exif_attitude, s.sfm.exif_attitude);
     CHECK_EQ(b.sfm.keep_intermediate, s.sfm.keep_intermediate);
     CHECK_EQ(b.sfm.ba_cpu, s.sfm.ba_cpu);
     CHECK_EQ(b.sfm.subprocess, s.sfm.subprocess);

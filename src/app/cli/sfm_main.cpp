@@ -1083,10 +1083,11 @@ static int cmdMerge(int argc, char** argv) {
                {d.string(), models.back().numRegistered(),
                 (long long)models.back().points3D.size()});
     }
-    // A metric reference re-gauges a model instead of joining it to another,
-    // which is the one thing this command does that one model can want (D74).
+    // A reference re-gauges a model instead of joining it to another, which is
+    // the one thing this command does that one model can want (D74).
     const bool metric = cfg.metric_gps != "none" || !cfg.metric_positions.empty() ||
-                        (!cfg.telemetry_inputs.empty() && cfg.sensor_gauge != "none");
+                        (!cfg.telemetry_inputs.empty() && cfg.sensor_gauge != "none") ||
+                        (cfg.orient && cfg.exif_attitude != "none" && !cfg.image_dir.empty());
     if (models.size() < 2 && !metric) {
         L::fail(Tag::Merge, M::merge_need_two, {(long long)models.size()});
         return 1;

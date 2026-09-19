@@ -553,6 +553,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("max_image_size", std::to_string(j.max_image_size));
     line("metric_gps", std::to_string(j.metric_gps));
     line("sensor_gauge", std::to_string(j.sensor_gauge));
+    line("exif_attitude", std::to_string(j.exif_attitude));
     line("keep_intermediate", cfg_str(j.keep_intermediate));
     line("ba_cpu", cfg_str(j.ba_cpu));
     line("subprocess", cfg_str(j.subprocess));
@@ -3094,9 +3095,9 @@ void photo_import_combo(PhotoImport* mode, bool several_inputs) {
 
 }  // namespace
 
-// What the IMU and GPS of this input hold, beside the row that chose it. The
-// reconstruction uses them without being asked (SfM's sensor gauge), so what
-// is worth seeing here is whether there is anything for it to use.
+// What the sensors of this input hold, beside the row that chose it. The
+// reconstruction uses them without being asked (SfM's sensor and attitude
+// gauges), so what is worth seeing here is whether there is anything to use.
 void GuiApp::draw_sensor_badge(const PrepInput& s) {
     std::error_code ec;
     if (s.path.empty() ||
@@ -3104,18 +3105,24 @@ void GuiApp::draw_sensor_badge(const PrepInput& s) {
                     : !fs::is_directory(s.path, ec)))
         return;
     const TelemetryInfo t = _telemetry.get(s.path, s.is_video);
-    ImGui::SameLine();
     if (!t.done) {
+        ImGui::SameLine();
         ui::TextDisabled(dmsg::sensors_reading);
         return;
     }
     if (!s.is_video) {
         if (t.photos == 0) return;
-        if (t.with_gps == 0) { ui::TextDisabled(dmsg::sensors_none); return; }
-        ui::TextDisabled(dmsg::sensors_photo_gps,
-                         {(long long)t.with_gps, (long long)t.photos});
+        ImGui::SameLine();
+        const long long n = t.photos, gps = t.with_gps, att = t.with_attitude;
+        if (gps == 0 && att == 0) ui::TextDisabled(dmsg::sensors_none);
+        else if (att == 0) ui::TextDisabled(dmsg::sensors_photo_gps, {gps, n});
+        else if (gps == 0) ui::TextDisabled(dmsg::sensors_photo_attitude, {att, n});
+        else if (gps == att) ui::TextDisabled(dmsg::sensors_photo_gps_attitude, {gps, n});
+        else ui::TextDisabled(dmsg::sensors_photo_gps_attitude_split, {gps, att, n});
+        if (att > 0) ui::help_on_hover(dmsg::sensors_photo_attitude_help);
         return;
     }
+    ImGui::SameLine();
     const bool imu = t.gyro || t.accel || t.attitude;
     if (!imu && !t.gps) { ui::TextDisabled(dmsg::sensors_none); return; }
     ui::TextDisabled(imu && t.gps ? dmsg::sensors_imu_gps
@@ -3170,14 +3177,26 @@ void GuiApp::draw_dataset_source() {
     // below, so a list of clips reads as the one decision it usually is.
     bool any_video = false;
     for (const PrepInput& s : _sources) any_video = any_video || s.is_video;
+    // The path box takes what the rows leave, measured on the frame before: a
+    // translated label or a badge still being read has no width until drawn.
+    // Below a dozen characters, the label and badge get a line of their own.
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float min_path = ImGui::GetFontSize() * 12.0f;
+    const float controls_w =
+        _source_controls_w > 0.0f ? _source_controls_w : px(any_video ? 250.0f : 160.0f);
+    const float info_w =
+        _source_info_w > 0.0f ? _source_info_w : px(any_video ? 340.0f : 240.0f);
+    const bool one_line = avail - controls_w - info_w >= min_path;
+    const float path_w =
+        std::max(min_path, avail - controls_w - (one_line ? info_w : 0.0f));
+    float row_controls = 0.0f, row_info = 0.0f;
     for (size_t i = 0; i < _sources.size(); i++) {
         PrepInput& s = _sources[i];
         ImGui::PushID((int)i);
-        // Room for Browse + Remove + where the frames go + what sensors it
-        // carries, which is longer than any other row on the screen.
-        ImGui::SetNextItemWidth(px(any_video ? -590.0f : -500.0f));
+        ImGui::SetNextItemWidth(path_w);
         std::string& path_edit = _source_path_edits[i];
         ui::InputTextRaw("##in", &path_edit);
+        const float path_right = ImGui::GetItemRectMax().x;
         // A typed path is only worth resolving once it is finished -- rewriting
         // `<folder>` to `<folder>/images` under the cursor is not helpful.
         if (ImGui::IsItemDeactivatedAfterEdit() && path_edit != s.path)
@@ -3237,7 +3256,10 @@ void GuiApp::draw_dataset_source() {
                 ImGui::Dummy(ImVec2(px(84.0f), 0.0f));
             }
         }
-        ImGui::SameLine();
+        row_controls = std::max(row_controls, ImGui::GetItemRectMax().x - path_right +
+                                                  ImGui::GetStyle().ItemSpacing.x);
+        if (one_line) ImGui::SameLine();
+        const float info_left = ImGui::GetCursorScreenPos().x;
         // What this input is, and -- the part worth seeing before pressing the
         // button -- whether masks were found for it. Four whole messages
         // rather than a kind + a "+ masks" tail: the two do not compose in
@@ -3263,7 +3285,12 @@ void GuiApp::draw_dataset_source() {
             ui::help_on_hover(dmsg::pano360_unsupported_help);
         }
         draw_sensor_badge(s);
+        row_info = std::max(row_info, ImGui::GetItemRectMax().x - info_left);
         ImGui::PopID();
+    }
+    if (!_sources.empty()) {
+        _source_controls_w = row_controls;
+        _source_info_w = row_info;
     }
     if (remove >= 0 && !native_work_busy()) {
         close_native_previews();
@@ -5322,8 +5349,8 @@ void GuiApp::draw_sfm_advanced() {
     ui::help_on_hover(dmsg::max_image_size_auto_help);
 
     // ---- what the sensors are allowed to settle ----
-    // Two sources, two controls: a video's own IMU and GPS track, and the
-    // per-photograph EXIF position. Either can be the only one an input has.
+    // A video's own IMU and GPS track, and per photograph the EXIF position
+    // and a drone's recorded attitude. Any one can be all an input has.
     ImGui::Spacing();
     ui::SeparatorText(dmsg::section_sensors);
     ImGui::SetNextItemWidth(px(260.0f));
@@ -5337,6 +5364,12 @@ void GuiApp::draw_sfm_advanced() {
               {&dmsg::sfm_metric_gps_off, &dmsg::sfm_metric_gps_horizontal,
                &dmsg::sfm_metric_gps_full});
     ui::help_on_hover(dmsg::sfm_metric_gps_help);
+
+    ImGui::SetNextItemWidth(px(260.0f));
+    ui::Combo(dmsg::sfm_exif_attitude, &_sfm_job.exif_attitude,
+              {&dmsg::sfm_sensor_gauge_off, &dmsg::sfm_sensor_gauge_up,
+               &dmsg::sfm_exif_attitude_auto});
+    ui::help_on_hover(dmsg::sfm_exif_attitude_help);
     ImGui::Spacing();
 
     // Unticking it is what throws the resumable state away, so it asks first
