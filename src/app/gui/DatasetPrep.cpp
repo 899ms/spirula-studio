@@ -989,11 +989,7 @@ const Backends& backends() {
     static const Backends probed = [] {
         Backends b;
 #ifdef SS_HAVE_VIDEO
-        b.video_reason = app::video_decode_availability();
-        b.builtin_video = b.video_reason.empty();
-        if (!b.builtin_video)
-            b.video_note = "this graphics driver cannot decode video, so "
-                           "frames are extracted with ffmpeg";
+        b.builtin_video = true;
 #else
         b.video_reason = "built without the video decoder "
                          "(-DSS_ENABLE_PATENTED=OFF)";
@@ -1013,6 +1009,18 @@ const Backends& backends() {
         return b;
     }();
     return probed;
+}
+
+// The decoder's own capability answer for THIS device; empty means yes. It
+// creates the inference context, so it is only asked after a job's device
+// request is frozen, at that job's first extraction.
+static const std::string& native_decode_reason() {
+#ifdef SS_HAVE_VIDEO
+    static const std::string reason = app::video_decode_availability();
+    return reason;
+#else
+    return backends().video_reason;
+#endif
 }
 
 int DatasetPrep::count_images(const std::string& dir, const std::string& skip) {
@@ -1060,12 +1068,16 @@ void DatasetPrep::enter(Stage s, const std::string& text) {
     _prog->enter(s, text);
 }
 
-int DatasetPrep::exec(const std::vector<std::string>& argv) {
+int DatasetPrep::exec(
+        const std::vector<std::string>& argv,
+        const std::function<void(const std::string&)>& on_line) {
     std::string cmd;
     for (const auto& a : argv) cmd += (cmd.empty() ? "$ " : " ") + a;
     log(cmd);
-    return run_process(argv, "", [this](const std::string& l) { log(l); },
-                       _cancel);
+    return run_process(argv, "", [this, &on_line](const std::string& line) {
+        log(line);
+        if (on_line) on_line(line);
+    }, _cancel);
 }
 
 int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
@@ -1091,7 +1103,7 @@ int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
             ? (int)app::pano360_views(in.pano360, job.pano).size()
             : 0;
 #ifdef SS_HAVE_VIDEO
-    if (!job.force_external_decode && backends().builtin_video) {
+    if (!job.force_external_decode && native_decode_reason().empty()) {
         std::string err;
         video::VideoProbe probe;
         if (video::probe_video(in.path, probe, err) && probe.tracks > 0)
@@ -1137,6 +1149,21 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         error = lmsg::err_nothing_to_prepare.get();
         return false;
     }
+
+    // Before the built-in decoder can pick one. Only a job that will reach the
+    // decoder pays: asking whether THIS device decodes is what the freeze makes
+    // safe, and a photo-only job that masks freezes inside Masker::init.
+#ifdef SS_HAVE_VIDEO
+    bool wants_native_decode = false;
+    if (!job.force_external_decode)
+        for (const PrepInput& in : job.inputs)
+            if (in.is_video) {
+                wants_native_decode = true;
+                break;
+            }
+    if (wants_native_decode && !sam::freeze_device(job.device, error))
+        return false;
+#endif
 
     // Frames already there were extracted with settings the workspace records;
     // a run asking for others has to go back to the video (ReconStamp.h).
@@ -1265,7 +1292,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
                 const bool keeping =
                     job.resume && !frames_stale(job) && count_images(p.images) > 0;
                 if (!keeping && !job.force_external_decode &&
-                    backends().builtin_video && !plan_group(job, i, error))
+                    native_decode_reason().empty() && !plan_group(job, i, error))
                     return false;
                 if (!extract_video(job, in, p.images, p.masks, out, p.have_masks,
                                    error))
@@ -1424,7 +1451,8 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
         }
     }
 
-    const bool want_builtin = !job.force_external_decode && backends().builtin_video;
+    const bool want_builtin =
+        !job.force_external_decode && native_decode_reason().empty();
     if (want_builtin) {
         if (extract_video_builtin(job, in, images, out, error)) {
             out.captures.push_back({in.subdir, in.path, 0.0});
@@ -1462,6 +1490,7 @@ static bool builtin_job(const PrepJob& job, const PrepInput& in,
     const double src_fps = probe.fps > 1.0 ? probe.fps : 30.0;
     const int window = std::max(job.sharp_window, 1);
     fx.input = in.path;
+    fx.device = job.device;
     fx.skip = frame_skip(input_fps(job, in), src_fps);
     fx.keep = window > 1 ? window : 0;
     fx.max_frames = job.max_frames;
@@ -1682,9 +1711,11 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
             }
             track_path = tmp_track.string();
         }
-
         enter(Stage::Frames, window > 1 ? lmsg::stage_extract_candidates.get()
                                        : lmsg::stage_extract_ffmpeg.get());
+        RateLimitedProgress progress(_prog, Stage::Frames,
+                                     lmsg::noun_frames_written, _frames_tally);
+        progress.update(0, /*force=*/true);
         const fs::path cand = ws / "frames_tmp";
         remove_tree(cand);
         std::error_code ec;
@@ -1697,7 +1728,19 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         if (!job.auto_rotate) argv.push_back("-noautorotate");
         argv.insert(argv.end(), {"-i", track_path, "-vf", vf, "-qscale:v", "2",
                                  (cand / "c_%06d.jpg").string()});
-        int rc = exec(argv);
+        const int max_frames = job.max_frames;
+        int rc = exec(argv, [&progress, window, max_frames](const std::string& line) {
+            const size_t at = line.find_first_not_of(" \t");
+            if (at == std::string::npos || line.compare(at, 6, "frame=") != 0)
+                return;
+            const char* first = line.c_str() + at + 6;
+            char* end = nullptr;
+            const long long frame = std::strtoll(first, &end, 10);
+            if (end == first || frame < 0) return;
+            int64_t projected = (frame + window - 1) / window;
+            if (max_frames > 0) projected = std::min<int64_t>(projected, max_frames);
+            progress.update(projected);
+        });
         if (rc == kCancelled) { error = lmsg::err_cancelled.get(); return false; }
         if (rc != 0) {
             error = lmsg::err_ffmpeg_extract_failed.get();
@@ -1728,6 +1771,7 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         const int kept = select_sharpest_frames(
             cand.string(), out_dir.string(), "", so,
             [this](const std::string& l) { log(l); }, _cancel);
+        progress.update(std::max<int64_t>(kept, 0), /*force=*/true);
         remove_tree(cand);
         if (streams > 1) fs::remove(track_path, ec);
         if (kept < 0) {
@@ -2352,7 +2396,7 @@ bool DatasetPrep::generate_masks_builtin(const PrepJob& job, const PrepInput& in
     // photo folder's clicks were recorded against its own sorted order.
     std::vector<int64_t> ids;
     const bool by_stem = in.is_video && !job.force_external_decode &&
-                         backends().builtin_video &&
+                         native_decode_reason().empty() &&
                          frame_ids_from_stems(files, ids);
     if (!by_stem) {
         ids.resize(files.size());
@@ -2366,6 +2410,7 @@ bool DatasetPrep::generate_masks_builtin(const PrepJob& job, const PrepInput& in
 
     sam::MaskOptions mo;
     mo.model = job.mask_model_path;
+    mo.device = job.device;
     mo.text = job.mask_prompt;
     mo.neg_text = job.mask_negative_prompt;
     mo.keep_prompted = job.mask_keep_subject;

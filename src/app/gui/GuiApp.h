@@ -26,11 +26,13 @@
 #include "app/gui/SegmentPanel.h"
 #include "app/gui/SfmRunner.h"
 #include "app/gui/SourceList.h"
+#include "app/gui/SourceProbe.h"
 #include "app/gui/TelemetryProbe.h"
 #include "app/gui/TrainPreset.h"
 #include "app/gui/TrainRunner.h"
 #include "app/gui/ViewportPanel.h"
 
+#include <cstdint>
 #include <deque>
 #include <fstream>
 #include <map>
@@ -153,6 +155,8 @@ private:
     // Give the engine back and leave the screen. Called before anything that
     // needs the engine for itself.
     void close_splat();
+    // Close GPU-backed previews before another native handoff.
+    void close_native_previews();
 
 public:
     // Drag-and-drop entry (GLFW drop callback, main thread): auto-detects
@@ -260,6 +264,7 @@ private:
     void draw_pano360_options();
     void draw_pano360_size();
     bool dataset_busy() const;
+    bool native_work_busy() const;
     // Which step a running job is on, or nullptr when none is. Both runners
     // report through the same object, so the screen reads one thing.
     RunProgress* dataset_steps();
@@ -331,7 +336,7 @@ private:
     int preview_for_stage();
     // Release everything the preview holds -- GL buffers, the watcher thread,
     // the snapshot. Called when the screen is left and at shutdown.
-    void reset_dataset_preview();
+    void reset_dataset_preview(bool sweep = true);
     // "Re-run masking only" and friends: what probe_workspace already knows,
     // as the actions it implies.
     void draw_dataset_rerun(const WorkspaceState& prior);
@@ -349,8 +354,9 @@ private:
     // never seen, with the panel asking for masked feature points? Then
     // pressing the button means one of two runs, and it has to be asked which.
     bool masks_miss_kept_model();
-    // Everything start_dataset_job does once that question is settled.
-    void launch_dataset_job();
+    // Everything start_dataset_job does once that question is settled. False
+    // when the run did not start (busy, or the device could not be frozen).
+    bool launch_dataset_job();
     // An existing dataset as an input: its images/ become the source and the
     // folder itself the output, so the run adds to it instead of building a
     // copy beside it.
@@ -434,6 +440,19 @@ private:
     void poll_batch_command();
     const spirula::i18n::Msg& batch_stage_name(BatchStage s) const;
     void draw_train_settings();      // left panel
+    // Native picker and frozen identity, available from shared settings/View menu.
+    void draw_device_picker(bool as_menu = false);
+    // Lists the native devices once per session. Enumeration is side-effect
+    // free (a throwaway Vulkan instance) and never creates a logical device.
+    void load_native_devices();
+    // Resolve and register the canonical UUID without creating the inference
+    // context; reject later conflicting requests as restart-required.
+    bool freeze_native_device();
+    bool freeze_cuda_device();
+    // Copies the frozen UUID into every native job field this session owns, so
+    // one choice reaches the dataset, mask/geometry previews, reconstruction,
+    // geometry child and mesh child. Called from the freeze point.
+    void propagate_frozen_device();
     void draw_preset_picker();       // built-in + saved presets, save / load
     void draw_preset_save_modal();
     void draw_preset_delete_modal();
@@ -458,14 +477,15 @@ private:
     void draw_confirm_modal();
     void draw_data_error_modal();
     void handle_dialog_result(const std::vector<std::string>& paths);
-    // Take paths onto the input list, `replace` clearing what was there (a
-    // fresh pick from Home) rather than adding to it (the panel's Add buttons).
-    // Sets the per-input defaults and, unless the user has edited it, the
-    // output folder.
-    void add_sources(const std::vector<std::string>& paths, bool replace);
+    // Take paths onto the input list; `replace` clears a fresh pick's inputs.
+    // Sets defaults and the output folder; false means no input was accepted.
+    bool add_sources(const std::vector<std::string>& paths, bool replace);
+    void replace_source(size_t input, const std::string& path);
     // Re-derive what is a function of the list: the sub-folder each input's
     // images go into, and the default workspace.
     void refresh_sources();
+    void pump_source_probes();
+    void mark_source_metadata_dirty();
     void rescan_found_masks();
     // Did any input arrive with masks of its own?
     bool any_found_masks() const;
@@ -496,7 +516,32 @@ private:
     bool _pending_batch_skip = false;  // Pending::StartBatch's argument
     bool _parse_dirty = false;       // dataparser option edited -> reload
     bool _color_space_touched = false;  // see adopt_exr_color_space
-    bool _device_locked = false;     // backend initialized -> device fixed
+
+    // ---- the one frozen native GPU choice ----
+    // Typed request, including explicit Auto; frozen flag makes it immutable.
+    std::string _native_device_request;
+    bool _native_device_choice_set = false;
+    std::string _native_device_uuid;   // canonical uuid:<hex>, "" before freeze
+    std::string _native_device_name;   // driver name of the frozen device
+    std::string _native_device_error;  // last rejected request, shown inline
+    bool _native_device_frozen = false;
+
+    // The session-level CUDA engine picker is an ordinal the native side never
+    // sees. Enforced here because CUDA's device_select cannot reject a later
+    // change.
+    bool _cuda_device_locked = false;
+    int _cuda_device_index = -1;
+
+    // What the picker lists: the native Vulkan records when the build has one,
+    // backend rows otherwise. Cached: enumeration spins up a throwaway
+    // instance, and the machine's device set does not change under a session.
+    struct NativeDeviceRow {
+        std::string name, type, uuid;   // uuid canonical, "" when unreported
+        uint64_t vram_bytes = 0;
+        bool usable = false;
+    };
+    std::vector<NativeDeviceRow> _native_devices;
+    bool _native_devices_loaded = false;
 
     // Config being edited + the preset baseline it diffs against.
     TrainConfig _cfg;
@@ -607,6 +652,12 @@ private:
     // that runs instead of a parallel copy of it: a video file or photo folder
     // each, plus the sub-folder and the lens that belong to it.
     std::vector<PrepInput> _sources;
+    // Keep the committed source stable while a path is edited.
+    std::vector<std::string> _source_path_edits;
+    // Video headers are read off the UI thread; the results are applied in
+    // pump_source_probes().
+    SourceProbe _source_probe;
+    bool _source_probes_ready = true;
     // The rate box's text per row, kept while it is being typed into: what is
     // in the model is a number or nothing, and the box shows a caret for the
     // nothing (draw_dataset_source).

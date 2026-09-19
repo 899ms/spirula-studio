@@ -11,6 +11,7 @@
 #include "i18n/catalog/Data.h"
 #include "i18n/catalog/Log.h"
 #include "nn/core/Log.h"
+#include "nn/Device.h"
 #include "nn/io/Image.h"
 #include "sam/Sam.h"
 #include "video/Demuxer.h"
@@ -215,6 +216,8 @@ void report_plan(const FrameExtractSinks& sinks, const std::vector<int64_t>& pla
 bool scan_motion(const FrameExtractJob& job, const FrameExtractSinks& sinks,
                  MotionPlanInput& out, FrameExtractStats& stats,
                  std::string& error) {
+    // Before the decoder below creates the device, as extract_frames does.
+    if (!sam::freeze_device(job.device, error)) return false;
     const int n = video_track_count(job.input, error);
     if (n <= 0) {
         if (error.empty()) error = "no video track in " + job.input;
@@ -663,6 +666,18 @@ bool extract_frames(const FrameExtractJob& job_in, const FrameExtractSinks& sink
         return false;
     }
 
+    // Before the probe below, which creates the device and reports the video
+    // queue family this job then decodes on. Everything after -- decoder,
+    // Masker, Tracker -- inherits that identity.
+    if (!sam::freeze_device(job.device.empty() ? job.mask.device : job.device,
+                            error))
+        return false;
+    // Past this point the canonical UUID is what crosses into the decoder and
+    // the masker; an ordinal only ever meant something in the resolution that
+    // consumed it.
+    job.device = nn::configured_device_selector();
+    job.mask.device = job.device;
+
     error = video_decode_availability();
     if (!error.empty()) return false;
 
@@ -784,7 +799,12 @@ bool extract_frames(const FrameExtractJob& job_in, const FrameExtractSinks& sink
 bool extract_frames_at(const std::string& input, const FrameLook& look_in,
                        const std::vector<int64_t>& indices, int folder,
                        const FrameAtSink& on_frame,
-                       const std::atomic<bool>* cancel, std::string& error) {
+                       const std::atomic<bool>* cancel, std::string& error,
+                       const std::string& device) {
+    // A preview decodes on the run's device, so a click drawn here names a
+    // pixel the run will read.
+    if (!sam::freeze_device(device, error)) return false;
+
     error = video_decode_availability();
     if (!error.empty()) return false;
 
@@ -933,7 +953,8 @@ bool extract_frames_at(const std::string& input, const FrameLook& look_in,
 
 bool extract_one_frame(const std::string& input, const FrameLook& look,
                        int64_t index, int folder, nn::Image& out,
-                       const std::atomic<bool>* cancel, std::string& error) {
+                       const std::atomic<bool>* cancel, std::string& error,
+                       const std::string& device) {
     bool got = false;
     const bool ok = extract_frames_at(
         input, look, {index}, folder,
@@ -941,7 +962,7 @@ bool extract_one_frame(const std::string& input, const FrameLook& look,
             out = std::move(img);
             got = true;
         },
-        cancel, error);
+        cancel, error, device);
     if (ok && !got && error.empty()) error = "no frame could be decoded";
     return ok && got;
 }
