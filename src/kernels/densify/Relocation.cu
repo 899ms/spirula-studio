@@ -5,6 +5,8 @@
 #include "kernels/densify/DensifyQuantCopy.cuh"
 #include "kernels/densify/DensifyInternal.cuh"
 
+#include <algorithm>
+
 // ================
 // Relocation
 // ================
@@ -269,9 +271,16 @@ void relocate_splats_with_long_axis_split_tensor(
 
     DeviceVector<float2> weights = sample_weights.data_ptr()
         ? sample_weights : densify_accum_buffer;
+    uint32_t num_eligible = 0;
     int32_t* src_indices = weighted_sample_without_replacement_internal(
         cur_num_splats, (float*)weights.data_ptr(),
-        weights.size() * 2, mask, num_relocate, seed);
+        weights.size() * 2, mask, num_relocate, seed, &num_eligible);
+    // Past the live splats of positive weight the draw returns dead ones,
+    // each also some pair's dst: the two writes race and the revival is lost.
+    // The rest wait for the next step.
+    num_relocate = std::min<int64_t>(num_relocate, num_eligible);
+    if (num_relocate == 0)
+        return;
 
     #define _DENSIFY_LAS_LAUNCH(T, bnd_ptr, bps) \
             relocate_with_long_axis_split_kernel<T><<<_LAUNCH_ARGS_1D(num_relocate, 256)>>>( \

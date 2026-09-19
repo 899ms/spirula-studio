@@ -56,6 +56,7 @@ std::vector<uint8_t> top_mask(int w, int h, int rows) {
 struct Fetched {
     int w = 0, h = 0;
     std::vector<uint8_t> mask;
+    std::vector<uint8_t> rgb;
     uint8_t at(int x, int y) const {   // in the image's own pixels
         return mask[(size_t)(y * h / H) * w + (size_t)(x * w / W)];
     }
@@ -65,13 +66,17 @@ struct Fetched {
 CacheMode g_mode = CacheMode::CPU;
 
 Fetched fetch(const std::string& image, const std::string& mask, bool alpha,
-              bool flip) {
+              bool flip, const float* over = nullptr) {
     DataManagerConfig cfg;
     cfg.cache_mode = g_mode;
     cfg.load_masks = true;
     cfg.load_depths = cfg.load_normals = false;
     cfg.flip_mask = flip;
     if (alpha) cfg.alpha_masks = {1};
+    if (over) {
+        cfg.composite_alpha = {1};
+        for (int c = 0; c < 3; c++) cfg.composite_color[c] = over[c];
+    }
     std::vector<float> viewmat(16, 0.0f);
     viewmat[0] = viewmat[5] = viewmat[10] = viewmat[15] = 1.0f;
     DataManager dm(cfg, {0}, {0}, {image},
@@ -81,7 +86,7 @@ Fetched fetch(const std::string& image, const std::string& mask, bool alpha,
                    std::vector<float>(8, 0.0f), {}, {}, {}, {}, {}, {}, {}, {0}, {});
     DecodedBatch b;
     dm.fetch_one(0, b);
-    return {b.mask_width, b.mask_height, b.mask_buffer};
+    return {b.mask_width, b.mask_height, b.mask_buffer, b.rgb_buffer};
 }
 
 void run_cases(const std::string& rgba, const std::string& small,
@@ -119,6 +124,21 @@ void run_cases(const std::string& rgba, const std::string& small,
             for (int x = 0; x < m.w; x++)
                 ok &= m.mask[(size_t)y * m.w + x] == (uint8_t)(y >= 1);
         check(ok, "no alpha flag: the flipped file alone, at its own size");
+    }
+    {
+        // Over a light grey: transparent reads as the grey, opaque as itself,
+        // and 127 / 128 as the straight-alpha blend of the two.
+        const float grey[3] = {0.8f, 0.8f, 0.8f};
+        Fetched m = fetch(rgba, "", true, false, grey);
+        const std::vector<uint8_t> src = rgba_image();
+        bool ok = m.rgb.size() == (size_t)W * H * 3;
+        for (int i = 0; i < W * H && ok; i++)
+            for (int c = 0; c < 3; c++) {
+                const double a = src[(size_t)i * 4 + 3] / 255.0;
+                const double want = src[(size_t)i * 4 + c] * a + 0.8 * 255.0 * (1.0 - a);
+                ok &= std::abs((double)m.rgb[(size_t)i * 3 + c] - want) <= 0.5;
+            }
+        check(ok, "colour composited onto the background by its alpha");
     }
 }
 

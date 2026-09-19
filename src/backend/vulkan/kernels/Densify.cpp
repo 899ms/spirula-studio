@@ -66,11 +66,11 @@ static_assert(sizeof(DensifyNoiseParams) == 5 * 8 + 4 * 4,
 
 // Mirrors EfraimidisParams.
 struct EfraimidisParams {
-    uint64_t weights, mask, out_keys;
+    uint64_t weights, mask, out_keys, eligible;
     uint32_t stride, seed, use_mask, numel, wgs_per_row;
     uint32_t _pad0;
 };
-static_assert(sizeof(EfraimidisParams) == 3 * 8 + 6 * 4,
+static_assert(sizeof(EfraimidisParams) == 4 * 8 + 6 * 4,
               "params layout must match the slang struct");
 
 // Mirrors RelocMaskParams.
@@ -310,13 +310,12 @@ uint32_t fill_g1g2(P& p, const DeviceVector<float3>& g1_means,
     return g1_means.data_ptr() ? 1u : 0u;
 }
 
-// Weighted sampling without replacement (DensifySampling.cu
-// weighted_sample_without_replacement_internal): efraimidis-spirakis keys
-// (as order-preserving uint32 bits), stable radix sort of the identity
-// permutation, first num_sample sorted indices copied to the OutIdx slot.
+// weighted_sample_without_replacement_internal (DensifySampling.cu), with the
+// keys as order-preserving uint32 bits for a stable radix sort -- which, unlike
+// CUB's, keeps -0.0 ahead of +0.0. `num_eligible` as there.
 const int32_t* wswr_sample(int64_t numel, const float* weights_ptr,
                            const int32_t* mask_ptr, uint32_t num_sample,
-                           uint32_t seed) {
+                           uint32_t seed, uint32_t* num_eligible = nullptr) {
     // stride fixed to 2 (accum buffer float2; see the CUDA comment about
     // warmup making the derived stride incorrect)
     DeviceVector<int32_t> keys_in, keys_out, idx_in, idx_out, out_idx;
@@ -326,10 +325,15 @@ const int32_t* wswr_sample(int64_t numel, const float* weights_ptr,
     idx_out.resize(PoolSlot::DensifyWswrIndicesOut, numel);
     out_idx.resize(PoolSlot::DensifyWswrOutIdx, num_sample);
 
+    DeviceVector<int32_t> eligible;
+    eligible.resize(PoolSlot::DensifyWswrEligible, 1);
+    backend::memset_sync(eligible.data_ptr(), 0, sizeof(int32_t));
+
     EfraimidisParams ep{};
     ep.weights = (uint64_t)weights_ptr;
     ep.mask = vkk::or_fallback(mask_ptr);
     ep.out_keys = (uint64_t)keys_in.data_ptr();
+    ep.eligible = (uint64_t)eligible.data_ptr();
     ep.stride = 2;
     ep.seed = seed;
     ep.use_mask = mask_ptr ? 1u : 0u;
@@ -355,6 +359,12 @@ const int32_t* wswr_sample(int64_t numel, const float* weights_ptr,
     backend::memcpy_sync(out_idx.data_ptr(), d_vals.current(),
                          sizeof(int32_t) * num_sample,
                          MemcpyKind::DeviceToDevice);
+    if (num_eligible) {
+        int32_t h = 0;
+        backend::memcpy_sync(&h, eligible.data_ptr(), sizeof(int32_t),
+                             MemcpyKind::DeviceToHost);
+        *num_eligible = (uint32_t)h;
+    }
     return out_idx.data_ptr();
 }
 
@@ -655,12 +665,16 @@ void relocate_splats_with_long_axis_split_tensor(
                          MemcpyKind::DeviceToHost);
     if (num_relocate == 0) return;
 
+    uint32_t num_eligible = 0;
     const int32_t* src_indices = wswr_sample(
         cur_num_splats,
         (const float*)(sample_weights.data_ptr()
                            ? sample_weights.data_ptr()
                            : densify_accum_buffer.data_ptr()),
-        mask.data_ptr(), (uint32_t)num_relocate, seed);
+        mask.data_ptr(), (uint32_t)num_relocate, seed, &num_eligible);
+    // As in Relocation.cu: a dead src is also some pair's dst, and they race.
+    num_relocate = std::min<int32_t>(num_relocate, (int32_t)num_eligible);
+    if (num_relocate == 0) return;
 
     launch_relocate_las(cur_num_splats, num_relocate, split_opacity_k,
                         src_indices, dst_indices.data_ptr(), means, quats,

@@ -189,8 +189,8 @@ public:
     bool has_mask = false;
     bool has_depth = false;
     bool has_normal = false;
-    // DataManagerConfig::alpha_masks for `ds`; empty unless has_mask.
-    std::vector<uint8_t> alpha_masks;
+    // probe_alpha_masks over `ds`: [N] flags, empty when no image is a cut-out.
+    std::vector<uint8_t> alpha_images;
 
     // Filled by setup_engine().
     std::filesystem::path out_dir;
@@ -279,6 +279,8 @@ public:
 private:
     // ds.points drawn at random when --random-init asks for it.
     void seed_at_random();
+    void set_alpha_config(DataManagerConfig& dm,
+                          const std::vector<uint8_t>& alpha) const;
 
     // Bracket the train loop's pause gate so paused time stays out of
     // elapsed_seconds().

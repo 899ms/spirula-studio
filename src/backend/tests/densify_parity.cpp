@@ -549,6 +549,45 @@ int main(int argc, char** argv) {
         readback_model(m);
     }
 
+    // Three dead splats to every live one: each live splat revives exactly one,
+    // and a splat left dead is left alone. Drawing past the live ones splits
+    // dead sources, which are also destinations. Self-checked, not dumped.
+    {
+        Model m = build_model(32, 32, false, false, 15, 15, -1, -1, -1);
+        std::vector<float> op(N), before(3 * N), after(3 * N);
+        backend::memcpy_sync(op.data(), m.opacs, N * sizeof(float),
+                             MemcpyKind::DeviceToHost);
+        backend::memcpy_sync(before.data(), m.means, 3 * N * sizeof(float),
+                             MemcpyKind::DeviceToHost);
+        const float dead_logit = std::log(0.005f / 0.995f);
+        int64_t live = 0;
+        for (int64_t i = 0; i < N; i++) {
+            if (i % 4 != 0) op[i] = -8.f;
+            else live++;
+        }
+        backend::memcpy_sync(m.opacs, op.data(), N * sizeof(float),
+                             MemcpyKind::HostToDevice);
+        call_relocate_las(m, 0.005f, 131u);
+        backend::memcpy_sync(op.data(), m.opacs, N * sizeof(float),
+                             MemcpyKind::DeviceToHost);
+        backend::memcpy_sync(after.data(), m.means, 3 * N * sizeof(float),
+                             MemcpyKind::DeviceToHost);
+        int64_t dead_after = 0, dead_moved = 0;
+        for (int64_t i = 0; i < N; i++) {
+            if (!(op[i] <= dead_logit)) continue;
+            dead_after++;
+            dead_moved += std::memcmp(&before[3 * i], &after[3 * i],
+                                      3 * sizeof(float)) != 0;
+        }
+        if (dead_after != N - 2 * live || dead_moved != 0) {
+            std::printf("densify_parity: relocate_las with dead splats in the "
+                        "majority left %lld dead (want %lld), %lld of them "
+                        "moved\n", (long long)dead_after,
+                        (long long)(N - 2 * live), (long long)dead_moved);
+            revived_ok = false;
+        }
+    }
+
     // add (long-axis split): many deterministic dst splats
     {
         Model m = build_model(32, 32, false, false, 15, 15, -1, -1, -1);

@@ -53,6 +53,13 @@ file's -- with the alpha area-resampled before the gate, and
 aspect ratio differs from its image's is stretched onto it with a warning.
 `load_masks` off ignores both.
 
+Against a constant background (`background_mode` `color`), a cut-out image's
+colour is also composited onto `background_color` by its alpha as it is
+decoded: a transparent pixel's ground truth is the background it is rendered
+on, which is what eval scores a render against over the whole frame, what the
+Images tab shows, and what a soft edge renders as. The other background modes
+have no one colour to composite onto and keep the stored one.
+
 What a masked-out pixel means is `apply_loss_for_mask` (the GUI's Mask mode):
 ignored ("Ignore distractors") or trained as empty space ("Cut out
 background"). Left unset it resolves per dataset: cut out when the only masks

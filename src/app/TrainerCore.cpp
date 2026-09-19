@@ -590,6 +590,18 @@ void TrainerSession::check_config() {
                  {cfg.orientation_method, cfg.center_method}));
 }
 
+// A cut-out image's alpha is its mask when masks are on, and against a constant
+// background its colour is that background where transparent -- which is what
+// eval scores a render against, and what a soft edge renders as.
+void TrainerSession::set_alpha_config(DataManagerConfig& dm,
+                                      const std::vector<uint8_t>& alpha) const {
+    if (cfg.load_masks) dm.alpha_masks = alpha;
+    if (cfg.background_mode == "color") {
+        dm.composite_alpha = alpha;
+        for (int c = 0; c < 3; c++) dm.composite_color[c] = cfg.background_color[c];
+    }
+}
+
 // After relative_scale, so the cloud is sized by the cameras it will train
 // with. Into ds.points itself: the GUI's preview draws the seed that is used.
 void TrainerSession::seed_at_random() {
@@ -683,12 +695,11 @@ void TrainerSession::load_dataset() {
         resolve_face_fit(cfg), cfg.warp_back_face);
 
     // Warp-path guards, plus: a modality no weight reads is not loaded at all.
-    alpha_masks = cfg.load_masks ? probe_alpha_masks(ds.image_filenames)
-                                 : std::vector<uint8_t>{};
-    has_mask   = (!ds.mask_filenames.empty() || !alpha_masks.empty()) &&
+    alpha_images = probe_alpha_masks(ds.image_filenames);
+    has_mask   = (!ds.mask_filenames.empty() || !alpha_images.empty()) &&
                  cfg.load_masks;
-    if (!alpha_masks.empty()) {
-        const long long n = std::count(alpha_masks.begin(), alpha_masks.end(), 1);
+    if (!alpha_images.empty() && cfg.load_masks) {
+        const long long n = std::count(alpha_images.begin(), alpha_images.end(), 1);
         log(lfmt(ds.mask_filenames.empty() ? lmsg::alpha_masks_found
                                            : lmsg::alpha_masks_with_files,
                  {n, (long long)ds.num_cameras}));
@@ -696,7 +707,7 @@ void TrainerSession::load_dataset() {
     // A cut-out's transparent pixels are empty space, not distractors. Mask
     // files could be either, so with any of them the default stays "ignore".
     if (!cfg.apply_loss_for_mask.has_value()) {
-        cfg.apply_loss_for_mask = !alpha_masks.empty() && ds.mask_filenames.empty();
+        cfg.apply_loss_for_mask = !alpha_images.empty() && ds.mask_filenames.empty();
         if (*cfg.apply_loss_for_mask) log(lmsg::alpha_masks_cut_out.get());
     }
     has_depth  = !ds.depth_filenames.empty()  && cfg.load_depths &&
@@ -913,7 +924,7 @@ void TrainerSession::setup_engine() {
     dm.train_batch_size = train_bs;
     dm.val_batch_size   = val_bs;
     dm.flip_mask = cfg.flip_mask;
-    dm.alpha_masks = alpha_masks;
+    set_alpha_config(dm, alpha_images);
     dm.mask_boundary_offset = cfg.mask_boundary_offset;
     dm.exif_quarter_turns = ds.exif_quarter_turns;
     engine_setup_data_manager(
@@ -1385,12 +1396,11 @@ void TrainerSession::eval() {
     // otherwise pack several resolutions into one step.
     DataManagerConfig dm;
     dm.cache_mode  = (cfg.cache_images == "disk") ? CacheMode::DISK : CacheMode::CPU;
-    std::vector<uint8_t> eval_alpha =
-        cfg.load_masks ? probe_alpha_masks(eds.image_filenames) : std::vector<uint8_t>{};
+    const std::vector<uint8_t> eval_alpha = probe_alpha_masks(eds.image_filenames);
     const bool eval_masks =
         (!eds.mask_filenames.empty() || !eval_alpha.empty()) && cfg.load_masks;
     dm.load_masks  = eval_masks || epost.any_fov_mask;
-    dm.alpha_masks = std::move(eval_alpha);
+    set_alpha_config(dm, eval_alpha);
     dm.load_depths = false;
     dm.load_normals = false;
     dm.train_batch_size = 1;

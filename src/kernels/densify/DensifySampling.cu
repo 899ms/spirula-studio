@@ -281,7 +281,8 @@ __global__ void compute_efraimidis_spirakis_weight_kernel(
     uint32_t seed,
     const float* weights,
     const bool* mask,
-    float* out_weights
+    float* out_weights,
+    int32_t* num_eligible  // null to skip counting
 ) {
     int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numel)
@@ -293,6 +294,9 @@ __global__ void compute_efraimidis_spirakis_weight_kernel(
     if (mask != nullptr && !mask[idx])
         w = 0.0f;
     out_weights[idx] = w;
+    // Strictly negative: a positive weight the mask admits. -0.0 is not one.
+    if (num_eligible != nullptr && w < 0.0f)
+        atomicAdd(num_eligible, 1);
 }
 
 __global__ void iota_kernel(
@@ -312,13 +316,20 @@ int32_t* weighted_sample_without_replacement_internal(
     int64_t weights_numel,
     bool* masks_ptr,
     uint32_t num_sample,
-    uint32_t seed
+    uint32_t seed,
+    uint32_t* num_eligible
 ) {
     // int stride = (int)(weights_numel / numel);
     int stride = 2;  // above is incorrect during warmup
 
     float* sorting_values = DevicePool::global().acquire<float>(
         PoolSlot::DensifyWswrSortingValues, numel);
+    int32_t* d_eligible = nullptr;
+    if (num_eligible) {
+        d_eligible = DevicePool::global().acquire<int32_t>(
+            PoolSlot::DensifyWswrEligible, 1);
+        cudaMemset(d_eligible, 0, sizeof(int32_t));
+    }
 
     compute_efraimidis_spirakis_weight_kernel<<<_LAUNCH_ARGS_1D(numel, 256)>>>(
         numel,
@@ -326,9 +337,15 @@ int32_t* weighted_sample_without_replacement_internal(
         seed,
         weights_ptr,
         masks_ptr,
-        sorting_values
+        sorting_values,
+        d_eligible
     );
     CHECK_DEVICE_ERROR(cudaGetLastError());
+    if (num_eligible) {
+        int32_t h = 0;
+        cudaMemcpy(&h, d_eligible, sizeof(int32_t), cudaMemcpyDeviceToHost);
+        *num_eligible = (uint32_t)h;
+    }
 
     int32_t* out_idx = DevicePool::global().acquire<int32_t>(
         PoolSlot::DensifyWswrOutIdx, num_sample);

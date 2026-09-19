@@ -663,8 +663,10 @@ int ImageCompare::faces() const {
     return std::max(1, K[(size_t)_index]);
 }
 
+// The session's own answer: mask files, the images' alpha, or neither when
+// load_masks is off.
 bool ImageCompare::has_masks() const {
-    return !_session->ds.mask_filenames.empty() || _session->post.any_fov_mask;
+    return _session->has_mask || _session->post.any_fov_mask;
 }
 
 void ImageCompare::select(int index) {

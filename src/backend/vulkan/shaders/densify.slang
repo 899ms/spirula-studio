@@ -410,6 +410,7 @@ struct EfraimidisParams {  // 52 bytes: pushed directly
     float* weights;   // [numel * stride]
     int* mask;        // [numel] int32 0/1 (use_mask gates; fallback-backed)
     uint* out_keys;   // [numel] sortable key bits
+    int* eligible;    // [1] += 1 per strictly negative key
     uint stride;
     uint seed;
     uint use_mask;
@@ -430,6 +431,11 @@ void densify_efraimidis_keys(uint3 wg: SV_GroupID, uint tid: SV_GroupThreadID,
     // larger w -> smaller (more negative) value
     w = w / log(max(1.0f - u, 1e-30f));
     if (p.use_mask != 0 && p.mask[idx] == 0) w = 0.0f;
+    // Strictly negative: a positive weight the mask admits. -0.0 is not one.
+    if (w < 0.0f) {
+        int unused;
+        InterlockedAdd(p.eligible[0], 1, unused);
+    }
 
     // float bits -> order-preserving unsigned key
     uint b = asuint(w);

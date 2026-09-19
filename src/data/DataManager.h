@@ -24,6 +24,7 @@
 #include "core/Common.cuh"
 #include "core/Tensor.h"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -90,6 +91,12 @@ struct DataManagerConfig {
     // (data/ImageProbe.h). Its mask is the alpha, opaque from 128 up, ANDed
     // with its mask file if it has one; flip_mask turns only the file.
     std::vector<uint8_t> alpha_masks;
+
+    // One flag per input image whose alpha is composited onto composite_color
+    // (display-referred, 0..1) as its colour is decoded -- the constant
+    // background it is rendered against, so a transparent pixel's GT is that.
+    std::vector<uint8_t> composite_alpha;
+    std::array<float, 3> composite_color{0.0f, 0.0f, 0.0f};
 
     // Quarter turns clockwise to load each image with, one per input camera
     // (ParsedDataset::exif_quarter_turns). Mask, depth and normal come from the

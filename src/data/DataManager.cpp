@@ -380,14 +380,31 @@ void turn_normal_vectors(uint8_t* px, size_t n, int turns_cw) {
     }
 }
 
+// Straight alpha over `over` (display-referred, 0..1), in the file's own
+// encoding: what a transparent pixel looks like rendered on that background.
+template <typename T>
+std::vector<T> composite_over(const T* rgba, size_t n, const float over[3]) {
+    const double top = (double)std::numeric_limits<T>::max();
+    std::vector<T> out(n * 3);
+    for (size_t i = 0; i < n; ++i) {
+        const double a = rgba[i * 4 + 3] / top;
+        for (int c = 0; c < 3; ++c)
+            out[i * 3 + c] = (T)std::lround(rgba[i * 4 + c] * a +
+                                            (double)over[c] * top * (1.0 - a));
+    }
+    return out;
+}
+
 // `decode_threads` is what an EXR may use: 1 on the worker pool, which is
 // already 16 wide, and every core for a lone image the viewer asked for.
+// `over`, when set, composites an 8- or 16-bit file's alpha onto that colour.
 void decode_rgb_into(const std::string& path,
                      int expected_h, int expected_w,
                      PixelDType dtype,
                      uint8_t* dst,
                      int turns_cw = 0,
-                     int decode_threads = 1)
+                     int decode_threads = 1,
+                     const float* over = nullptr)
 {
     int w, h, ch;
     if (dtype == PixelDType::FLOAT32) {
@@ -410,10 +427,14 @@ void decode_rgb_into(const std::string& path,
             cpu_resize<float, 3>(src, h, w, (float*)dst, expected_h, expected_w);
         }
     } else if (dtype == PixelDType::UINT16) {
-        stbi_us* img = stbi_load_16(path.c_str(), &w, &h, &ch, 3);
+        stbi_us* img = stbi_load_16(path.c_str(), &w, &h, &ch, over ? 4 : 3);
         if (!img) throw std::runtime_error(decode_failure(path));
         const stbi_us* src = img;
-        std::vector<stbi_us> turned;
+        std::vector<stbi_us> flat, turned;
+        if (over) {
+            flat = composite_over(img, (size_t)w * h, over);
+            src = flat.data();
+        }
         turn_decoded(src, w, h, 3, turns_cw, turned);
         if (w == expected_w && h == expected_h) {
             std::memcpy(dst, src, (size_t)w * h * 3 * sizeof(stbi_us));
@@ -423,10 +444,14 @@ void decode_rgb_into(const std::string& path,
         }
         stbi_image_free(img);
     } else if (dtype == PixelDType::UINT8) {
-        stbi_uc* img = stbi_load(path.c_str(), &w, &h, &ch, 3);
+        stbi_uc* img = stbi_load(path.c_str(), &w, &h, &ch, over ? 4 : 3);
         if (!img) throw std::runtime_error(decode_failure(path));
         const stbi_uc* src = img;
-        std::vector<stbi_uc> turned;
+        std::vector<stbi_uc> flat, turned;
+        if (over) {
+            flat = composite_over(img, (size_t)w * h, over);
+            src = flat.data();
+        }
         turn_decoded(src, w, h, 3, turns_cw, turned);
         if (w == expected_w && h == expected_h) {
             std::memcpy(dst, src, (size_t)w * h * 3);
@@ -853,6 +878,11 @@ private:
     // build the views and publish to the appropriate ready queue.
     void publish_if_done(DecodeJob& job);
 
+    // The colour image i's alpha is composited onto at decode, or null.
+    const float* composite_of(int64_t i) const {
+        return (size_t)i < _cfg.composite_alpha.size() && _cfg.composite_alpha[(size_t)i]
+                   ? _cfg.composite_color.data() : nullptr;
+    }
     bool alpha_mask(int64_t i) const {
         return _has_alpha_masks && _cfg.alpha_masks[(size_t)i];
     }
@@ -1399,7 +1429,8 @@ void DataManagerImpl::preload_cpu_cache() {
                     size_t bytes = (size_t)W * H * 3 * pixel_dtype_size(dt);
                     _rgb_cache[i].assign(bytes, 0);
                     decode_rgb_into(_image_filenames[i], H, W, dt,
-                                    _rgb_cache[i].data(), turns_of(i));
+                                    _rgb_cache[i].data(), turns_of(i), 1,
+                                    composite_of(i));
                 }
                 // Per-image shape; a 1x1 mask is broadcast at batch-fill time.
                 // A synthesized one is image-sized: a 1x1 broadcast fails the
@@ -1901,7 +1932,8 @@ void DataManagerImpl::worker_loop_rgb() {
         uint8_t* dst = b.rgb_buffer.data() + (size_t)job.slot * row;
         if (!decode_or_park([&]{
                 decode_rgb_into(_image_filenames[job.ds_index], H, W,
-                                b.rgb_dtype, dst, turns_of(job.ds_index)); }))
+                                b.rgb_dtype, dst, turns_of(job.ds_index), 1,
+                                composite_of(job.ds_index)); }))
             return;
         publish_if_done(job);
     }
@@ -2238,7 +2270,8 @@ void DataManagerImpl::fetch_one(int32_t index, DecodedBatch& out) {
     } else {
         decode_rgb_into(_image_filenames[index], out.input_height,
                         out.input_width, out.rgb_dtype, out.rgb_buffer.data(),
-                        turns_of(index), /*decode_threads=*/0);
+                        turns_of(index), /*decode_threads=*/0,
+                        composite_of(index));
         // No mask of its own: the row stays zero, as the training path
         // leaves it.
         if (!out.mask_buffer.empty() && mask_present(index))
