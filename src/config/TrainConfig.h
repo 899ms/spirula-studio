@@ -121,6 +121,8 @@ inline int train_tier_rank(const char* tier) {
     X(std::string, metashape_xml, "", "dataset", "advanced", "none")         \
     X(std::string, metashape_ply, "", "dataset", "advanced", "none")         \
     X(std::string, metashape_psx, "", "dataset", "advanced", "none")         \
+    X(std::string, init_ply, "", "dataset", "basic", "none")                 \
+    X(bool, init_ply_add_points, false, "dataset", "advanced", "")           \
     X(float, train_resolution_divisor, 0.0f, "dataset", "basic", "")         \
     X(std::string, downscale_rounding_mode, "floor", "dataset", "advanced", "floor|ceil|round") \
     X(std::string, eval_mode, "all", "dataset", "advanced", "fraction|filename|interval|all") \
