@@ -82,20 +82,22 @@ struct DataManagerConfig {
     // Hard upper bound on RAM consumed by ready / partially-ready batches.
     int prefetch_batches = 4;
 
-    // Swap keep and ignore in every mask, before mask_boundary_offset. For
-    // masks that mark what to EXCLUDE, the other convention in the wild.
+    // Swap keep and ignore in every mask file, before mask_boundary_offset.
+    // For masks that mark what to EXCLUDE, the other convention in the wild.
     bool flip_mask = false;
+
+    // One flag per input image whose alpha channel is a cut-out
+    // (data/ImageProbe.h). Its mask is the alpha, opaque from 128 up, ANDed
+    // with its mask file if it has one; flip_mask turns only the file.
+    std::vector<uint8_t> alpha_masks;
 
     // Quarter turns clockwise to load each image with, one per input camera
     // (ParsedDataset::exif_quarter_turns). Mask, depth and normal come from the
     // same frame and turn with it. Empty when no image asks for one.
     std::vector<uint8_t> exif_quarter_turns;
 
-    // Signed boundary offset applied to binarized masks at decode time,
-    // expressed as a fraction of sqrt(W*H) of the decoded mask. Positive ->
-    // dilate (grow) foreground; negative -> erode (shrink) foreground; zero
-    // disables. Implemented via separable Felzenszwalb-Huttenlocher squared
-    // Euclidean distance transform on CPU (O(N) per row+col, exact).
+    // Dilate (+) or erode (-) the final mask by this fraction of sqrt(W*H) of
+    // the decoded mask, by an exact squared distance transform; 0 disables.
     float mask_boundary_offset = 0.0f;
 };
 

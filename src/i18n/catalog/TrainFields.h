@@ -692,35 +692,47 @@ SS_MSG(load_masks,
     RU("Использовать маски набора"),
     TR("Veri kümesinin maskelerini kullan"));
 SS_MSG(load_masks_help,
-    EN("Use the dataset's masks when they exist. What they then mean is set by "
+    EN("Use the dataset's masks when they exist, and the alpha channel of "
+       "images that have one. What they then mean is set by "
        "apply_loss_for_mask; turn off to train as if the dataset had none."),
-    JA("データセットにマスクがあれば使います。その意味は apply_loss_for_mask で"
-       "決まります。オフにするとマスクがないものとして学習します。"),
-    ZH_HANS("数据集里有蒙版时就使用它们。它们的含义由 apply_loss_for_mask 决定；"
-            "关掉就当作数据集没有蒙版来训练。"),
-    ZH_HANT("資料集裡有遮罩時就使用它們。它們的含意由 apply_loss_for_mask 決定；"
-            "關掉就當作資料集沒有遮罩來訓練。"),
-    KO("데이터셋에 마스크가 있으면 사용합니다. 그 의미는 apply_loss_for_mask가 "
-       "정하며, 끄면 마스크가 없는 데이터셋처럼 학습합니다."),
-    DE("Die Masken des Datensatzes verwenden, sofern vorhanden. Was sie bedeuten, "
-       "legt apply_loss_for_mask fest; abschalten trainiert wie ohne Masken."),
-    FR("Utiliser les masques du jeu de données lorsqu'ils existent. Ce qu'ils "
-       "signifient est fixé par apply_loss_for_mask ; décocher entraîne comme "
-       "si le jeu n'en avait pas."),
-    ES("Usar las máscaras del conjunto de datos cuando existan. Lo que significan "
-       "lo fija apply_loss_for_mask; desactive para entrenar como si no hubiera."),
-    PT("Usar as máscaras do conjunto de dados quando existirem. O que elas "
-       "significam é definido por apply_loss_for_mask; desligue para treinar "
-       "como se não houvesse nenhuma."),
-    IT("Usare le maschere del set di dati quando ci sono. Che cosa significhino "
-       "lo stabilisce apply_loss_for_mask; disattivare addestra come se non ce "
-       "ne fossero."),
-    NL("De maskers van de dataset gebruiken als die er zijn. Wat ze betekenen, "
-       "bepaalt apply_loss_for_mask; zet uit om te trainen alsof er geen zijn."),
-    RU("Использовать маски набора, если они есть. Что они означают, задаёт "
+    JA("データセットにマスクがあれば使います。アルファチャンネルのある画像は"
+       "それもマスクとして使います。その意味は apply_loss_for_mask で決まりま"
+       "す。オフにするとマスクがないものとして学習します。"),
+    ZH_HANS("数据集里有蒙版时就使用它们，带 Alpha 通道的图像也用该通道作蒙版。"
+            "它们的含义由 apply_loss_for_mask 决定；关掉就当作数据集没有蒙版"
+            "来训练。"),
+    ZH_HANT("資料集裡有遮罩時就使用它們，帶 Alpha 通道的影像也用該通道作遮罩。"
+            "它們的含意由 apply_loss_for_mask 決定；關掉就當作資料集沒有遮罩"
+            "來訓練。"),
+    KO("데이터셋에 마스크가 있으면 사용하며, 알파 채널이 있는 이미지는 그 채"
+       "널도 마스크로 씁니다. 그 의미는 apply_loss_for_mask가 정하며, 끄면 마"
+       "스크가 없는 데이터셋처럼 학습합니다."),
+    DE("Die Masken des Datensatzes verwenden, sofern vorhanden, dazu den "
+       "Alphakanal von Bildern, die einen haben. Was sie bedeuten, legt "
+       "apply_loss_for_mask fest; abschalten trainiert wie ohne Masken."),
+    FR("Utiliser les masques du jeu de données lorsqu'ils existent, ainsi que "
+       "le canal alpha des images qui en ont un. Ce qu'ils signifient est fixé "
+       "par apply_loss_for_mask ; décocher entraîne comme si le jeu n'en avait "
+       "pas."),
+    ES("Usar las máscaras del conjunto de datos cuando existan, y el canal "
+       "alfa de las imágenes que lo tengan. Lo que significan lo fija "
+       "apply_loss_for_mask; desactive para entrenar como si no hubiera."),
+    PT("Usar as máscaras do conjunto de dados quando existirem, e o canal alfa "
+       "das imagens que tiverem um. O que elas significam é definido por "
+       "apply_loss_for_mask; desligue para treinar como se não houvesse "
+       "nenhuma."),
+    IT("Usare le maschere del set di dati quando ci sono, e il canale alfa "
+       "delle immagini che ne hanno uno. Che cosa significhino lo stabilisce "
+       "apply_loss_for_mask; disattivare addestra come se non ce ne fossero."),
+    NL("De maskers van de dataset gebruiken als die er zijn, en het alfakanaal "
+       "van beelden die er een hebben. Wat ze betekenen, bepaalt "
+       "apply_loss_for_mask; zet uit om te trainen alsof er geen zijn."),
+    RU("Использовать маски набора, если они есть, а также альфа-канал "
+       "изображений, у которых он есть. Что они означают, задаёт "
        "apply_loss_for_mask; выключите, чтобы обучать как без масок."),
-    TR("Veri kümesinde maskeler varsa onları kullanır. Ne anlama geldiklerini "
-       "apply_loss_for_mask belirler; maskesiz eğitmek için kapatın."));
+    TR("Veri kümesinde maskeler varsa onları, alfa kanalı olan görüntülerde de "
+       "bu kanalı kullanır. Ne anlama geldiklerini apply_loss_for_mask "
+       "belirler; maskesiz eğitmek için kapatın."));
 
 SS_MSG(apply_loss_for_mask,
     EN("Train masked pixels as empty"), JA("マスク部分を空として学習"),
@@ -739,51 +751,76 @@ SS_MSG(apply_loss_for_mask_help,
     EN("Whether masked-out pixels are ignored or trained as empty space. Off "
        "ignores them, which is how you hide distractions such as people, cars, "
        "or the black area outside a fisheye circle. On trains them as empty, "
-       "which removes the background and leaves just the subject."),
-    JA("マスクされた画素を無視するか、空として学習するかを決めます。オフなら無"
-       "視され、通行人や車、魚眼の円外の黒い部分といった邪魔物を隠すのに使えま"
-       "す。オンなら空として学習され、背景が取り除かれて被写体だけが残ります。"),
+       "which removes the background and leaves just the subject. Left unset, "
+       "it is on when the only masks are the images' own alpha channel, and "
+       "off otherwise."),
+    JA("マスクされた画素を無視するか、空として学習するかを決めます。オフなら"
+       "無視され、通行人や車、魚眼の円外の黒い部分といった邪魔物を隠すのに使"
+       "えます。オンなら空として学習され、背景が取り除かれて被写体だけが残り"
+       "ます。未設定なら、マスクが画像自身のアルファチャンネルだけのときにオ"
+       "ン、それ以外はオフになります。"),
     ZH_HANS("被遮住的像素是忽略还是按空白训练。关闭时忽略它们，可用来隐藏行人、"
             "汽车、鱼眼圆外的黑边等干扰物。开启时按空白训练，会去掉背景，只留"
-            "下主体。"),
+            "下主体。未设置时，若蒙版只有图像自身的 Alpha 通道则开启，否则关"
+            "闭。"),
     ZH_HANT("被遮住的像素是忽略還是按空白訓練。關閉時忽略它們，可用來隱藏行人、"
             "汽車、魚眼圓外的黑邊等干擾物。開啟時按空白訓練，會去掉背景，只留"
-            "下主體。"),
-    KO("가려진 픽셀을 무시할지, 빈 공간으로 학습할지 정합니다. 끄면 무시하므로"
-       " 사람, 자동차, 어안 원 바깥의 검은 영역 같은 방해물을 가리는 데 쓸 수"
-       " 있습니다. 켜면 빈 곳으로 학습해 배경이 사라지고 피사체만 남습니다."),
-    DE("Ob maskierte Pixel ignoriert oder als leerer Raum trainiert werden. Aus "
-       "ignoriert sie, womit sich Störendes wie Passanten, Autos oder der schwarze "
-       "Bereich außerhalb des Fischaugenkreises ausblenden lässt. An trainiert "
-       "sie als leer, was den Hintergrund entfernt und nur das Motiv übrig lässt."),
-    FR("Les pixels masqués sont-ils ignorés ou entraînés comme du vide. Décoché, "
-       "ils sont ignorés, ce qui permet de cacher les gêneurs : passants, voitures, "
-       "ou la zone noire hors du cercle fisheye. Coché, ils sont entraînés comme "
-       "vides, ce qui supprime l'arrière-plan et ne laisse que le sujet."),
-    ES("Si los píxeles enmascarados se ignoran o se entrenan como espacio vacío. "
-       "Desactivado los ignora, que es como se ocultan elementos molestos: transeúntes, "
-       "coches o la zona negra fuera del círculo de ojo de pez. Activado los "
-       "entrena como vacíos, lo que elimina el fondo y deja solo el sujeto."),
+            "下主體。未設定時，若遮罩只有影像自身的 Alpha 通道則開啟，否則關"
+            "閉。"),
+    KO("가려진 픽셀을 무시할지, 빈 공간으로 학습할지 정합니다. 끄면 무시하므"
+       "로 사람, 자동차, 어안 원 바깥의 검은 영역 같은 방해물을 가리는 데 쓸 "
+       "수 있습니다. 켜면 빈 곳으로 학습해 배경이 사라지고 피사체만 남습니다."
+       " 설정하지 않으면 마스크가 이미지 자체의 알파 채널뿐일 때 켜지고, 그 "
+       "밖에는 꺼집니다."),
+    DE("Ob maskierte Pixel ignoriert oder als leerer Raum trainiert werden. "
+       "Aus ignoriert sie, womit sich Störendes wie Passanten, Autos oder der "
+       "schwarze Bereich außerhalb des Fischaugenkreises ausblenden lässt. An "
+       "trainiert sie als leer, was den Hintergrund entfernt und nur das Motiv "
+       "übrig lässt. Ungesetzt ist es an, wenn die einzigen Masken der "
+       "Alphakanal der Bilder selbst sind, sonst aus."),
+    FR("Les pixels masqués sont-ils ignorés ou entraînés comme du vide. "
+       "Décoché, ils sont ignorés, ce qui permet de cacher les gêneurs : "
+       "passants, voitures, ou la zone noire hors du cercle fisheye. Coché, "
+       "ils sont entraînés comme vides, ce qui supprime l'arrière-plan et ne "
+       "laisse que le sujet. Non défini, il est coché quand les seuls masques "
+       "sont le canal alpha des images elles-mêmes, décoché sinon."),
+    ES("Si los píxeles enmascarados se ignoran o se entrenan como espacio "
+       "vacío. Desactivado los ignora, que es como se ocultan elementos "
+       "molestos: transeúntes, coches o la zona negra fuera del círculo de ojo "
+       "de pez. Activado los entrena como vacíos, lo que elimina el fondo y "
+       "deja solo el sujeto. Sin definir, se activa cuando las únicas máscaras "
+       "son el canal alfa de las propias imágenes, y se desactiva en otro caso."),
     PT("Se os pixels mascarados são ignorados ou treinados como espaço vazio. "
-       "Desligado os ignora, que é como se escondem elementos indesejados: pessoas, "
-       "carros ou a área preta fora do círculo olho de peixe. Ligado os treina "
-       "como vazios, o que remove o fundo e deixa só o sujeito."),
+       "Desligado os ignora, que é como se escondem elementos indesejados: "
+       "pessoas, carros ou a área preta fora do círculo olho de peixe. Ligado "
+       "os treina como vazios, o que remove o fundo e deixa só o sujeito. Sem "
+       "valor definido, fica ligado quando as únicas máscaras são o canal alfa "
+       "das próprias imagens, e desligado caso contrário."),
     IT("Se i pixel mascherati vengono ignorati o addestrati come spazio vuoto. "
-       "Disattivato li ignora, ed è così che si nascondono gli elementi di disturbo: "
-       "passanti, automobili o l'area nera fuori dal cerchio fisheye. Attivato "
-       "li addestra come vuoti, il che rimuove lo sfondo e lascia solo il soggetto."),
-    NL("Of gemaskeerde pixels worden genegeerd of als lege ruimte getraind. Uit "
-       "negeert ze, waarmee je stoorelementen verbergt: voorbijgangers, auto's "
-       "of het zwarte gebied buiten de fisheye-cirkel. Aan traint ze als leeg, "
-       "waardoor de achtergrond verdwijnt en alleen het onderwerp overblijft."),
-    RU("Игнорировать закрытые маской пиксели или обучать их как пустоту. Выключено "
-       "— игнорирует; так скрывают помехи: прохожих, машины, чёрную область вне "
-       "круга фишая. Включено — обучает как пустоту, что убирает фон и оставляет "
-       "только объект."),
-    TR("Maskelenen piksellerin yok sayılması mı yoksa boş alan olarak eğitilmesi "
-       "mi. Kapalıyken yok sayılır; geçen insanlar, arabalar ya da balıkgözü "
-       "dairesinin dışındaki siyah alan gibi istenmeyenler böyle gizlenir. Açıkken "
-       "boş olarak eğitilir; arka plan kalkar ve yalnızca özne kalır."));
+       "Disattivato li ignora, ed è così che si nascondono gli elementi di "
+       "disturbo: passanti, automobili o l'area nera fuori dal cerchio "
+       "fisheye. Attivato li addestra come vuoti, il che rimuove lo sfondo e "
+       "lascia solo il soggetto. Se non impostato, è attivo quando le uniche "
+       "maschere sono il canale alfa delle immagini stesse, altrimenti è "
+       "disattivato."),
+    NL("Of gemaskeerde pixels worden genegeerd of als lege ruimte getraind. "
+       "Uit negeert ze, waarmee je stoorelementen verbergt: voorbijgangers, "
+       "auto's of het zwarte gebied buiten de fisheye-cirkel. Aan traint ze "
+       "als leeg, waardoor de achtergrond verdwijnt en alleen het onderwerp "
+       "overblijft. Niet ingesteld staat het aan als de enige maskers het "
+       "alfakanaal van de beelden zelf zijn, en anders uit."),
+    RU("Игнорировать закрытые маской пиксели или обучать их как пустоту. "
+       "Выключено — игнорирует; так скрывают помехи: прохожих, машины, чёрную "
+       "область вне круга фишая. Включено — обучает как пустоту, что убирает "
+       "фон и оставляет только объект. Если не задано, включено, когда "
+       "единственные маски — альфа-канал самих изображений, и выключено в "
+       "остальных случаях."),
+    TR("Maskelenen piksellerin yok sayılması mı yoksa boş alan olarak "
+       "eğitilmesi mi. Kapalıyken yok sayılır; geçen insanlar, arabalar ya da "
+       "balıkgözü dairesinin dışındaki siyah alan gibi istenmeyenler böyle "
+       "gizlenir. Açıkken boş olarak eğitilir; arka plan kalkar ve yalnızca "
+       "özne kalır. Ayarlanmazsa, tek maske görüntülerin kendi alfa kanalı "
+       "olduğunda açık, aksi hâlde kapalıdır."));
 
 SS_MSG(flip_mask,
     EN("Flip masks"), JA("マスクを反転"),
@@ -795,48 +832,64 @@ SS_MSG(flip_mask,
     NL("Maskers omkeren"), RU("Инвертировать маски"),
     TR("Maskeleri ters çevir"));
 SS_MSG(flip_mask_help,
-    EN("Swap what a mask keeps for what it hides. Masks here are white where the "
-       "image is kept; turn this on for masks that instead paint the region to "
-       "remove. Applied before the mask edge adjustment."),
-    JA("マスクが残す領域と隠す領域を入れ替えます。ここでのマスクは残す部分が白"
-       "です。取り除く領域を塗ったマスクではこれを有効にしてください。マスク境"
-       "界の調整より前に適用されます。"),
-    ZH_HANS("交换蒙版保留与隐藏的区域。这里的蒙版以白色表示保留的部分；若蒙版画"
-            "的是要去掉的区域，请打开此项。它在蒙版边缘调整之前生效。"),
-    ZH_HANT("交換遮罩保留與隱藏的區域。這裡的遮罩以白色表示保留的部分；若遮罩畫"
-            "的是要去掉的區域，請開啟此項。它在遮罩邊緣調整之前生效。"),
-    KO("마스크가 남기는 영역과 가리는 영역을 맞바꿉니다. 여기서 마스크는 남길 "
-       "부분이 흰색입니다. 지울 영역을 칠한 마스크라면 이 항목을 켜십시오. 마스크 "
-       "가장자리 조정보다 먼저 적용됩니다."),
-    DE("Vertauscht, was eine Maske behält, mit dem, was sie verbirgt. Masken sind "
-       "hier weiß, wo das Bild behalten wird; für Masken, die stattdessen den zu "
-       "entfernenden Bereich zeichnen, einschalten. Wirkt vor der "
-       "Maskenrand-Anpassung."),
+    EN("Swap what a mask keeps for what it hides. Masks here are white where "
+       "the image is kept; turn this on for masks that instead paint the "
+       "region to remove. Applied before the mask edge adjustment. Only mask "
+       "files are flipped, never an image's alpha channel."),
+    JA("マスクが残す領域と隠す領域を入れ替えます。ここでのマスクは残す部分が"
+       "白です。取り除く領域を塗ったマスクではこれを有効にしてください。マス"
+       "ク境界の調整より前に適用されます。反転するのはマスクファイルだけで、"
+       "画像のアルファチャンネルは反転しません。"),
+    ZH_HANS("交换蒙版保留与隐藏的区域。这里的蒙版以白色表示保留的部分；若蒙版"
+            "画的是要去掉的区域，请打开此项。它在蒙版边缘调整之前生效。只反转"
+            "蒙版文件，从不反转图像的 Alpha 通道。"),
+    ZH_HANT("交換遮罩保留與隱藏的區域。這裡的遮罩以白色表示保留的部分；若遮罩"
+            "畫的是要去掉的區域，請開啟此項。它在遮罩邊緣調整之前生效。只反轉"
+            "遮罩檔案，從不反轉影像的 Alpha 通道。"),
+    KO("마스크가 남기는 영역과 가리는 영역을 맞바꿉니다. 여기서 마스크는 남길"
+       " 부분이 흰색입니다. 지울 영역을 칠한 마스크라면 이 항목을 켜십시오. "
+       "마스크 가장자리 조정보다 먼저 적용됩니다. 반전하는 것은 마스크 파일뿐"
+       "이며, 이미지의 알파 채널은 반전하지 않습니다."),
+    DE("Vertauscht, was eine Maske behält, mit dem, was sie verbirgt. Masken "
+       "sind hier weiß, wo das Bild behalten wird; für Masken, die stattdessen "
+       "den zu entfernenden Bereich zeichnen, einschalten. Wirkt vor der "
+       "Maskenrand-Anpassung. Umgekehrt werden nur Maskendateien, nie der "
+       "Alphakanal eines Bildes."),
     FR("Échange ce qu'un masque garde et ce qu'il cache. Ici les masques sont "
        "blancs là où l'image est gardée ; activez ceci pour des masques qui "
-       "peignent au contraire la zone à retirer. Appliqué avant l'ajustement du "
-       "bord du masque."),
+       "peignent au contraire la zone à retirer. Appliqué avant l'ajustement "
+       "du bord du masque. Seuls les fichiers de masque sont inversés, jamais "
+       "le canal alpha d'une image."),
     ES("Intercambia lo que una máscara conserva con lo que oculta. Aquí las "
-       "máscaras son blancas donde se conserva la imagen; actívalo para máscaras "
-       "que en cambio pintan la zona a quitar. Se aplica antes del ajuste del "
-       "borde de la máscara."),
-    PT("Troca o que uma máscara mantém pelo que ela esconde. Aqui as máscaras são "
-       "brancas onde a imagem é mantida; ative isto para máscaras que pintam antes "
-       "a área a remover. Aplicado antes do ajuste da borda da máscara."),
+       "máscaras son blancas donde se conserva la imagen; actívalo para "
+       "máscaras que en cambio pintan la zona a quitar. Se aplica antes del "
+       "ajuste del borde de la máscara. Solo se invierten los archivos de "
+       "máscara, nunca el canal alfa de una imagen."),
+    PT("Troca o que uma máscara mantém pelo que ela esconde. Aqui as máscaras "
+       "são brancas onde a imagem é mantida; ative isto para máscaras que "
+       "pintam antes a área a remover. Aplicado antes do ajuste da borda da "
+       "máscara. Só os arquivos de máscara são invertidos, nunca o canal alfa "
+       "de uma imagem."),
     IT("Scambia ciò che una maschera conserva con ciò che nasconde. Qui le "
        "maschere sono bianche dove l'immagine viene conservata; attivalo per "
-       "maschere che dipingono invece l'area da togliere. Si applica prima della "
-       "regolazione del bordo della maschera."),
-    NL("Verwisselt wat een masker behoudt met wat het verbergt. Maskers zijn hier "
-       "wit waar het beeld behouden blijft; zet dit aan voor maskers die juist het "
-       "te verwijderen gebied inkleuren. Werkt vóór de aanpassing van de maskerrand."),
+       "maschere che dipingono invece l'area da togliere. Si applica prima "
+       "della regolazione del bordo della maschera. Si invertono solo i file "
+       "di maschera, mai il canale alfa di un'immagine."),
+    NL("Verwisselt wat een masker behoudt met wat het verbergt. Maskers zijn "
+       "hier wit waar het beeld behouden blijft; zet dit aan voor maskers die "
+       "juist het te verwijderen gebied inkleuren. Werkt vóór de aanpassing "
+       "van de maskerrand. Alleen maskerbestanden worden omgekeerd, nooit het "
+       "alfakanaal van een beeld."),
     RU("Меняет местами то, что маска сохраняет, и то, что она скрывает. Здесь "
        "маски белые там, где изображение сохраняется; включите это для масок, "
-       "которые вместо этого закрашивают удаляемую область. Действует до правки "
-       "края маски."),
-    TR("Bir maskenin koruduğu ile gizlediğini yer değiştirir. Buradaki maskeler "
-       "görüntünün korunduğu yerde beyazdır; bunun yerine kaldırılacak alanı "
-       "boyayan maskeler için açın. Maske kenarı ayarından önce uygulanır."));
+       "которые вместо этого закрашивают удаляемую область. Действует до "
+       "правки края маски. Инвертируются только файлы масок, но не альфа-канал "
+       "изображения."),
+    TR("Bir maskenin koruduğu ile gizlediğini yer değiştirir. Buradaki "
+       "maskeler görüntünün korunduğu yerde beyazdır; bunun yerine "
+       "kaldırılacak alanı boyayan maskeler için açın. Maske kenarı ayarından "
+       "önce uygulanır. Yalnızca maske dosyaları ters çevrilir, bir görüntünün "
+       "alfa kanalı asla."));
 
 SS_MSG(mask_boundary_offset,
     EN("Mask edge adjustment"), JA("マスク境界の調整"),
@@ -2965,6 +3018,406 @@ SS_MSG(suppress_initial_scales_help,
        "им раздуваться в крупные «летающие» артефакты над пустотой."),
     TR("Nokta bulutunun seyrek olduğu yerlerde splat'ları küçük başlatır. Boşluğun "
        "üstünde büyük uçuşan artıklara şişmelerini önler."));
+
+SS_MSG(random_init,
+    EN("Random seed points"),
+    JA("ランダムな初期点"),
+    ZH_HANS("随机初始点"),
+    ZH_HANT("隨機初始點"),
+    KO("무작위 초기 점"),
+    DE("Zufällige Startpunkte"),
+    FR("Points de départ aléatoires"),
+    ES("Puntos iniciales aleatorios"),
+    PT("Pontos iniciais aleatórios"),
+    IT("Punti iniziali casuali"),
+    NL("Willekeurige beginpunten"),
+    RU("Случайные начальные точки"),
+    TR("Rastgele başlangıç noktaları"));
+
+SS_MSG(random_init_help,
+    EN("Whether the splats start from points drawn at random around the "
+       "cameras instead of the dataset's point cloud. `auto` draws them only "
+       "when the dataset has no point cloud, or an empty one; `always` draws "
+       "them even when it has one; `never` stops with an error instead."),
+    JA("スプラットの初期位置を、データセットの点群ではなくカメラの周りにラン"
+       "ダムに置いた点にするかどうかです。`auto` はデータセットに点群がないか"
+       "空のときだけ置き、`always` は点群があっても置き、`never` は置かずにエ"
+       "ラーで止まります。"),
+    ZH_HANS("泼溅是否从相机周围随机抽取的点开始，而不是从数据集的点云开始。`a"
+            "uto` 只在数据集没有点云或点云为空时抽取；`always` 即使有点云也抽"
+            "取；`never` 则报错停止。"),
+    ZH_HANT("潑濺是否從相機周圍隨機抽取的點開始，而不是從資料集的點雲開始。`a"
+            "uto` 只在資料集沒有點雲或點雲為空時抽取；`always` 即使有點雲也抽"
+            "取；`never` 則報錯停止。"),
+    KO("스플랫을 데이터셋의 점군 대신 카메라 주변에 무작위로 뽑은 점에서 시작"
+       "할지 정합니다. `auto`는 데이터셋에 점군이 없거나 비어 있을 때만 뽑고,"
+       " `always`는 점군이 있어도 뽑으며, `never`는 뽑지 않고 오류로 멈춥니다"
+       "."),
+    DE("Ob die Splats statt von der Punktwolke des Datensatzes von zufällig um "
+       "die Kameras gezogenen Punkten ausgehen. `auto` zieht sie nur, wenn der "
+       "Datensatz keine oder eine leere Punktwolke hat; `always` auch dann, "
+       "wenn er eine hat; `never` bricht stattdessen mit einem Fehler ab."),
+    FR("Les splats partent-ils de points tirés au hasard autour des caméras "
+       "plutôt que du nuage de points du jeu de données. `auto` ne les tire "
+       "que si le jeu n'a pas de nuage de points, ou un nuage vide ; `always` "
+       "les tire même s'il en a un ; `never` s'arrête sur une erreur à la "
+       "place."),
+    ES("Si los splats parten de puntos sorteados al azar alrededor de las "
+       "cámaras en lugar de la nube de puntos del conjunto. `auto` solo los "
+       "sortea cuando el conjunto no tiene nube de puntos o la tiene vacía; "
+       "`always` los sortea aunque la tenga; `never` se detiene con un error."),
+    PT("Se os splats partem de pontos sorteados ao redor das câmeras em vez da "
+       "nuvem de pontos do conjunto. `auto` só os sorteia quando o conjunto "
+       "não tem nuvem de pontos ou a tem vazia; `always` sorteia mesmo quando "
+       "tem; `never` para com um erro."),
+    IT("Se gli splat partono da punti estratti a caso attorno alle camere "
+       "invece che dalla nuvola di punti del set di dati. `auto` li estrae "
+       "solo quando il set non ha una nuvola di punti o ce l'ha vuota; "
+       "`always` li estrae anche quando ce l'ha; `never` si ferma con un "
+       "errore."),
+    NL("Of de splats beginnen bij punten die willekeurig rond de camera's "
+       "worden getrokken in plaats van bij de puntenwolk van de dataset. "
+       "`auto` trekt ze alleen als de dataset geen of een lege puntenwolk "
+       "heeft; `always` ook als hij er een heeft; `never` stopt in plaats "
+       "daarvan met een fout."),
+    RU("Начинать ли сплаты со случайных точек вокруг камер вместо облака точек "
+       "набора. `auto` создаёт их, только если облака точек нет или оно "
+       "пустое; `always` — даже если оно есть; `never` вместо этого "
+       "останавливается с ошибкой."),
+    TR("Splatların veri kümesinin nokta bulutu yerine kameraların çevresinde "
+       "rastgele çekilen noktalardan başlayıp başlamayacağı. `auto` yalnızca "
+       "veri kümesinde nokta bulutu yoksa ya da boşsa çeker; `always` olsa "
+       "bile çeker; `never` bunun yerine hatayla durur."));
+
+SS_MSG(random_init_fraction,
+    EN("Random seed count"),
+    JA("ランダム初期点の数"),
+    ZH_HANS("随机初始点数量"),
+    ZH_HANT("隨機初始點數量"),
+    KO("무작위 초기 점 수"),
+    DE("Anzahl zufälliger Startpunkte"),
+    FR("Nombre de points de départ aléatoires"),
+    ES("Número de puntos iniciales aleatorios"),
+    PT("Número de pontos iniciais aleatórios"),
+    IT("Numero di punti iniziali casuali"),
+    NL("Aantal willekeurige beginpunten"),
+    RU("Число случайных начальных точек"),
+    TR("Rastgele başlangıç noktası sayısı"));
+
+SS_MSG(random_init_fraction_help,
+    EN("How many points random_init draws, as a share of cap_max: 0.1 of a "
+       "million is a hundred thousand."),
+    JA("random_init が置く点の数を cap_max に対する割合で指定します。100 万の"
+       " 0.1 なら 10 万点です。"),
+    ZH_HANS("random_init 抽取的点数，按 cap_max 的比例计：一百万的 0.1 就是十"
+            "万个。"),
+    ZH_HANT("random_init 抽取的點數，按 cap_max 的比例計：一百萬的 0.1 就是十"
+            "萬個。"),
+    KO("random_init이 뽑는 점의 수를 cap_max에 대한 비율로 정합니다. 100만의 "
+       "0.1이면 10만 개입니다."),
+    DE("Wie viele Punkte random_init zieht, als Anteil von cap_max: 0.1 von "
+       "einer Million sind hunderttausend."),
+    FR("Nombre de points que tire random_init, en part de cap_max : 0.1 d'un "
+       "million font cent mille."),
+    ES("Cuántos puntos sortea random_init, como fracción de cap_max: 0.1 de un "
+       "millón son cien mil."),
+    PT("Quantos pontos random_init sorteia, como fração de cap_max: 0.1 de um "
+       "milhão são cem mil."),
+    IT("Quanti punti estrae random_init, come quota di cap_max: 0.1 di un "
+       "milione fa centomila."),
+    NL("Hoeveel punten random_init trekt, als aandeel van cap_max: 0.1 van een "
+       "miljoen is honderdduizend."),
+    RU("Сколько точек создаёт random_init, в долях cap_max: 0.1 от миллиона — "
+       "сто тысяч."),
+    TR("random_init'in çektiği nokta sayısı, cap_max'in payı olarak: bir "
+       "milyonun 0.1'i yüz bindir."));
+
+SS_MSG(random_init_distribution,
+    EN("Random seed distribution"),
+    JA("ランダム初期点の分布"),
+    ZH_HANS("随机初始点分布"),
+    ZH_HANT("隨機初始點分布"),
+    KO("무작위 초기 점 분포"),
+    DE("Verteilung der zufälligen Startpunkte"),
+    FR("Répartition des points de départ aléatoires"),
+    ES("Distribución de los puntos iniciales aleatorios"),
+    PT("Distribuição dos pontos iniciais aleatórios"),
+    IT("Distribuzione dei punti iniziali casuali"),
+    NL("Verdeling van de willekeurige beginpunten"),
+    RU("Распределение случайных начальных точек"),
+    TR("Rastgele başlangıç noktalarının dağılımı"));
+
+SS_MSG(random_init_distribution_help,
+    EN("What the random seed points are drawn from. isotropic-gaussian is "
+       "round; anisotropic-gaussian follows the cameras' spread along each of "
+       "its principal axes; ellipsoid and box fill a solid ellipsoid or an "
+       "oriented box evenly, sized to the same spread. Cameras all at one "
+       "height have no vertical spread, which flattens every shape but the "
+       "isotropic one."),
+    JA("ランダム初期点をどの分布から取るかです。isotropic-gaussian は等方的な"
+       "球状、anisotropic-gaussian はカメラの広がりの主軸ごとの大きさに従いま"
+       "す。ellipsoid と box は同じ広がりに合わせた楕円体または向き付きの箱の"
+       "中に一様に置きます。カメラがすべて同じ高さにあると上下の広がりがなく、"
+       "等方的なもの以外は平たくなります。"),
+    ZH_HANS("随机初始点从什么分布中抽取。isotropic-gaussian 是各向同性的圆形"
+            "分布；anisotropic-gaussian 沿相机分布的各个主轴跟随其范围；ellip"
+            "soid 和 box 在按同样范围确定大小的实心椭球或定向长方体内均匀填充。"
+            "相机都在同一高度时没有竖直方向的范围，除各向同性以外的形状都会被"
+            "压扁。"),
+    ZH_HANT("隨機初始點從什麼分布中抽取。isotropic-gaussian 是各向同性的圓形"
+            "分布；anisotropic-gaussian 沿相機分布的各個主軸跟隨其範圍；ellip"
+            "soid 和 box 在按同樣範圍決定大小的實心橢球或定向長方體內均勻填充。"
+            "相機都在同一高度時沒有垂直方向的範圍，除各向同性以外的形狀都會被"
+            "壓扁。"),
+    KO("무작위 초기 점을 어떤 분포에서 뽑을지 정합니다. isotropic-gaussian은 "
+       "둥근 분포이고, anisotropic-gaussian은 카메라 분포의 주축마다 그 퍼짐"
+       "을 따릅니다. ellipsoid와 box는 같은 퍼짐에 맞춘 속이 찬 타원체나 방향"
+       "이 있는 상자를 고르게 채웁니다. 카메라가 모두 같은 높이에 있으면 수직"
+       " 퍼짐이 없어 등방성 분포 말고는 모두 납작해집니다."),
+    DE("Woraus die zufälligen Startpunkte gezogen werden. isotropic-gaussian "
+       "ist rund; anisotropic-gaussian folgt der Streuung der Kameras entlang "
+       "jeder ihrer Hauptachsen; ellipsoid und box füllen gleichmäßig ein "
+       "volles Ellipsoid oder einen ausgerichteten Quader, auf dieselbe "
+       "Streuung bemessen. Stehen alle Kameras auf einer Höhe, fehlt die "
+       "senkrechte Streuung, und jede Form außer der isotropen wird flach."),
+    FR("La loi d'où sont tirés les points de départ aléatoires. "
+       "isotropic-gaussian est ronde ; anisotropic-gaussian suit l'étalement "
+       "des caméras le long de chacun de ses axes principaux ; ellipsoid et "
+       "box remplissent uniformément un ellipsoïde plein ou une boîte "
+       "orientée, dimensionnés sur le même étalement. Des caméras toutes à la "
+       "même hauteur n'ont aucun étalement vertical, ce qui aplatit toutes les "
+       "formes sauf l'isotrope."),
+    ES("De qué se sortean los puntos iniciales aleatorios. isotropic-gaussian "
+       "es redonda; anisotropic-gaussian sigue la dispersión de las cámaras a "
+       "lo largo de cada uno de sus ejes principales; ellipsoid y box llenan "
+       "de manera uniforme un elipsoide macizo o una caja orientada, "
+       "dimensionados con esa misma dispersión. Unas cámaras todas a la misma "
+       "altura no tienen dispersión vertical, lo que aplana toda forma salvo "
+       "la isótropa."),
+    PT("De onde os pontos iniciais aleatórios são sorteados. "
+       "isotropic-gaussian é redonda; anisotropic-gaussian segue a dispersão "
+       "das câmeras ao longo de cada um dos seus eixos principais; ellipsoid e "
+       "box preenchem por igual um elipsoide sólido ou uma caixa orientada, "
+       "dimensionados com a mesma dispersão. Câmeras todas na mesma altura não "
+       "têm dispersão vertical, o que achata toda forma exceto a isotrópica."),
+    IT("Da che cosa si estraggono i punti iniziali casuali. isotropic-gaussian "
+       "è rotonda; anisotropic-gaussian segue la dispersione delle camere "
+       "lungo ciascuno dei suoi assi principali; ellipsoid e box riempiono in "
+       "modo uniforme un ellissoide pieno o una scatola orientata, "
+       "dimensionati sulla stessa dispersione. Camere tutte alla stessa "
+       "altezza non hanno dispersione verticale, il che appiattisce ogni forma "
+       "tranne quella isotropa."),
+    NL("Waaruit de willekeurige beginpunten worden getrokken. "
+       "isotropic-gaussian is rond; anisotropic-gaussian volgt de spreiding "
+       "van de camera's langs elk van haar hoofdassen; ellipsoid en box vullen "
+       "gelijkmatig een massieve ellipsoïde of een gerichte doos, op dezelfde "
+       "spreiding afgemeten. Camera's die allemaal op één hoogte staan hebben "
+       "geen verticale spreiding, en dan wordt elke vorm behalve de isotrope "
+       "plat."),
+    RU("Из какого распределения берутся случайные начальные точки. "
+       "isotropic-gaussian — круглое; anisotropic-gaussian следует разбросу "
+       "камер вдоль каждой из его главных осей; ellipsoid и box равномерно "
+       "заполняют сплошной эллипсоид или ориентированный параллелепипед того "
+       "же разброса. Если все камеры на одной высоте, вертикального разброса "
+       "нет, и все формы, кроме изотропной, становятся плоскими."),
+    TR("Rastgele başlangıç noktalarının hangi dağılımdan çekileceği. "
+       "isotropic-gaussian yuvarlaktır; anisotropic-gaussian kameraların "
+       "yayılımını her bir ana ekseni boyunca izler; ellipsoid ve box aynı "
+       "yayılıma göre boyutlanan dolu bir elipsoidi ya da yönlü bir kutuyu "
+       "eşit biçimde doldurur. Kameraların hepsi aynı yükseklikteyse dikey "
+       "yayılım olmaz ve izotropik olan dışında her şekil yassılaşır."));
+
+SS_MSG(random_init_center,
+    EN("Random seed center"),
+    JA("ランダム初期点の中心"),
+    ZH_HANS("随机初始点中心"),
+    ZH_HANT("隨機初始點中心"),
+    KO("무작위 초기 점 중심"),
+    DE("Mitte der zufälligen Startpunkte"),
+    FR("Centre des points de départ aléatoires"),
+    ES("Centro de los puntos iniciales aleatorios"),
+    PT("Centro dos pontos iniciais aleatórios"),
+    IT("Centro dei punti iniziali casuali"),
+    NL("Midden van de willekeurige beginpunten"),
+    RU("Центр случайных начальных точек"),
+    TR("Rastgele başlangıç noktalarının merkezi"));
+
+SS_MSG(random_init_center_help,
+    EN("Where the random seed points are centred: the median, the mean or the "
+       "focus of the camera positions (the point their optical axes converge "
+       "on), or the origin of the dataset's own frame. camera-focus suits a "
+       "capture that circles an object."),
+    JA("ランダム初期点の中心です。カメラ位置の中央値・平均・注視点（光軸が集"
+       "まる点）、またはデータセット自身の座標の原点から選びます。物体の周り"
+       "を回る撮影には camera-focus が向きます。"),
+    ZH_HANS("随机初始点的中心：相机位置的中位数、平均或注视点（各光轴汇聚的点），"
+            "或数据集自身坐标系的原点。绕物体一周的拍摄适合 camera-focus。"),
+    ZH_HANT("隨機初始點的中心：相機位置的中位數、平均或注視點（各光軸匯聚的點），"
+            "或資料集自身座標系的原點。繞物體一周的拍攝適合 camera-focus。"),
+    KO("무작위 초기 점의 중심입니다. 카메라 위치의 중앙값, 평균, 주시점(광축"
+       "이 모이는 점) 또는 데이터셋 자체 좌표계의 원점 중에서 고릅니다. 물체 "
+       "주위를 도는 촬영에는 camera-focus가 맞습니다."),
+    DE("Wo die zufälligen Startpunkte zentriert werden: Median, Mittelwert "
+       "oder Fokus der Kamerapositionen (der Punkt, auf den ihre optischen "
+       "Achsen zulaufen), oder der Ursprung des eigenen Koordinatensystems des "
+       "Datensatzes. camera-focus passt zu einer Aufnahme, die ein Objekt "
+       "umkreist."),
+    FR("Où sont centrés les points de départ aléatoires : médiane, moyenne ou "
+       "point de convergence des positions de caméra (là où leurs axes "
+       "optiques se rejoignent), ou origine du repère propre au jeu de "
+       "données. camera-focus convient à une prise qui tourne autour d'un "
+       "objet."),
+    ES("Dónde se centran los puntos iniciales aleatorios: la mediana, la media "
+       "o el foco de las posiciones de cámara (el punto al que convergen sus "
+       "ejes ópticos), o el origen del sistema propio del conjunto. "
+       "camera-focus conviene a una captura que rodea un objeto."),
+    PT("Onde os pontos iniciais aleatórios são centrados: a mediana, a média "
+       "ou o foco das posições das câmeras (o ponto para onde convergem os "
+       "seus eixos ópticos), ou a origem do sistema próprio do conjunto. "
+       "camera-focus serve a uma captura que circunda um objeto."),
+    IT("Dove sono centrati i punti iniziali casuali: mediana, media o fuoco "
+       "delle posizioni delle camere (il punto verso cui convergono i loro "
+       "assi ottici), oppure l'origine del sistema proprio del set di dati. "
+       "camera-focus si addice a una ripresa che gira attorno a un oggetto."),
+    NL("Waar de willekeurige beginpunten gecentreerd worden: de mediaan, het "
+       "gemiddelde of het focuspunt van de cameraposities (waar hun optische "
+       "assen samenkomen), of de oorsprong van het eigen assenstelsel van de "
+       "dataset. camera-focus past bij een opname die rond een object draait."),
+    RU("Где центрируются случайные начальные точки: медиана, среднее или фокус "
+       "положений камер (точка, где сходятся их оптические оси), либо начало "
+       "собственной системы координат набора. Для съёмки по кругу вокруг "
+       "объекта подходит camera-focus."),
+    TR("Rastgele başlangıç noktalarının nereye ortalanacağı: kamera "
+       "konumlarının ortancası, ortalaması ya da odağı (optik eksenlerinin "
+       "buluştuğu nokta) veya veri kümesinin kendi koordinat sisteminin "
+       "başlangıcı. Bir nesnenin çevresinde dönen çekime camera-focus uyar."));
+
+SS_MSG(random_init_spread,
+    EN("Random seed spread measure"),
+    JA("ランダム初期点の広がりの測り方"),
+    ZH_HANS("随机初始点范围的度量"),
+    ZH_HANT("隨機初始點範圍的度量"),
+    KO("무작위 초기 점 퍼짐 측정"),
+    DE("Maß der Streuung der Startpunkte"),
+    FR("Mesure de l'étalement des points de départ"),
+    ES("Medida de la dispersión de los puntos iniciales"),
+    PT("Medida da dispersão dos pontos iniciais"),
+    IT("Misura della dispersione dei punti iniziali"),
+    NL("Maat voor de spreiding van de beginpunten"),
+    RU("Мера разброса начальных точек"),
+    TR("Başlangıç noktası yayılımının ölçüsü"));
+
+SS_MSG(random_init_spread_help,
+    EN("How the cameras' spread about the centre is measured: the median or "
+       "the mean of their squared distances along each axis. The median "
+       "ignores a few cameras far from the rest."),
+    JA("中心からのカメラの広がりの測り方です。各軸に沿った距離の 2 乗の中央値"
+       "か平均を使います。中央値は他から離れた少数のカメラを無視します。"),
+    ZH_HANS("如何度量相机相对于中心的范围：取沿各轴距离平方的中位数或平均值。"
+            "中位数会忽略少数远离其他相机的相机。"),
+    ZH_HANT("如何度量相機相對於中心的範圍：取沿各軸距離平方的中位數或平均值。"
+            "中位數會忽略少數遠離其他相機的相機。"),
+    KO("중심에 대한 카메라의 퍼짐을 재는 방법입니다. 각 축을 따른 거리 제곱의"
+       " 중앙값이나 평균을 씁니다. 중앙값은 나머지와 멀리 떨어진 몇몇 카메라"
+       "를 무시합니다."),
+    DE("Wie die Streuung der Kameras um die Mitte gemessen wird: Median oder "
+       "Mittelwert ihrer quadrierten Abstände entlang jeder Achse. Der Median "
+       "übergeht ein paar Kameras, die weit von den übrigen entfernt sind."),
+    FR("Comment se mesure l'étalement des caméras autour du centre : médiane "
+       "ou moyenne de leurs distances au carré le long de chaque axe. La "
+       "médiane ignore quelques caméras éloignées des autres."),
+    ES("Cómo se mide la dispersión de las cámaras respecto al centro: la "
+       "mediana o la media de sus distancias al cuadrado a lo largo de cada "
+       "eje. La mediana ignora unas pocas cámaras alejadas del resto."),
+    PT("Como se mede a dispersão das câmeras em torno do centro: a mediana ou "
+       "a média das suas distâncias ao quadrado ao longo de cada eixo. A "
+       "mediana ignora umas poucas câmeras longe das demais."),
+    IT("Come si misura la dispersione delle camere attorno al centro: mediana "
+       "o media delle loro distanze al quadrato lungo ciascun asse. La mediana "
+       "ignora poche camere lontane dalle altre."),
+    NL("Hoe de spreiding van de camera's rond het midden wordt gemeten: de "
+       "mediaan of het gemiddelde van hun gekwadrateerde afstanden langs elke "
+       "as. De mediaan negeert een paar camera's die ver van de rest staan."),
+    RU("Как измеряется разброс камер вокруг центра: медиана или среднее "
+       "квадратов их расстояний вдоль каждой оси. Медиана не замечает "
+       "нескольких камер, далёких от остальных."),
+    TR("Kameraların merkez çevresindeki yayılımının nasıl ölçüleceği: her "
+       "eksen boyunca uzaklıklarının karelerinin ortancası ya da ortalaması. "
+       "Ortanca, diğerlerinden uzakta kalan birkaç kamerayı yok sayar."));
+
+SS_MSG(random_init_std,
+    EN("Random seed standard deviation"),
+    JA("ランダム初期点の標準偏差"),
+    ZH_HANS("随机初始点标准差"),
+    ZH_HANT("隨機初始點標準差"),
+    KO("무작위 초기 점 표준편차"),
+    DE("Standardabweichung der Startpunkte"),
+    FR("Écart type des points de départ aléatoires"),
+    ES("Desviación típica de los puntos iniciales aleatorios"),
+    PT("Desvio padrão dos pontos iniciais aleatórios"),
+    IT("Deviazione standard dei punti iniziali casuali"),
+    NL("Standaardafwijking van de willekeurige beginpunten"),
+    RU("Стандартное отклонение начальных точек"),
+    TR("Rastgele başlangıç noktalarının standart sapması"));
+
+SS_MSG(random_init_std_help,
+    EN("The standard deviation of the random seed points, in units of the "
+       "cameras' measured spread. Below 1 packs them inside the camera "
+       "positions, which suits an object the cameras circle; above 1 spreads "
+       "them past the cameras, which suits a scene the cameras stand inside."),
+    JA("ランダム初期点の標準偏差を、測ったカメラの広がりを単位として指定しま"
+       "す。1 未満ならカメラ位置の内側に集まり、カメラが周りを回る物体に向き"
+       "ます。1 を超えるとカメラより外まで広がり、カメラがその中に立つシーン"
+       "に向きます。"),
+    ZH_HANS("随机初始点的标准差，以测得的相机范围为单位。小于 1 时点集中在相"
+            "机位置以内，适合相机环绕的物体；大于 1 时点散到相机之外，适合相"
+            "机身处其中的场景。"),
+    ZH_HANT("隨機初始點的標準差，以測得的相機範圍為單位。小於 1 時點集中在相"
+            "機位置以內，適合相機環繞的物體；大於 1 時點散到相機之外，適合相"
+            "機身處其中的場景。"),
+    KO("무작위 초기 점의 표준편차를 측정한 카메라 퍼짐을 단위로 정합니다. 1보"
+       "다 작으면 카메라 위치 안쪽에 모여 카메라가 둘러싼 물체에 맞고, 1보다 "
+       "크면 카메라 너머까지 퍼져 카메라가 그 안에 서 있는 장면에 맞습니다."),
+    DE("Die Standardabweichung der zufälligen Startpunkte, in Einheiten der "
+       "gemessenen Streuung der Kameras. Unter 1 liegen sie innerhalb der "
+       "Kamerapositionen, passend für ein Objekt, das die Kameras umkreisen; "
+       "über 1 reichen sie über die Kameras hinaus, passend für eine Szene, in "
+       "der die Kameras stehen."),
+    FR("L'écart type des points de départ aléatoires, en unités de l'étalement "
+       "mesuré des caméras. En dessous de 1, ils se serrent à l'intérieur des "
+       "positions de caméra, ce qui convient à un objet autour duquel tournent "
+       "les caméras ; au-dessus de 1, ils s'étendent au-delà des caméras, ce "
+       "qui convient à une scène au milieu de laquelle elles se tiennent."),
+    ES("La desviación típica de los puntos iniciales aleatorios, en unidades "
+       "de la dispersión medida de las cámaras. Por debajo de 1 se concentran "
+       "dentro de las posiciones de cámara, lo que conviene a un objeto que "
+       "las cámaras rodean; por encima de 1 se extienden más allá de las "
+       "cámaras, lo que conviene a una escena dentro de la cual están."),
+    PT("O desvio padrão dos pontos iniciais aleatórios, em unidades da "
+       "dispersão medida das câmeras. Abaixo de 1 eles se concentram dentro "
+       "das posições das câmeras, o que serve a um objeto que as câmeras "
+       "circundam; acima de 1 se espalham além das câmeras, o que serve a uma "
+       "cena dentro da qual elas estão."),
+    IT("La deviazione standard dei punti iniziali casuali, in unità della "
+       "dispersione misurata delle camere. Sotto 1 si raccolgono dentro le "
+       "posizioni delle camere, adatto a un oggetto attorno a cui girano le "
+       "camere; sopra 1 si allargano oltre le camere, adatto a una scena in "
+       "cui le camere stanno dentro."),
+    NL("De standaardafwijking van de willekeurige beginpunten, in eenheden van "
+       "de gemeten spreiding van de camera's. Onder 1 liggen ze binnen de "
+       "cameraposities, wat past bij een object waar de camera's omheen "
+       "draaien; boven 1 reiken ze voorbij de camera's, wat past bij een scène "
+       "waar de camera's middenin staan."),
+    RU("Стандартное отклонение случайных начальных точек в единицах "
+       "измеренного разброса камер. Меньше 1 — точки собираются внутри "
+       "положений камер, что подходит для объекта, вокруг которого ходят "
+       "камеры; больше 1 — выходят за камеры, что подходит для сцены, внутри "
+       "которой они стоят."),
+    TR("Rastgele başlangıç noktalarının standart sapması, kameraların ölçülen "
+       "yayılımı biriminde. 1'in altında noktalar kamera konumlarının içinde "
+       "toplanır; bu, kameraların çevresinde döndüğü bir nesneye uyar. 1'in "
+       "üstünde kameraların ötesine yayılır; bu, kameraların içinde durduğu "
+       "bir sahneye uyar."));
 
 SS_MSG(use_camera_optimizer,
     EN("Refine camera poses"), JA("カメラ位置を微調整"),
@@ -10586,6 +11039,126 @@ SS_MSG(choice_same_as_input,
     ES("igual que la entrada"), PT("igual à entrada"), IT("come l'ingresso"),
     NL("zoals de invoer"),  RU("как у входа"),  TR("girdiyle aynı"));
 
+SS_MSG(choice_never,
+    EN("never"),
+    JA("しない"),
+    ZH_HANS("从不"),
+    ZH_HANT("從不"),
+    KO("안 함"),
+    DE("nie"),
+    FR("jamais"),
+    ES("nunca"),
+    PT("nunca"),
+    IT("mai"),
+    NL("nooit"),
+    RU("никогда"),
+    TR("asla"));
+
+SS_MSG(choice_without_points,
+    EN("when the dataset has no points"),
+    JA("点群がないとき"),
+    ZH_HANS("数据集无点云时"),
+    ZH_HANT("資料集無點雲時"),
+    KO("점군이 없을 때"),
+    DE("wenn der Datensatz keine Punkte hat"),
+    FR("si le jeu n'a pas de points"),
+    ES("si el conjunto no tiene puntos"),
+    PT("se o conjunto não tiver pontos"),
+    IT("se il set non ha punti"),
+    NL("als de dataset geen punten heeft"),
+    RU("если в наборе нет точек"),
+    TR("veri kümesinde nokta yoksa"));
+
+SS_MSG(choice_always,
+    EN("always"),
+    JA("常に"),
+    ZH_HANS("总是"),
+    ZH_HANT("總是"),
+    KO("항상"),
+    DE("immer"),
+    FR("toujours"),
+    ES("siempre"),
+    PT("sempre"),
+    IT("sempre"),
+    NL("altijd"),
+    RU("всегда"),
+    TR("her zaman"));
+
+SS_MSG(choice_isotropic_gaussian,
+    EN("isotropic Gaussian"),
+    JA("等方ガウス分布"),
+    ZH_HANS("各向同性高斯"),
+    ZH_HANT("各向同性高斯"),
+    KO("등방성 가우시안"),
+    DE("isotrope Gauß-Verteilung"),
+    FR("gaussienne isotrope"),
+    ES("gaussiana isótropa"),
+    PT("gaussiana isotrópica"),
+    IT("gaussiana isotropa"),
+    NL("isotrope gaussverdeling"),
+    RU("изотропное гауссово"),
+    TR("izotropik Gauss"));
+
+SS_MSG(choice_anisotropic_gaussian,
+    EN("anisotropic Gaussian"),
+    JA("異方ガウス分布"),
+    ZH_HANS("各向异性高斯"),
+    ZH_HANT("各向異性高斯"),
+    KO("비등방성 가우시안"),
+    DE("anisotrope Gauß-Verteilung"),
+    FR("gaussienne anisotrope"),
+    ES("gaussiana anisótropa"),
+    PT("gaussiana anisotrópica"),
+    IT("gaussiana anisotropa"),
+    NL("anisotrope gaussverdeling"),
+    RU("анизотропное гауссово"),
+    TR("anizotropik Gauss"));
+
+SS_MSG(choice_solid_ellipsoid,
+    EN("uniform solid ellipsoid"),
+    JA("一様な中実楕円体"),
+    ZH_HANS("均匀实心椭球"),
+    ZH_HANT("均勻實心橢球"),
+    KO("균일한 속이 찬 타원체"),
+    DE("gleichmäßig gefülltes Ellipsoid"),
+    FR("ellipsoïde plein uniforme"),
+    ES("elipsoide macizo uniforme"),
+    PT("elipsoide sólido uniforme"),
+    IT("ellissoide pieno uniforme"),
+    NL("gelijkmatig gevulde ellipsoïde"),
+    RU("равномерный сплошной эллипсоид"),
+    TR("düzgün dolu elipsoid"));
+
+SS_MSG(choice_oriented_box,
+    EN("uniform oriented box"),
+    JA("一様な向き付きの箱"),
+    ZH_HANS("均匀定向长方体"),
+    ZH_HANT("均勻定向長方體"),
+    KO("균일한 방향 상자"),
+    DE("gleichmäßig gefüllter ausgerichteter Quader"),
+    FR("boîte orientée uniforme"),
+    ES("caja orientada uniforme"),
+    PT("caixa orientada uniforme"),
+    IT("scatola orientata uniforme"),
+    NL("gelijkmatig gevulde gerichte doos"),
+    RU("равномерный ориентированный параллелепипед"),
+    TR("düzgün yönlü kutu"));
+
+SS_MSG(choice_world_origin,
+    EN("world origin"),
+    JA("ワールド原点"),
+    ZH_HANS("世界原点"),
+    ZH_HANT("世界原點"),
+    KO("월드 원점"),
+    DE("Koordinatenursprung"),
+    FR("origine du repère"),
+    ES("origen de coordenadas"),
+    PT("origem das coordenadas"),
+    IT("origine delle coordinate"),
+    NL("oorsprong"),
+    RU("начало координат"),
+    TR("koordinat başlangıcı"));
+
 // ---------------------------------------------------------------------------
 // flag + value -> label. Null for anything not listed, which is most of them.
 // ---------------------------------------------------------------------------
@@ -10649,6 +11222,23 @@ inline constexpr ChoiceText kChoiceText[] = {
     {"splat_color_gamut", "none", &choice_same_as_input},
     {"image_color_transfer", "none", &choice_srgb_default},
     {"splat_color_transfer", "none", &choice_same_as_input},
+
+    {"random_init", "never",  &choice_never},
+    {"random_init", "auto",   &choice_without_points},
+    {"random_init", "always", &choice_always},
+
+    {"random_init_distribution", "isotropic-gaussian",   &choice_isotropic_gaussian},
+    {"random_init_distribution", "anisotropic-gaussian", &choice_anisotropic_gaussian},
+    {"random_init_distribution", "ellipsoid",            &choice_solid_ellipsoid},
+    {"random_init_distribution", "box",                  &choice_oriented_box},
+
+    {"random_init_center", "camera-median", &choice_camera_median},
+    {"random_init_center", "camera-focus",  &choice_camera_focus},
+    {"random_init_center", "camera-mean",   &choice_camera_mean},
+    {"random_init_center", "origin",        &choice_world_origin},
+
+    {"random_init_spread", "median", &choice_median},
+    {"random_init_spread", "mean",   &choice_mean},
 };
 inline constexpr size_t kNumChoiceText =
     sizeof(kChoiceText) / sizeof(kChoiceText[0]);

@@ -537,8 +537,8 @@ struct WorkspaceState {
     bool features = false;  // features/, matches.bin, database.db -- reusable
     bool masks = false;     // masks/ this run would generate into
     // A reconstruction any dataset reader can open: this run's own sparse/, or
-    // the transforms.json / Metashape export of a dataset that arrived
-    // finished. A run pointed at one ADDS to it rather than rebuilding it.
+    // the transforms.json, root-level COLMAP files or Metashape export of a
+    // dataset that arrived finished. A run pointed at one ADDS to it.
     bool model = false;
     bool geometry = false;  // normals/ or depths/, which a run adds to
     // Were the flags that built that model written down beside it

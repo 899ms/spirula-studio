@@ -848,6 +848,82 @@ SS_MSG(normal_shape_mismatch,
        "büyütülüyor (çift doğrusal). Sonraki normal haritası uyarıları "
        "bastırılıyor."));
 
+SS_MSG(mask_image_aspect,
+    EN("mask '{0}' is {1} and its image {2} -- a different shape, not just a "
+       "different size. It is stretched onto the image; check that it belongs "
+       "to it."),
+    JA("マスク '{0}' は {1}、画像は {2} で、大きさだけでなく縦横比も違います。"
+       "画像に合わせて引き伸ばします。この画像のマスクか確認してください。"),
+    ZH_HANS("蒙版 '{0}' 是 {1}，其图像是 {2}：不只是尺寸不同，长宽比也不同。"
+            "将把它拉伸到图像上；请确认它属于该图像。"),
+    ZH_HANT("遮罩 '{0}' 是 {1}，其影像是 {2}：不只是尺寸不同，長寬比也不同。"
+            "將把它拉伸到影像上；請確認它屬於該影像。"),
+    KO("마스크 '{0}' 은(는) {1}, 이미지는 {2} 입니다. 크기뿐 아니라 가로세로 "
+       "비율도 다릅니다. 이미지에 맞춰 늘립니다. 이 이미지의 마스크인지 "
+       "확인하세요."),
+    DE("Maske '{0}' ist {1}, ihr Bild {2} -- nicht nur eine andere Größe, "
+       "sondern ein anderes Seitenverhältnis. Sie wird auf das Bild gestreckt; "
+       "prüfen Sie, ob sie zu ihm gehört."),
+    FR("le masque '{0}' fait {1} et son image {2} : le rapport d'aspect "
+       "diffère, pas seulement la taille. Il est étiré sur l'image ; vérifiez "
+       "qu'il lui correspond."),
+    ES("la máscara '{0}' es de {1} y su imagen de {2}: cambia la relación de "
+       "aspecto, no solo el tamaño. Se estira sobre la imagen; compruebe que "
+       "le corresponde."),
+    PT("a máscara '{0}' é {1} e a sua imagem {2}: muda a proporção, não apenas "
+       "o tamanho. Ela é esticada sobre a imagem; verifique se pertence a ela."),
+    IT("la maschera '{0}' è {1} e la sua immagine {2}: cambia il rapporto "
+       "d'aspetto, non solo la dimensione. Viene stirata sull'immagine; "
+       "verifica che le appartenga."),
+    NL("masker '{0}' is {1} en zijn beeld {2}: een andere beeldverhouding, "
+       "niet alleen een ander formaat. Het wordt over het beeld uitgerekt; "
+       "controleer of het erbij hoort."),
+    RU("маска '{0}' имеет размер {1}, а её изображение {2}: отличается не "
+       "только размер, но и соотношение сторон. Она растягивается по "
+       "изображению; проверьте, что она к нему относится."),
+    TR("'{0}' maskesi {1}, görüntüsü ise {2}: yalnızca boyut değil, en-boy "
+       "oranı da farklı. Görüntüye uyacak şekilde geriliyor; bu görüntüye ait "
+       "olduğunu doğrulayın."));
+
+SS_MSG(random_init_no_spread,
+    EN("Cannot size the random seed points: the cameras do not spread around "
+       "{0} (--random-init-center). Pick another centre, or give the dataset a "
+       "point cloud."),
+    JA("ランダム初期点の大きさを決められません。カメラが {0}（--random-init-c"
+       "enter）の周りに広がっていません。別の中心を選ぶか、データセットに点群"
+       "を用意してください。"),
+    ZH_HANS("无法确定随机初始点的范围：相机没有分布在 {0}（--random-init-cent"
+            "er）周围。请换一个中心，或为数据集提供点云。"),
+    ZH_HANT("無法決定隨機初始點的範圍：相機沒有分布在 {0}（--random-init-cent"
+            "er）周圍。請換一個中心，或為資料集提供點雲。"),
+    KO("무작위 초기 점의 크기를 정할 수 없습니다. 카메라가 {0}(--random-init-"
+       "center) 주위에 퍼져 있지 않습니다. 다른 중심을 고르거나 데이터셋에 점"
+       "군을 넣으세요."),
+    DE("Die zufälligen Startpunkte lassen sich nicht bemessen: Die Kameras "
+       "streuen nicht um {0} (--random-init-center). Wählen Sie eine andere "
+       "Mitte, oder geben Sie dem Datensatz eine Punktwolke."),
+    FR("Impossible de dimensionner les points de départ aléatoires : les "
+       "caméras ne s'étalent pas autour de {0} (--random-init-center). "
+       "Choisissez un autre centre, ou fournissez un nuage de points."),
+    ES("No se pueden dimensionar los puntos iniciales aleatorios: las cámaras "
+       "no se dispersan en torno a {0} (--random-init-center). Elija otro "
+       "centro o dé al conjunto una nube de puntos."),
+    PT("Não é possível dimensionar os pontos iniciais aleatórios: as câmeras "
+       "não se dispersam em torno de {0} (--random-init-center). Escolha outro "
+       "centro ou dê ao conjunto uma nuvem de pontos."),
+    IT("Impossibile dimensionare i punti iniziali casuali: le camere non si "
+       "disperdono attorno a {0} (--random-init-center). Scegliete un altro "
+       "centro, oppure fornite una nuvola di punti."),
+    NL("De willekeurige beginpunten zijn niet af te meten: de camera's "
+       "spreiden niet rond {0} (--random-init-center). Kies een ander midden, "
+       "of geef de dataset een puntenwolk."),
+    RU("Невозможно задать размер случайных начальных точек: камеры не "
+       "разбросаны вокруг {0} (--random-init-center). Выберите другой центр "
+       "или добавьте в набор облако точек."),
+    TR("Rastgele başlangıç noktaları boyutlandırılamıyor: kameralar {0} "
+       "(--random-init-center) çevresine yayılmıyor. Başka bir merkez seçin ya "
+       "da veri kümesine bir nokta bulutu verin."));
+
 // Redrawn in place on one line, so it stays short.
 SS_MSG(loading_images,
     EN("Loading images {0}/{1}"),

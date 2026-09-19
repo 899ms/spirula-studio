@@ -866,13 +866,24 @@ static bool metashape_export_here(const fs::path& p) {
     return has_xml && has_ply;
 }
 
+// A COLMAP model written straight into the folder rather than under sparse/,
+// the last place ColmapParser looks. points3D is optional, as it is there.
+static bool colmap_model_here(const fs::path& p) {
+    std::error_code ec;
+    for (const char* base : {"cameras", "images"})
+        if (!fs::exists(p / (std::string(base) + ".bin"), ec) &&
+            !fs::exists(p / (std::string(base) + ".txt"), ec))
+            return false;
+    return true;
+}
+
 bool folder_looks_like_dataset(const std::string& dir) {
     std::error_code ec;
     const fs::path p(dir);
     if (fs::exists(p / "transforms.json", ec) ||
         fs::is_directory(p / "sparse", ec) || fs::is_directory(p / "colmap", ec))
         return true;
-    return metashape_export_here(p);
+    return colmap_model_here(p) || metashape_export_here(p);
 }
 
 // A folder is the run's leftover only if the run would write it. When images/
@@ -910,7 +921,7 @@ WorkspaceState probe_workspace(const std::string& workspace,
     // is a directory somebody made, and reconstructing into it is right.
     st.model = has_content(ws / "sparse") || has_content(ws / "colmap") ||
                fs::exists(ws / "transforms.json", ec) ||
-               metashape_export_here(ws);
+               colmap_model_here(ws) || metashape_export_here(ws);
     st.geometry = has_content(ws / "normals") || has_content(ws / "depths");
     st.recon_stamp = fs::exists(ws / kReconStampFile, ec);
     return st;

@@ -262,10 +262,10 @@ ParsedDataset parse_metashape_dataset(const std::string& dataset_dir,
 
     fs::path xml_path = resolve_input(root, cfg.metashape_xml, ".xml", true,
                                       "metashape-xml");
-    // The point cloud is mandatory for training but optional in lenient
-    // (viewer) mode, where an XML alone still yields camera frustums.
-    fs::path ply_path = resolve_input(root, cfg.metashape_ply, ".ply",
-                                      cfg.require_image_files, "metashape-ply");
+    // Optional: an XML alone is poses, which the trainer seeds at random
+    // (--random-init) and the viewer draws as frustums.
+    fs::path ply_path = resolve_input(root, cfg.metashape_ply, ".ply", false,
+                                      "metashape-ply");
     fs::path psx_path = resolve_input(root, cfg.metashape_psx, ".psx", false,
                                       "metashape-psx");
 

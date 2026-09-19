@@ -10,13 +10,97 @@ implementation, shared by the CLI trainer, the GUI and the WASM viewer.
 
 | format | inputs | parser |
 |---|---|---|
-| COLMAP | `cameras`/`images`/`points3D` in `.bin` or `.txt` | `ColmapParser.cpp` |
-| Nerfstudio | `transforms.json` + a PLY point cloud | `NerfstudioParser.cpp` (PLY reader lives here) |
-| Metashape | camera-export `.xml` + `.ply`, optionally a `.psx` project for filename disambiguation | `MetashapeParser.cpp` (XML via `app/Xml.h`, zips via `external/miniz`) |
+| COLMAP | `cameras`/`images`, and `points3D` if there is one, in `.bin` or `.txt` | `ColmapParser.cpp` |
+| Nerfstudio | `transforms.json`, and a PLY point cloud if there is one | `NerfstudioParser.cpp` (PLY reader lives here) |
+| Metashape | camera-export `.xml`, a `.ply` if there is one, optionally a `.psx` project for filename disambiguation | `MetashapeParser.cpp` (XML via `app/Xml.h`, zips via `external/miniz`) |
+
+The point cloud is optional in every format: a dataset without one, or with an
+empty one, parses to poses alone and the trainer seeds it at random (below).
 
 Default subdirectory names: `images/`, `masks/`, `depths/`, `normals/`.
 The COLMAP reconstruction directory is auto-detected over
 `{sparse/0, colmap/sparse/0, sparse, colmap, .}` unless `recon_dir` is set.
+An image name in `images.txt` / `images.bin` is relative to the image folder,
+as COLMAP writes it; a name relative to the dataset instead
+(`images/frame_000001.png`, which some exporters write) is accepted when that
+is where the file is. Masks, depths and normals are then looked up by the
+name relative to the image folder, as always.
+
+A finished dataset -- any of the layouts above, a COLMAP model sitting at its
+root included -- is an input like any other on the GUI's dataset screen: its
+model is reused, and the run only adds what was asked for (masks, depth and
+normals). `spirula geometry <dataset>` does the depth-and-normal half from the
+command line. Both write `depths/` and `normals/` beside `images/`, where the
+parsers already look, and touch nothing else.
+
+## Masks
+
+A training image's mask comes from up to two places:
+
+- **a mask file** in `masks/`, found by the image's name (`frame.png`,
+  `frame.jpg.png`, `frame_mask.png`), white where the image is kept;
+  `flip_mask` swaps that for files that paint what to remove;
+- **the image's own alpha channel**, for an RGBA (or gray + alpha) image whose
+  alpha is not opaque everywhere -- a render or a cut-out with a transparent
+  background. Opaque from 128 up, the gate the dataset screen's JPEG
+  conversion uses when it turns alpha into a mask file.
+
+With both, a pixel is kept only where both keep it, and `flip_mask` applies
+to the file alone: alpha always means "transparent is not the subject". The two
+are ANDed at whichever size is finer -- the image's training size or the mask
+file's -- with the alpha area-resampled before the gate, and
+`mask_boundary_offset` then moves the edge of the result. A mask file whose
+aspect ratio differs from its image's is stretched onto it with a warning.
+`load_masks` off ignores both.
+
+What a masked-out pixel means is `apply_loss_for_mask` (the GUI's Mask mode):
+ignored ("Ignore distractors") or trained as empty space ("Cut out
+background"). Left unset it resolves per dataset: cut out when the only masks
+are the images' alpha, ignore otherwise -- a mask file is as likely to mark a
+passer-by as a background. `config.json` records the resolved value.
+
+Which files carry alpha is read from their headers, then settled by decoding
+the first, middle and last of them: an RGBA export that is opaque everywhere is
+no mask. Training decodes each such image twice, once for its colour and once
+for its alpha.
+
+## Seed points
+
+The splats start from the dataset's point cloud. `random_init` decides when
+they start from points drawn at random around the cameras instead: `auto` (the
+default) when the dataset has no point cloud or an empty one, `always` in place
+of whatever it has, `never` not at all -- a dataset without points is then an
+error, as it was before the option existed. `src/data/RandomPoints.h` draws
+them, `TrainerSession::load_dataset()` puts them in `ds.points`, so the GUI's
+preview shows the cloud that will be used and `seed_splats()` treats it like
+any other.
+
+- **How many:** `random_init_fraction` of `cap_max` (0.1: 100k of 1M).
+- **Colour:** uniform random 8-bit RGB, which then goes through the same
+  seed-colour conversion (`convert_initial_point_cloud_color`) a
+  reconstruction's colours do.
+- **Centre** (`random_init_center`): the median, focus or mean of the camera
+  positions -- `dsparse::scene_center`, the modes `--scene-center` uses -- or
+  the origin of the training frame.
+- **Spread:** the cameras' second moment about that centre, `M = mean(d dT)`,
+  gives the principal axes. Along each, `random_init_spread` takes the mean of
+  the squared projections (the eigenvalues of M) or their median, which
+  ignores a few far-off cameras; the isotropic variance is a third of the mean
+  or median squared distance. `random_init_std` multiplies every standard
+  deviation, so below 1 packs the cloud inside the camera positions (an object
+  they circle) and above 1 spreads it past them (a room they stand in).
+- **Shape** (`random_init_distribution`): `isotropic-gaussian`,
+  `anisotropic-gaussian` along those axes, or a uniform `ellipsoid` or oriented
+  `box`, sized so their covariance is the anisotropic Gaussian's (semi-axes
+  `sqrt(5)` and half-extents `sqrt(3)` standard deviations). Cameras that all
+  sit at one height have no vertical spread, and every shape but the isotropic
+  one comes out flat.
+
+The draw is seeded, so the same settings give the same cloud. Cameras that do
+not spread about the centre at all -- one camera, or `origin` placed exactly on
+a lone one -- are an error rather than a cloud of zero size. The log line
+`Seed points drawn at random` gives the count, shape, centre and the three
+standard deviations it used.
 
 ## Camera models
 

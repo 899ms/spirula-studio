@@ -7283,16 +7283,28 @@ void GuiApp::draw_basic_options() {
     ui::help_on_hover(msg::opt_resolution_help);
 
     {
-        int mi = !_cfg.load_masks ? 2 : _cfg.apply_loss_for_mask ? 1 : 0;
+        // Unset, the mode is whatever the parsed dataset resolved it to --
+        // cut out for masks that are only the images' alpha (TrainerCore).
+        bool cut_out = _cfg.apply_loss_for_mask.value_or(false);
+        const TrainRunner::Phase ph = _runner.phase();
+        if (!_cfg.apply_loss_for_mask.has_value() &&
+            (ph == TrainRunner::Phase::Ready || ph == TrainRunner::Phase::Training ||
+             ph == TrainRunner::Phase::Done))
+            if (auto* s = _runner.session())
+                cut_out = s->cfg.apply_loss_for_mask.value_or(false);
+        int mi = !_cfg.load_masks ? 2 : cut_out ? 1 : 0;
         ImGui::SetNextItemWidth(w);
         if (ui::Combo(msg::opt_mask_mode, &mi,
                       {&msg::opt_mask_mode_exclude,
                        &msg::opt_mask_mode_cut_out,
                        &msg::opt_mask_mode_off})) {
             _cfg.load_masks = mi != 2;
-            _cfg.apply_loss_for_mask = mi == 1;
             _cfg_ui.touched.insert("load_masks");
-            _cfg_ui.touched.insert("apply_loss_for_mask");
+            // Off says nothing about what masks mean, so it keeps auto.
+            if (mi != 2) {
+                _cfg.apply_loss_for_mask = mi == 1;
+                _cfg_ui.touched.insert("apply_loss_for_mask");
+            }
         }
         ui::help_on_hover(msg::opt_mask_mode_help);
     }

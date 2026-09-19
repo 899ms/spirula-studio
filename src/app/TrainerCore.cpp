@@ -11,6 +11,7 @@
 #include "i18n/catalog/Log.h"
 #include "data/CameraMath.h"
 #include "data/ImageProbe.h"
+#include "data/RandomPoints.h"
 #include "data/Knn.h"
 #include "sfm/core/Exif.h"
 
@@ -220,11 +221,11 @@ SeedSplats seed_splats(const ColmapPoints3D& pts, const TrainConfig& cfg,
     s.features_dc.assign(cap * 3, 0.f);
     s.features_sh.assign(cap * (dim_sh - 1) * 3, 0.f);
 
-    // means, scaled into the training frame
-    float rescale = cfg.relative_scale.value_or(1.0f);
+    // `pts` is in the training frame already: load_dataset() applied
+    // relative_scale to it along with the cameras.
     for (int64_t i = 0; i < num; i++)
         for (int d = 0; d < 3; d++)
-            s.means[i*3 + d] = (float)(pts.xyz[pick[i]*3 + d] * rescale);
+            s.means[i*3 + d] = (float)pts.xyz[pick[i]*3 + d];
 
     // log(scale_init * sqrt(mean d^2 of 4-NN)) over xyz, over the DISTINCT
     // points: a repeat is its own zero-distance neighbor, and would seed
@@ -313,7 +314,7 @@ build_loss_weights(const TrainConfig& c, int step) {
     float median_factor = std::min((float)step / std::max(c.median_warmup, 1), 1.0f);
     float alpha_reg_factor = c.alpha_reg_weight *
         std::min((float)step / std::max(c.alpha_reg_warmup, 1), 1.0f);
-    float mask = c.apply_loss_for_mask ? 1.0f : 0.0f;
+    float mask = c.apply_loss_for_mask.value_or(false) ? 1.0f : 0.0f;
 
     float w_rgb_l1 = std::max(0.0f, c.l1_weight);
     float w_rgb_l2 = std::max(0.0f, c.l2_weight);
@@ -589,6 +590,34 @@ void TrainerSession::check_config() {
                  {cfg.orientation_method, cfg.center_method}));
 }
 
+// After relative_scale, so the cloud is sized by the cameras it will train
+// with. Into ds.points itself: the GUI's preview draws the seed that is used.
+void TrainerSession::seed_at_random() {
+    const std::string& mode = cfg.random_init;
+    if (mode != "never" && mode != "auto" && mode != "always")
+        throw std::runtime_error("unknown random_init '" + mode + "'");
+    const int64_t had = ds.points.num();
+    if (had == 0 && mode == "never")
+        throw std::runtime_error(lmsg::random_init_never.get());
+    if (mode == "never" || (mode == "auto" && had > 0)) return;
+
+    RandomPointsConfig rc;
+    rc.count = std::max<int64_t>(
+        1, (int64_t)std::llround((double)cfg.random_init_fraction * cfg.cap_max));
+    rc.distribution = cfg.random_init_distribution;
+    rc.center = cfg.random_init_center;
+    rc.spread = cfg.random_init_spread;
+    rc.std_scale = cfg.random_init_std;
+    RandomPointsFit fit;
+    ds.points = random_seed_points(ds.c2w.data(), ds.num_cameras, rc, &fit);
+    if (had > 0) log(lfmt(lmsg::random_init_replaced, {(long long)had}));
+    char sigma[96];
+    std::snprintf(sigma, sizeof sigma, "%.4g, %.4g, %.4g",
+                  fit.sigma[0], fit.sigma[1], fit.sigma[2]);
+    log(lfmt(lmsg::random_init_drawn,
+             {(long long)rc.count, rc.distribution, rc.center, sigma, mode}));
+}
+
 void TrainerSession::load_dataset() {
     DatasetParserConfig pcfg;
     pcfg.recon_dir            = cfg.colmap_recon_dir;
@@ -646,13 +675,30 @@ void TrainerSession::load_dataset() {
     }
     if (!cfg.auto_scale_poses) ds.train_frame_scale = 1.0f;
 
+    seed_at_random();
+
     // POST-split camera bake (identity when no warp flag applies).
     post = bake_post_split(
         ds, cfg.warp_to_pinhole, cfg.warp_spherical_to_pinhole,
         resolve_face_fit(cfg), cfg.warp_back_face);
 
     // Warp-path guards, plus: a modality no weight reads is not loaded at all.
-    has_mask   = !ds.mask_filenames.empty()   && cfg.load_masks;
+    alpha_masks = cfg.load_masks ? probe_alpha_masks(ds.image_filenames)
+                                 : std::vector<uint8_t>{};
+    has_mask   = (!ds.mask_filenames.empty() || !alpha_masks.empty()) &&
+                 cfg.load_masks;
+    if (!alpha_masks.empty()) {
+        const long long n = std::count(alpha_masks.begin(), alpha_masks.end(), 1);
+        log(lfmt(ds.mask_filenames.empty() ? lmsg::alpha_masks_found
+                                           : lmsg::alpha_masks_with_files,
+                 {n, (long long)ds.num_cameras}));
+    }
+    // A cut-out's transparent pixels are empty space, not distractors. Mask
+    // files could be either, so with any of them the default stays "ignore".
+    if (!cfg.apply_loss_for_mask.has_value()) {
+        cfg.apply_loss_for_mask = !alpha_masks.empty() && ds.mask_filenames.empty();
+        if (*cfg.apply_loss_for_mask) log(lmsg::alpha_masks_cut_out.get());
+    }
     has_depth  = !ds.depth_filenames.empty()  && cfg.load_depths &&
                  cfg.depth_supervision_weight > 0.0f;
     has_normal = !ds.normal_filenames.empty() && cfg.load_normals &&
@@ -867,6 +913,7 @@ void TrainerSession::setup_engine() {
     dm.train_batch_size = train_bs;
     dm.val_batch_size   = val_bs;
     dm.flip_mask = cfg.flip_mask;
+    dm.alpha_masks = alpha_masks;
     dm.mask_boundary_offset = cfg.mask_boundary_offset;
     dm.exif_quarter_turns = ds.exif_quarter_turns;
     engine_setup_data_manager(
@@ -1338,8 +1385,12 @@ void TrainerSession::eval() {
     // otherwise pack several resolutions into one step.
     DataManagerConfig dm;
     dm.cache_mode  = (cfg.cache_images == "disk") ? CacheMode::DISK : CacheMode::CPU;
-    const bool eval_masks = !eds.mask_filenames.empty() && cfg.load_masks;
+    std::vector<uint8_t> eval_alpha =
+        cfg.load_masks ? probe_alpha_masks(eds.image_filenames) : std::vector<uint8_t>{};
+    const bool eval_masks =
+        (!eds.mask_filenames.empty() || !eval_alpha.empty()) && cfg.load_masks;
     dm.load_masks  = eval_masks || epost.any_fov_mask;
+    dm.alpha_masks = std::move(eval_alpha);
     dm.load_depths = false;
     dm.load_normals = false;
     dm.train_batch_size = 1;

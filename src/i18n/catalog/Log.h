@@ -1299,6 +1299,163 @@ SS_MSG(ray_depth_straight_ahead,
     RU("расстояние прямо вперёд"),
     TR("ileri doğru mesafe"));
 
+SS_MSG(alpha_masks_found,
+    EN("Alpha channel used as the mask ({0} of {1} images)"),
+    JA("アルファチャンネルをマスクとして使います（{1} 枚中 {0} 枚）"),
+    ZH_HANS("使用 Alpha 通道作为蒙版（{1} 张图像中的 {0} 张）"),
+    ZH_HANT("使用 Alpha 通道作為遮罩（{1} 張影像中的 {0} 張）"),
+    KO("알파 채널을 마스크로 사용합니다({1}장 중 {0}장)"),
+    DE("Alphakanal wird als Maske verwendet ({0} von {1} Bildern)"),
+    FR("Canal alpha utilisé comme masque ({0} images sur {1})"),
+    ES("Canal alfa usado como máscara ({0} de {1} imágenes)"),
+    PT("Canal alfa usado como máscara ({0} de {1} imagens)"),
+    IT("Canale alfa usato come maschera ({0} immagini su {1})"),
+    NL("Alfakanaal gebruikt als masker ({0} van {1} beelden)"),
+    RU("Альфа-канал используется как маска ({0} из {1} изображений)"),
+    TR("Alfa kanalı maske olarak kullanılıyor ({1} görüntüden {0})"));
+
+SS_MSG(alpha_masks_with_files,
+    EN("Alpha channel used as the mask ({0} of {1} images), together with the "
+       "mask files: a pixel is kept only where both keep it"),
+    JA("アルファチャンネルをマスクとして使います（{1} 枚中 {0} 枚）。マスク"
+       "ファイルと組み合わせ、両方が残す画素だけを残します"),
+    ZH_HANS("使用 Alpha 通道作为蒙版（{1} 张图像中的 {0} 张），并与蒙版文件"
+            "合并：只保留两者都保留的像素"),
+    ZH_HANT("使用 Alpha 通道作為遮罩（{1} 張影像中的 {0} 張），並與遮罩檔案"
+            "合併：只保留兩者都保留的像素"),
+    KO("알파 채널을 마스크로 사용합니다({1}장 중 {0}장). 마스크 파일과 "
+       "합쳐서 둘 다 남기는 픽셀만 남깁니다"),
+    DE("Alphakanal wird als Maske verwendet ({0} von {1} Bildern), zusammen "
+       "mit den Maskendateien: Ein Pixel bleibt nur, wo beide es behalten"),
+    FR("Canal alpha utilisé comme masque ({0} images sur {1}), avec les "
+       "fichiers de masque : un pixel n'est gardé que là où les deux le "
+       "gardent"),
+    ES("Canal alfa usado como máscara ({0} de {1} imágenes), junto con los "
+       "archivos de máscara: un píxel se conserva solo donde ambos lo conservan"),
+    PT("Canal alfa usado como máscara ({0} de {1} imagens), junto com os "
+       "arquivos de máscara: um pixel só é mantido onde ambos o mantêm"),
+    IT("Canale alfa usato come maschera ({0} immagini su {1}), insieme ai file "
+       "di maschera: un pixel resta solo dove lo tengono entrambi"),
+    NL("Alfakanaal gebruikt als masker ({0} van {1} beelden), samen met de "
+       "maskerbestanden: een pixel blijft alleen waar beide hem houden"),
+    RU("Альфа-канал используется как маска ({0} из {1} изображений) вместе с "
+       "файлами масок: пиксель остаётся, только если его оставляют оба"),
+    TR("Alfa kanalı maske olarak kullanılıyor ({1} görüntüden {0}), maske "
+       "dosyalarıyla birlikte: bir piksel yalnızca ikisi de tuttuğunda kalır"));
+
+SS_MSG(alpha_masks_cut_out,
+    EN("Transparent pixels train as empty space (--apply-loss-for-mask)"),
+    JA("透明な画素は空として学習します（--apply-loss-for-mask）"),
+    ZH_HANS("透明像素按空白训练（--apply-loss-for-mask）"),
+    ZH_HANT("透明像素按空白訓練（--apply-loss-for-mask）"),
+    KO("투명한 픽셀은 빈 곳으로 학습합니다(--apply-loss-for-mask)"),
+    DE("Transparente Pixel werden als leerer Raum trainiert "
+       "(--apply-loss-for-mask)"),
+    FR("Les pixels transparents sont entraînés comme du vide "
+       "(--apply-loss-for-mask)"),
+    ES("Los píxeles transparentes se entrenan como espacio vacío "
+       "(--apply-loss-for-mask)"),
+    PT("Os pixels transparentes são treinados como espaço vazio "
+       "(--apply-loss-for-mask)"),
+    IT("I pixel trasparenti vengono addestrati come spazio vuoto "
+       "(--apply-loss-for-mask)"),
+    NL("Transparante pixels worden als lege ruimte getraind "
+       "(--apply-loss-for-mask)"),
+    RU("Прозрачные пиксели обучаются как пустота (--apply-loss-for-mask)"),
+    TR("Saydam pikseller boş alan olarak eğitiliyor (--apply-loss-for-mask)"));
+
+SS_MSG(random_init_never,
+    EN("The dataset has no seed point cloud, and --random-init never forbids "
+       "drawing one at random. Set --random-init auto, or give the dataset a "
+       "point cloud."),
+    JA("データセットに初期点群がなく、--random-init never がランダムに作るこ"
+       "とを禁じています。--random-init auto にするか、データセットに点群を用"
+       "意してください。"),
+    ZH_HANS("数据集没有初始点云，而 --random-init never 禁止随机生成。请设置 "
+            "--random-init auto，或为数据集提供点云。"),
+    ZH_HANT("資料集沒有初始點雲，而 --random-init never 禁止隨機產生。請設定 "
+            "--random-init auto，或為資料集提供點雲。"),
+    KO("데이터셋에 초기 점군이 없고, --random-init never 때문에 무작위로 만들"
+       " 수도 없습니다. --random-init auto로 바꾸거나 데이터셋에 점군을 넣으"
+       "세요."),
+    DE("Der Datensatz hat keine Start-Punktwolke, und --random-init never "
+       "verbietet, eine zufällig zu ziehen. Setzen Sie --random-init auto, "
+       "oder geben Sie dem Datensatz eine Punktwolke."),
+    FR("Le jeu de données n'a pas de nuage de points de départ, et "
+       "--random-init never interdit d'en tirer un au hasard. Passez à "
+       "--random-init auto, ou fournissez un nuage de points."),
+    ES("El conjunto no tiene nube de puntos inicial, y --random-init never "
+       "prohíbe sortear una. Ponga --random-init auto o dé al conjunto una "
+       "nube de puntos."),
+    PT("O conjunto não tem nuvem de pontos inicial, e --random-init never "
+       "proíbe sortear uma. Use --random-init auto ou dê ao conjunto uma nuvem "
+       "de pontos."),
+    IT("Il set di dati non ha una nuvola di punti iniziale, e --random-init "
+       "never vieta di estrarne una a caso. Impostate --random-init auto, "
+       "oppure fornite una nuvola di punti."),
+    NL("De dataset heeft geen beginpuntenwolk, en --random-init never verbiedt "
+       "er willekeurig een te trekken. Zet --random-init auto, of geef de "
+       "dataset een puntenwolk."),
+    RU("В наборе нет начального облака точек, а --random-init never запрещает "
+       "создать его случайно. Задайте --random-init auto или добавьте в набор "
+       "облако точек."),
+    TR("Veri kümesinde başlangıç nokta bulutu yok ve --random-init never "
+       "rastgele çekilmesini yasaklıyor. --random-init auto ayarlayın ya da "
+       "veri kümesine bir nokta bulutu verin."));
+
+SS_MSG(random_init_replaced,
+    EN("Seed points from the dataset: {0}, replaced by random ones "
+       "(--random-init always)"),
+    JA("データセットの初期点 {0} 個をランダムな点で置き換えます（--random-ini"
+       "t always）"),
+    ZH_HANS("数据集的初始点：{0} 个，改用随机点（--random-init always）"),
+    ZH_HANT("資料集的初始點：{0} 個，改用隨機點（--random-init always）"),
+    KO("데이터셋의 초기 점: {0}개, 무작위 점으로 바꿉니다(--random-init alway"
+       "s)"),
+    DE("Startpunkte aus dem Datensatz: {0}, durch zufällige ersetzt "
+       "(--random-init always)"),
+    FR("Points de départ du jeu de données : {0}, remplacés par des points "
+       "aléatoires (--random-init always)"),
+    ES("Puntos iniciales del conjunto: {0}, sustituidos por aleatorios "
+       "(--random-init always)"),
+    PT("Pontos iniciais do conjunto: {0}, substituídos por aleatórios "
+       "(--random-init always)"),
+    IT("Punti iniziali del set di dati: {0}, sostituiti da punti casuali "
+       "(--random-init always)"),
+    NL("Beginpunten uit de dataset: {0}, vervangen door willekeurige "
+       "(--random-init always)"),
+    RU("Начальные точки набора: {0}, заменены случайными (--random-init always)"),
+    TR("Veri kümesinden başlangıç noktaları: {0}, rastgele olanlarla "
+       "değiştirildi (--random-init always)"));
+
+SS_MSG(random_init_drawn,
+    EN("Seed points drawn at random: {0} -- {1} about {2}, standard deviations "
+       "{3} (--random-init {4})"),
+    JA("ランダムに置いた初期点: {0} 個。{2} を中心とする {1}、標準偏差 {3}（-"
+       "-random-init {4}）"),
+    ZH_HANS("随机抽取的初始点：{0} 个——以 {2} 为中心的 {1}，标准差 {3}（--ran"
+            "dom-init {4}）"),
+    ZH_HANT("隨機抽取的初始點：{0} 個——以 {2} 為中心的 {1}，標準差 {3}（--ran"
+            "dom-init {4}）"),
+    KO("무작위로 뽑은 초기 점: {0}개 — {2} 중심의 {1}, 표준편차 {3}(--random-"
+       "init {4})"),
+    DE("Zufällig gezogene Startpunkte: {0} -- {1} um {2}, Standardabweichungen "
+       "{3} (--random-init {4})"),
+    FR("Points de départ tirés au hasard : {0} -- {1} autour de {2}, écarts "
+       "types {3} (--random-init {4})"),
+    ES("Puntos iniciales sorteados al azar: {0} -- {1} en torno a {2}, "
+       "desviaciones típicas {3} (--random-init {4})"),
+    PT("Pontos iniciais sorteados: {0} -- {1} em torno de {2}, desvios padrão "
+       "{3} (--random-init {4})"),
+    IT("Punti iniziali estratti a caso: {0} -- {1} attorno a {2}, deviazioni "
+       "standard {3} (--random-init {4})"),
+    NL("Willekeurig getrokken beginpunten: {0} -- {1} rond {2}, "
+       "standaardafwijkingen {3} (--random-init {4})"),
+    RU("Случайные начальные точки: {0} -- {1} вокруг {2}, стандартные "
+       "отклонения {3} (--random-init {4})"),
+    TR("Rastgele çekilen başlangıç noktaları: {0} -- {2} çevresinde {1}, "
+       "standart sapmalar {3} (--random-init {4})"));
+
 SS_MSG(ppisp_exif_exposure,
     EN("PPISP exposure initialized from EXIF ({0} of {1} photos)"),
     JA("PPISP の露出を EXIF から初期化しました（{1} 枚中 {0} 枚）"),

@@ -80,7 +80,8 @@ std::map<int32_t, ColmapImage>  read_images_text(const std::string& recon_dir);
 ColmapPoints3D                  read_points3D_text(const std::string& recon_dir);
 
 // PLY point-cloud reader (ascii + binary_little_endian; x/y/z of any float
-// or double type, red/green/blue uchar or float). NerfstudioParser.cpp.
+// or double type, red/green/blue uchar or float). NerfstudioParser.cpp. A
+// vertex element of zero rows reads as an empty cloud.
 ColmapPoints3D read_ply_points(const std::string& path);
 
 
@@ -216,7 +217,8 @@ struct ParsedDataset {
     std::vector<int32_t>     train_indices;
     std::vector<int32_t>     val_indices;
 
-    // Seed point cloud in the training frame.
+    // Seed point cloud in the training frame. Empty when the dataset has
+    // none, which is the trainer's cue to draw one (--random-init).
     ColmapPoints3D           points;
 
     // p_train = p_raw - center, where p_raw is the frame the files came in

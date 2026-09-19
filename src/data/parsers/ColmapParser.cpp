@@ -678,11 +678,10 @@ static std::string find_colmap_recon(const std::string& dataset_dir,
             probe.push_back(rel);
     }
 
-    // points3D is required only in strict (trainer) mode; the lenient viewer
-    // accepts a cameras-only reconstruction (poses / frustums).
+    // points3D is optional: without it the model is poses alone, which the
+    // trainer seeds at random (--random-init) and the viewer draws as frustums.
     auto has_recon = [&](const ColmapModelFmt& f) {
-        return f.cameras != ColmapFmt::None && f.images != ColmapFmt::None &&
-               (f.points3D != ColmapFmt::None || !cfg.require_image_files);
+        return f.cameras != ColmapFmt::None && f.images != ColmapFmt::None;
     };
     *fmt = ColmapModelFmt{};
     for (const auto& rel : probe) {
@@ -692,7 +691,7 @@ static std::string find_colmap_recon(const std::string& dataset_dir,
     }
 
     // Nothing matched: report the first probed dir that holds *some* of the
-    // three files (a recon that lost points3D, say) rather than none.
+    // files (a model that lost images.bin, say) rather than none.
     if (near_miss) {
         for (const auto& rel : probe) {
             ColmapModelFmt f = colmap_model_fmt(fs::path(dataset_dir) / rel);
@@ -700,12 +699,13 @@ static std::string find_colmap_recon(const std::string& dataset_dir,
                 {"cameras", f.cameras}, {"images", f.images},
                 {"points3D", f.points3D}};
             std::vector<std::string> present, missing;
-            for (const auto& [base, e] : files)
-                (e == ColmapFmt::None ? missing : present)
-                    .push_back(std::string(base) +
-                               (e == ColmapFmt::Bin  ? ".bin"
-                                : e == ColmapFmt::Text ? ".txt"
-                                                       : ".bin or .txt"));
+            for (const auto& [base, e] : files) {
+                const std::string name = std::string(base) +
+                    (e == ColmapFmt::Bin  ? ".bin"
+                     : e == ColmapFmt::Text ? ".txt" : ".bin or .txt");
+                if (e != ColmapFmt::None) present.push_back(name);
+                else if (std::string(base) != "points3D") missing.push_back(name);
+            }
             if (present.empty() || missing.empty()) continue;
             *near_miss = (rel.empty() ? std::string("the dataset dir")
                                       : "'" + rel + "'") +
@@ -725,7 +725,7 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
                                               /*verbose=*/true, &near_miss);
     if (recon_dir.empty())
         throw std::runtime_error(
-            "ColmapParser: no COLMAP reconstruction (cameras/images/points3D"
+            "ColmapParser: no COLMAP reconstruction (cameras and images"
             " .bin or .txt) found under " + dataset_dir +
             (near_miss.empty() ? "" : " -- " + near_miss));
 
@@ -820,10 +820,26 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
     // train_to_normalized = inv(T_n_from_camera). -----------------------------
     fs::path image_dir = fs::path(dataset_dir) / cfg.image_dir;
 
+    // Relative to image_dir, the way COLMAP writes it. Some exporters write it
+    // relative to the dataset instead ("images/x.png"), which is honoured when
+    // that is where the file is.
+    std::vector<std::string> rel_names(n_all);
+    for (int64_t i = 0; i < n_all; i++) {
+        rel_names[i] = frames[i]->name;
+        std::error_code ec;
+        const fs::path in_dataset = fs::path(dataset_dir) / frames[i]->name;
+        if (fs::exists(image_dir / frames[i]->name, ec) ||
+            !fs::exists(in_dataset, ec))
+            continue;
+        const fs::path rel = in_dataset.lexically_normal().lexically_relative(
+            image_dir.lexically_normal());
+        if (!rel.empty() && *rel.begin() != "..") rel_names[i] = rel.generic_string();
+    }
+
     // Read before the split, like everything else the whole set decides.
     std::vector<std::string> all_paths(n_all);
     for (int64_t i = 0; i < n_all; i++)
-        all_paths[i] = (image_dir / frames[i]->name).string();
+        all_paths[i] = (image_dir / rel_names[i]).string();
     const std::vector<uint8_t> exif_o =
         dsparse::read_exif_orientations(cfg.exif_orientation, all_paths);
     // `apply` turns the pixels, so the levelling has nothing left to correct.
@@ -837,9 +853,7 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
     float train_frame_scale = (float)(scale_factor != 0.0 ? 1.0 / scale_factor : 1.0);
 
     // ---- eval_mode train subset --------------------------------------------
-    std::vector<std::string> names(n_all);
-    for (int64_t i = 0; i < n_all; i++) names[i] = frames[i]->name;
-    std::vector<int64_t> subset = dsparse::train_subset(n_all, names, cfg);
+    std::vector<int64_t> subset = dsparse::train_subset(n_all, rel_names, cfg);
 
     ParsedDataset ds;
     const int64_t N = (int64_t)subset.size();
@@ -884,14 +898,15 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
     for (int64_t j = 0; j < N; j++) {
         const int64_t i = subset[j];
         const ColmapImage& im = *frames[i];
+        const std::string& name = rel_names[i];
         auto cam_it = cameras.find(im.camera_id);
         if (cam_it == cameras.end())
-            throw std::runtime_error("ColmapParser: image " + im.name +
+            throw std::runtime_error("ColmapParser: image " + name +
                                      " references missing camera id " +
                                      std::to_string(im.camera_id));
         const ColmapCamera& cam = cam_it->second;
 
-        fs::path img_path = image_dir / im.name;
+        fs::path img_path = image_dir / name;
         if (cfg.require_image_files && !fs::exists(img_path))
             throw std::runtime_error("ColmapParser: " + img_path.string() +
                                      " does not exist (set --image-dir if needed)");
@@ -923,11 +938,11 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
 
         // Auxiliary supervision buffers, discovered by filename convention.
         mask_files[j]   = dsparse::find_aux_file(
-            (fs::path(dataset_dir) / cfg.mask_dir).string(),   im.name, "mask");
+            (fs::path(dataset_dir) / cfg.mask_dir).string(),   name, "mask");
         depth_files[j]  = dsparse::find_aux_file(
-            (fs::path(dataset_dir) / cfg.depth_dir).string(),  im.name, "depth");
+            (fs::path(dataset_dir) / cfg.depth_dir).string(),  name, "depth");
         normal_files[j] = dsparse::find_aux_file(
-            (fs::path(dataset_dir) / cfg.normal_dir).string(), im.name, "normal");
+            (fs::path(dataset_dir) / cfg.normal_dir).string(), name, "normal");
         any_mask   |= !mask_files[j].empty();
         any_depth  |= !depth_files[j].empty();
         any_normal |= !normal_files[j].empty();
@@ -1037,8 +1052,9 @@ ParsedDataset parse_dataset(const std::string& dataset_dir,
         dataset_dir + " does not look like a supported dataset.\n"
         "Looked for:\n"
         "  nerfstudio  transforms.json in the dataset dir\n"
-        "  COLMAP      cameras/images/points3D (.bin or .txt) under sparse/0,\n"
-        "              colmap/sparse/0, sparse, colmap or the dataset dir itself\n"
+        "  COLMAP      cameras and images, points3D if any (.bin or .txt) under\n"
+        "              sparse/0, colmap/sparse/0, sparse, colmap or the dataset\n"
+        "              dir itself\n"
         "  Metashape   a camera-export .xml in the dataset dir\n" +
         (colmap_near_miss.empty() ? std::string()
                                   : "Closest match: " + colmap_near_miss + ".\n") +

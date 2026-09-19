@@ -250,8 +250,6 @@ ColmapPoints3D read_ply_points(const std::string& path) {
                 pts.rgb[i*3 + 2] = to_u8(vals[ib], el.props[ib].type);
             }
         }
-        if (pts.num() == 0)
-            throw std::runtime_error("PLY: no points in " + path);
         return pts;
     }
     throw std::runtime_error("PLY: no vertex element in " + path);
@@ -500,17 +498,10 @@ ParsedDataset parse_nerfstudio_meta(const JsonValue& meta,
             for (const char* cand : {"sparse_pc.ply", "pointcloud.ply"})
                 if (fs::exists(root / cand)) { ply_rel = cand; break; }
         }
-        if (ply_rel.empty()) {
-            // Lenient (viewer) mode: a transforms.json with no point cloud
-            // still yields camera poses / frustums. The trainer requires the
-            // seed cloud.
-            if (cfg.require_image_files)
-                throw std::runtime_error(
-                    "NerfstudioParser: no initial point cloud found (ply_file_path / "
-                    "sparse_pc.ply / pointcloud.ply)");
-        } else if (cfg.require_image_files || fs::exists(root / ply_rel)) {
+        // No cloud at all is poses alone, which the trainer seeds at random
+        // (--random-init). A named file that is missing is still an error.
+        if (!ply_rel.empty() && (cfg.require_image_files || fs::exists(root / ply_rel)))
             points = read_ply_points((root / ply_rel).string());
-        }
     }
 
     // ---- applied_transform inverse (train_frame="points" branch): poses and

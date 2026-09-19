@@ -109,7 +109,7 @@ inline int train_tier_rank(const char* tier) {
     X(std::string, image_dir, "images", "dataset", "basic", "")              \
     X(std::string, mask_dir, "masks", "dataset", "basic", "")                \
     X(bool, load_masks, true, "dataset", "basic", "")                        \
-    X(bool, apply_loss_for_mask, false, "dataset", "basic", "")              \
+    X(std::optional<bool>, apply_loss_for_mask, std::nullopt, "dataset", "basic", "") \
     X(bool, flip_mask, false, "dataset", "basic", "")                        \
     X(float, mask_boundary_offset, 0.0f, "dataset", "advanced", "")          \
     X(std::string, depth_dir, "depths", "dataset", "basic", "")              \
@@ -156,6 +156,12 @@ inline int train_tier_rank(const char* tier) {
     X(std::optional<float>, scale_init, std::nullopt, "splats", "advanced", "") \
     X(std::optional<float>, opacity_init, std::nullopt, "splats", "advanced", "") \
     X(bool, suppress_initial_scales, false, "splats", "expert", "")          \
+    X(std::string, random_init, "auto", "splats", "advanced", "never|auto|always") \
+    X(float, random_init_fraction, 0.1f, "splats", "advanced", "")          \
+    X(std::string, random_init_distribution, "isotropic-gaussian", "splats", "expert", "isotropic-gaussian|anisotropic-gaussian|ellipsoid|box") \
+    X(std::string, random_init_center, "camera-median", "splats", "expert", "camera-median|camera-focus|camera-mean|origin") \
+    X(std::string, random_init_spread, "median", "splats", "expert", "median|mean") \
+    X(float, random_init_std, 1.0f, "splats", "expert", "")                  \
     X(bool, use_camera_optimizer, false, "splats", "stub", "")               \
                                                                              \
     /* ==== detail -- how many splats there are and where they go ==== */    \
@@ -358,6 +364,8 @@ struct TrainConfig {
     X(warp_back_face) \
     X(load_masks) \
     X(load_depths) X(load_normals) X(relative_scale) \
+    X(cap_max) X(random_init) X(random_init_fraction) X(random_init_distribution) \
+    X(random_init_center) X(random_init_spread) X(random_init_std) \
     /* end */
 
 
