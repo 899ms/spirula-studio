@@ -602,31 +602,6 @@ SS_MSG(mesh_no_cameras,
     TR("Kamera veri kümesi kullanılmıyor: ağ yalnızca Gauss yoğunluklarından "
        "çıkarılıyor. --data <dataset_dir> verirseniz yüzeyler belirgin biçimde "
        "iyileşir."));
-SS_MSG(mesh_mixed_camera_models,
-    EN("warning: mixed camera models in dataset; using the first one for all "
-       "cameras"),
-    JA("警告: データセットにカメラモデルが混在しています。すべてのカメラに"
-       "最初のものを使います"),
-    ZH_HANS("警告：数据集里混有多种相机模型，将对所有相机使用第一种"),
-    ZH_HANT("警告：資料集裡混有多種相機模型，將對所有相機使用第一種"),
-    KO("경고: 데이터셋에 카메라 모델이 섞여 있습니다. 모든 카메라에 첫 번째 것을 "
-       "씁니다"),
-    DE("Warnung: gemischte Kameramodelle im Datensatz; für alle Kameras wird "
-       "das erste benutzt"),
-    FR("Avertissement : modèles de caméra mélangés dans le jeu de données ; le "
-       "premier sera utilisé pour toutes les caméras"),
-    ES("Aviso: hay modelos de cámara mezclados en el conjunto de datos; se "
-       "usará el primero para todas las cámaras"),
-    PT("Aviso: modelos de câmera misturados no conjunto de dados; o primeiro "
-       "será usado para todas as câmeras"),
-    IT("Avviso: modelli di camera misti nel set di dati; verrà usato il primo "
-       "per tutte le camere"),
-    NL("Waarschuwing: gemengde cameramodellen in de dataset; het eerste wordt "
-       "voor alle camera's gebruikt"),
-    RU("Предупреждение: в наборе данных смешаны модели камер; для всех камер "
-       "будет взята первая"),
-    TR("Uyarı: veri kümesinde karışık kamera modelleri var; hepsi için ilki "
-       "kullanılacak"));
 
 SS_MSG(error_line,
     EN("error: {0}"),

@@ -54,9 +54,11 @@ struct MeshCameras {
     std::vector<float>   positions;    // [C*3] camera centers, splat frame
     std::vector<float>   viewmats;     // [C*16] world->cam, engine convention
     std::vector<float>   intrins;      // [C*4]
-    std::vector<float>   dist_coeffs;  // [C*10]
+    std::vector<float>   dist_coeffs;  // [C*8]
     std::vector<int32_t> widths, heights;
-    std::string          model;
+    std::vector<int32_t> models;       // [C] CameraModelType
+    std::vector<int32_t> distortions;  // [C] CameraDistortionType
+    std::string          model;        // the distinct models, for the log
     int64_t num() const { return (int64_t)widths.size(); }
 };
 
@@ -114,20 +116,16 @@ MeshCameras load_cameras(const JsonValue& run_cfg, const std::string& data_dir,
     out.viewmats = std::move(post.viewmats);
     out.intrins = std::move(post.intrins);
     out.dist_coeffs = std::move(post.dist_coeffs);
-    out.widths = ds.widths;
-    out.heights = ds.heights;
+    out.widths = std::move(post.post_widths);
+    out.heights = std::move(post.post_heights);
+    out.models = std::move(post.post_models);
+    out.distortions = std::move(post.post_distortions);
     out.positions.resize(C * 3);
     for (int64_t i = 0; i < C; ++i)
         for (int r = 0; r < 3; ++r)
             out.positions[i*3 + r] = ds.c2w[i*12 + r*4 + 3];
 
-    int32_t m0 = ds.camera_models.empty() ? 0 : ds.camera_models[0];
-    for (int32_t m : ds.camera_models)
-        if (m != m0) {
-            mlog::warn(mlog::Stage::Loading, cmsg::mesh_mixed_camera_models);
-            break;
-        }
-    out.model = camera_model_to_string((CameraModelType)m0);
+    out.model = meshing::camera_models_summary(out.models.data(), (int)C);
     return out;
 }
 
@@ -409,7 +407,8 @@ int spirula_mesh_main(int argc, char** argv) {
             cp.dist_coeffs = cams.dist_coeffs.data();
             cp.widths = cams.widths.data();
             cp.heights = cams.heights.data();
-            cp.camera_model = cams.model;
+            cp.camera_models = cams.models.data();
+            cp.distortions = cams.distortions.data();
         }
         bool ok = meshing::generate_mesh(
             splats.means.data(), splats.quats.data(), splats.scales.data(),

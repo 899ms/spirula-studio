@@ -619,12 +619,22 @@ int main(int argc, char** argv) {
         std::vector<int32_t> ws(NCAM, (int32_t)W), hs(NCAM, (int32_t)H);
         int32_t* d_W = upload(ws);
         int32_t* d_H = upload(hs);
+        // Camera 0 over every vertex, then the rest over two vertex ranges:
+        // the accumulation across launches the host driver relies on.
         uint32_t* d_vis = alloc<uint32_t>(NV);
+        backend::memset_sync(d_vis, 0, (size_t)NV * sizeof(uint32_t));
         meshing::launch_cull(
-            d_verts, NV, d_faces, NF, d_vm, d_intr,
+            d_verts, 0, NV, d_faces, NF, d_vm, d_intr,
             d_dist + dist_fixture::row_offset(2, NCAM),
-            d_W, d_H, /*camera_model=*/0, /*distortion=*/2, NCAM, t_leafMin,
+            d_W, d_H, /*camera_model=*/0, /*distortion=*/2, 1, t_leafMin,
             t_leafMax, t_internal, t_nodeAABB, d_vis);
+        for (int v0 : {0, NV / 3})
+            meshing::launch_cull(
+                d_verts, v0, v0 == 0 ? NV / 3 : NV - v0, d_faces, NF,
+                d_vm + 16, d_intr + 4,
+                d_dist + dist_fixture::row_offset(2, NCAM, 1),
+                d_W + 1, d_H + 1, /*camera_model=*/0, /*distortion=*/2,
+                NCAM - 1, t_leafMin, t_leafMax, t_internal, t_nodeAABB, d_vis);
         backend::device_synchronize();
         if (check_error()) return 1;
         readback_i32(codes, (const int32_t*)d_vis, NV);
