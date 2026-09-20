@@ -170,6 +170,10 @@ if(SS_BUILD_GUI)
     )
     target_compile_options(imgui_glfw PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:${SPLAT_CXX_FLAGS}>)
+    # The item hooks src/app/gui/Automation.cpp implements: one never-taken
+    # branch per widget until it arms them. Not an option -- imgui references
+    # the hooks once this is on, so a build without Automation.cpp would fail.
+    target_compile_definitions(imgui_glfw PUBLIC IMGUI_ENABLE_TEST_ENGINE)
     target_include_directories(imgui_glfw PUBLIC
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends

@@ -2354,6 +2354,36 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
 // Frame
 // ===========================================================================
 
+std::string GuiApp::state_json() {
+    auto quoted = [](const std::string& s) {
+        std::string q = "\"";
+        for (char c : s) {
+            if ((unsigned char)c < 0x20) continue;
+            if (c == '"' || c == '\\') q += '\\';
+            q += c;
+        }
+        return q + "\"";
+    };
+    // Index order is the declaration order of Screen and TrainRunner::Phase.
+    static const char* kScreens[] = {"home", "new_dataset", "train", "viewer",
+                                     "batch", "mesh"};
+    static const char* kPhases[] = {"idle", "loading", "ready", "load_error",
+                                    "preparing", "training", "done",
+                                    "train_error"};
+    std::string out = "\"screen\":\"";
+    out += kScreens[(int)_screen];
+    out += "\",\"train_phase\":\"";
+    out += kPhases[(int)_runner.phase()];
+    out += "\",\"step\":" + std::to_string(_runner.latest_progress().step);
+    out += ",\"busy\":";
+    out += native_work_busy() ? "true" : "false";
+    out += ",\"dialog_open\":";
+    out += _dialog.is_open() ? "true" : "false";
+    out += ",\"models_open\":" + std::to_string(_compare.count());
+    out += ",\"dataset\":" + quoted(_cfg.data);
+    return out;
+}
+
 void GuiApp::frame() {
     // Before the first widget: a style swap halfway through a frame would
     // measure half the window against one scale and half against the other.

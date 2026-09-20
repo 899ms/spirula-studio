@@ -5,7 +5,9 @@
 #include "app/Tools.h"
 #include "i18n/catalog/Log.h"
 #include "app/AppPaths.h"
+#include "core/Env.h"
 #include "app/CrashLog.h"
+#include "app/gui/Automation.h"
 #include "app/gui/Fonts.h"
 #include "app/gui/GuiApp.h"
 #include "app/gui/Layout.h"
@@ -179,6 +181,11 @@ int spirula_gui_main(int argc, char** argv) {
         if (mw > 0) win_w = std::min(win_w, mw);
         if (mh > 0) win_h = std::min(win_h, mh);
     }
+    // A driven window still needs a real GL context, but nothing needs it on
+    // screen -- and one that is not on screen cannot be clicked on by accident.
+    if (spirula::env_on("GUI_OFFSCREEN"))
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
     // The title is set from the catalog below, once GuiApp has settled the
     // language; this is only what the window is born with.
     GLFWwindow* window = glfwCreateWindow(win_w, win_h, "Spirula Studio",
@@ -209,9 +216,11 @@ int spirula_gui_main(int argc, char** argv) {
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+    gui::automation::arm();
 
     {
         gui::GuiApp app;
+        gui::automation::set_state_source([&app] { return app.state_json(); });
         app.set_dpi_scale(layout_dpi(window));
         // The atlas has to exist before the first frame, and the language it
         // depends on is only settled once GuiApp has read its settings file.
@@ -274,9 +283,12 @@ int spirula_gui_main(int argc, char** argv) {
 
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
+            // After the backend's own mouse update, so an injected position
+            // is the later event and wins for this frame.
+            const bool scripted = gui::automation::begin_frame();
             ImGui::NewFrame();
             app.frame();
-            const bool busy = ui_busy();
+            const bool busy = ui_busy() || scripted;
             ImGui::Render();
 
             const double now = glfwGetTime();
@@ -293,6 +305,7 @@ int spirula_gui_main(int argc, char** argv) {
             glClearColor(0.07f, 0.07f, 0.08f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+            gui::automation::end_frame(w, h);   // reads the back buffer
             glfwSwapBuffers(window);
         }
         // Joins worker threads (finishing a final checkpoint save if a stop
@@ -301,6 +314,7 @@ int spirula_gui_main(int argc, char** argv) {
         app.shutdown();
     }
 
+    gui::automation::shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

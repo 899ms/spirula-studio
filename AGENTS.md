@@ -47,6 +47,10 @@ assets/fonts/               the five embedded UI faces + the full-CJK face
                               table (assets/fonts/README.md). The CJK subsets
                               are GENERATED from the catalogs -- see below
 tools/codegen/              the four codegen tools (see "Codegen" below)
+tools/guictl.py             drive the GUI from a script -- list the widgets on
+                              screen, click them, read the framebuffer back.
+                              tools/gui_mcp.py is the same surface as an MCP
+                              server; docs/notes/gui-automation.md
 reference/scripts/          dataset preprocessing CLI tools (Python, standalone;
                               mask.py is embedded into the GUI binary)
 reference/python/           hand-run tools on NO code path: eval_lpips.py,

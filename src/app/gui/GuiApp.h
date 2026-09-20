@@ -72,6 +72,11 @@ public:
     // Draw one frame (between ImGui::NewFrame and ImGui::Render).
     void frame();
 
+    // What a script needs to know that is not on screen as a widget: the
+    // screen, what is running, what is open. A JSON object body without the
+    // braces, for gui::automation::set_state_source.
+    std::string state_json();
+
     // Window close button pressed; may open a confirmation dialog instead
     // of quitting when training is in flight.
     void request_close();
