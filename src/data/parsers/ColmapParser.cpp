@@ -1002,6 +1002,19 @@ static bool has_metashape_xml(const std::string& dataset_dir,
     return false;
 }
 
+std::string find_colmap_model(const std::string& dataset_dir,
+                              const std::string& recon_dir_hint,
+                              bool* points_text) {
+    DatasetParserConfig cfg;
+    cfg.recon_dir = recon_dir_hint;
+    ColmapModelFmt fmt;
+    const std::string dir = find_colmap_recon(dataset_dir, cfg, &fmt, false);
+    if (points_text) *points_text = fmt.points3D == ColmapFmt::Text;
+    if (fmt.points3D == ColmapFmt::None) return {};
+    return dir;
+}
+
+
 ParsedDataset parse_dataset(const std::string& dataset_dir,
                             const DatasetParserConfig& cfg,
                             const std::string& format) {

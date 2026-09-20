@@ -217,7 +217,8 @@ if(SS_BUILD_GUI)
         ${CMAKE_BINARY_DIR}/app_generated/app_banner.h
         AppBanner)
 
-    file(GLOB SS_GUI_SOURCES CONFIGURE_DEPENDS ${SS_SRC}/app/gui/*.cpp)
+    file(GLOB SS_GUI_SOURCES CONFIGURE_DEPENDS
+        ${SS_SRC}/app/gui/*.cpp ${SS_SRC}/app/gui/edit/*.cpp)
     list(APPEND SS_TOOL_SOURCES ${SS_GUI_SOURCES})
     list(APPEND SS_TOOL_DEFS SS_TOOL_GUI=1)
     list(APPEND SS_TOOL_LIBS imgui_glfw OpenGL::GL)

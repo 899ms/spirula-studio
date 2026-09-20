@@ -4,8 +4,13 @@
 
 #include "app/gui/Layout.h"
 #include "app/gui/Ui.h"
+#include "app/gui/edit/MeshDoc.h"
+#include "app/gui/edit/PointsDoc.h"
+#include "app/gui/edit/SplatDoc.h"
+#include "checkpoint/SplatPly.h"
 #include "core/Camera.h"
 #include "engine/Engine.h"
+#include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
 
 #include "imgui.h"
@@ -17,6 +22,7 @@
 
 namespace fs = std::filesystem;
 namespace msg = spirula::i18n::msg::gui;
+namespace emsg = spirula::i18n::msg::edit;
 
 namespace gui {
 
@@ -95,6 +101,8 @@ void CompareView::add(const std::string& path,
 
 void CompareView::remove(int index) {
     if (index < 0 || index >= count()) return;
+    if (_edit_index == index) end_edit();
+    else if (_edit_index > index) _edit_index--;
     Model& m = *_models[index];
     m.panel.detach();
     m.panel.destroy_gl();
@@ -108,11 +116,14 @@ void CompareView::remove(int index) {
 void CompareView::move(int index, int dir) {
     const int to = index + dir;
     if (index < 0 || index >= count() || to < 0 || to >= count()) return;
+    if (_edit_index == index) _edit_index = to;
+    else if (_edit_index == to) _edit_index = index;
     std::swap(_models[index], _models[to]);
     if (index == 0 || to == 0) _overlay_key.clear();
 }
 
 void CompareView::close() {
+    end_edit();
     // No destroy_gl here: close() also runs from the destructor, by which
     // point the GL context may be gone. GuiApp::shutdown calls destroy_gl()
     // while it is still current.
@@ -143,6 +154,12 @@ std::vector<std::string> CompareView::drain_log() {
     std::vector<std::string> out;
     for (auto& m : _models)
         for (auto& s : m->src.drain_log()) out.push_back(std::move(s));
+    for (auto& s : _edit.drain_log()) out.push_back(std::move(s));
+    // Written by the loader thread, which clears `_edit_loading` after it.
+    if (!_edit_loading.load() && !_edit_error.empty()) {
+        out.push_back(spirula::i18n::format(emsg::edit_failed, {_edit_error}));
+        _edit_error.clear();
+    }
     return out;
 }
 
@@ -154,8 +171,11 @@ std::vector<std::string> CompareView::drain_log() {
 void CompareView::attach(Model& m) {
     switch (m.src.kind()) {
         case SplatViewer::Kind::Points:
+            // A reconstruction has cameras worth seeing; a loose point file
+            // has none, so the controls for them are offered on the first.
             m.panel.attach_preview_data(m.src.points(), m.src.post(),
-                                        m.src.scene_key());
+                                        m.src.scene_key(), 1.0f,
+                                        m.src.post().n_post > 0);
             break;
         case SplatViewer::Kind::Mesh:
             m.panel.attach_preview_mesh(m.src.mesh(), m.src.mesh_to_normalized(),
@@ -264,6 +284,117 @@ void CompareView::poll() {
         if (!m->attached && m->src.ready()) attach(*m);
     ensure_viewer_overlay();
     update_placements();
+    if (_edit_when_ready && _edit_index < 0 && !_edit_loading.load() &&
+        !_models.empty() && _models[0]->attached) {
+        _edit_when_ready = false;
+        begin_edit(0);
+    }
+    finish_edit_load();
+    if (_edit.active()) _edit.poll();
+}
+
+
+// ---------------------------------------------------------------------------
+// Editing
+// ---------------------------------------------------------------------------
+
+bool CompareView::edit_dirty() const {
+    return _edit_index >= 0 && _edit.active() &&
+           const_cast<EditSession&>(_edit).doc()->dirty();
+}
+
+void CompareView::confirm_discard_edits(std::function<void()> then) {
+    if (!edit_dirty()) {
+        if (then) then();
+        return;
+    }
+    _discard_then = std::move(then);
+    _ask_discard = true;
+}
+
+void CompareView::end_edit() {
+    _edit_when_ready = false;
+    if (_edit_worker.joinable()) _edit_worker.join();
+    _edit_loading = false;
+    _edit_pending.reset();
+    _edit.close();
+    _edit_index = -1;
+}
+
+void CompareView::begin_edit(int index) {
+    if (index < 0 || index >= count()) return;
+    end_edit();
+    Model& m = *_models[index];
+    if (!m.src.ready()) return;
+    _edit_index = index;
+    _edit_error.clear();
+
+    switch (m.src.kind()) {
+        case SplatViewer::Kind::Points: {
+            ParsedDataset ds = m.src.points();
+            PostSplitCameras post = m.src.post();
+            const std::string src = m.src.file();
+            const std::string dir = m.src.dataset_dir();
+            ViewportPanel* panel = &m.panel;
+            const std::string key = m.src.scene_key();
+            _edit.open(std::make_unique<PointsDoc>(
+                           std::move(ds), std::move(post), src, dir,
+                           [panel, key](const ParsedDataset& d,
+                                        const PostSplitCameras& p) {
+                               panel->attach_preview_data(d, p, key, 1.0f,
+                                                          p.n_post > 0);
+                           }),
+                       panel);
+            break;
+        }
+        case SplatViewer::Kind::Mesh: {
+            meshing::MeshData mesh = m.src.mesh();
+            float t2n[12];
+            for (int i = 0; i < 12; i++) t2n[i] = m.src.mesh_to_normalized()[i];
+            ViewportPanel* panel = &m.panel;
+            const std::string key = m.src.scene_key();
+            _edit.open(std::make_unique<MeshDoc>(
+                           std::move(mesh), m.src.file(), t2n,
+                           [panel, key](const meshing::MeshData& d,
+                                        const float* a) {
+                               panel->attach_preview_mesh(d, a, key);
+                           }),
+                       panel);
+            break;
+        }
+        default: {
+            // The PLY is read again rather than kept: a viewer that held every
+            // open model host-side would double the memory of a comparison
+            // nobody is editing.
+            const std::string file = m.src.file();
+            const int slot = m.src.scene_slot();
+            std::mutex* mu = m.src.engine_mutex();
+            float t2v[12];
+            m.src.to_view_frame(t2v);
+            _edit_loading = true;
+            _edit_worker = std::thread([this, file, slot, mu, t2v] {
+                try {
+                    spirula::SplatCloud c = spirula::read_splat_ply(file);
+                    _edit_pending = std::make_unique<SplatDoc>(
+                        std::move(c), file, t2v, slot, mu);
+                } catch (const std::exception& e) {
+                    _edit_error = e.what();
+                }
+                _edit_loading = false;
+            });
+            break;
+        }
+    }
+}
+
+void CompareView::finish_edit_load() {
+    if (_edit_loading.load() || !_edit_worker.joinable()) return;
+    _edit_worker.join();
+    if (_edit_pending && _edit_index >= 0 && _edit_index < count())
+        _edit.open(std::move(_edit_pending), &_models[_edit_index]->panel);
+    else
+        _edit_index = -1;
+    _edit_pending.reset();
 }
 
 
@@ -272,6 +403,29 @@ void CompareView::poll() {
 // ---------------------------------------------------------------------------
 
 void CompareView::draw_toolbar() {
+    if (_ask_discard) {
+        ui::OpenPopup(emsg::discard_title);
+        _ask_discard = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(px(420.0f), 0.0f), ImGuiCond_Appearing);
+    if (ui::BeginPopupModal(emsg::discard_title)) {
+        const std::string what =
+            _edit.active() ? display_name(_edit.doc()->source_path()) : "";
+        ui::TextWrapped(emsg::discard_body, {what});
+        if (ui::Button(emsg::discard_yes)) {
+            std::function<void()> then;
+            then.swap(_discard_then);
+            end_edit();
+            ImGui::CloseCurrentPopup();
+            if (then) then();
+        }
+        ImGui::SameLine();
+        if (ui::Button(emsg::discard_no)) {
+            _discard_then = nullptr;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     ImGui::BeginDisabled(full());
     if (ui::Button(msg::compare_add_model)) ImGui::OpenPopup("##addmodel");
     ImGui::EndDisabled();
@@ -365,6 +519,23 @@ void CompareView::draw_pane(int index, const ImVec2& size) {
         ui::help_on_hover_raw(f.c_str());
     }
     if (m.src.ready()) {
+        // The way in and out of editing lives on the pane it edits: with two
+        // models open, which one a toolbar button meant would be a guess.
+        ImGui::SameLine();
+        const bool on = _edit_index == index;
+        if (on) {
+            const ImVec4 c = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+            ImGui::PushStyleColor(ImGuiCol_Button, c);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, c);
+        }
+        if (ui::Button(on ? emsg::leave_edit : emsg::enter_edit)) {
+            if (on) confirm_discard_edits([this] { end_edit(); });
+            else    begin_edit(index);
+        }
+        if (on) ImGui::PopStyleColor(2);
+        ui::help_on_hover(emsg::enter_edit_help);
+    }
+    if (m.src.ready()) {
         ImGui::SameLine();
         if (m.src.kind() == SplatViewer::Kind::Points)
             ui::TextDisabled(msg::viewer_point_count,
@@ -391,6 +562,9 @@ void CompareView::draw_pane(int index, const ImVec2& size) {
             ui::TextDisabledRaw(m.src.error());
             break;
         case SplatViewer::State::Ready:
+            if (_edit_index == index && _edit.active()) _edit.draw_status();
+            else if (_edit_index == index && _edit_loading.load())
+                ui::TextDisabled(emsg::edit_preparing);
             // Nothing is training, so nothing changes between frames unless
             // the camera does: the viewport renders on demand.
             m.panel.draw(/*training=*/false);

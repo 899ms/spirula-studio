@@ -168,6 +168,11 @@ float viewer_camera_size_heuristic(const PostSplitCameras& post);
 // false when the pixel is outside the model's domain.
 bool viewer_pixel_ray(int camera_model, float u, float v, float dir[3]);
 
+// Its inverse: a camera-space direction (need not be unit) to the same
+// normalized coordinates, false behind the model's horizon. Selecting in the
+// viewport is this run over every element, so the two must stay one pair.
+bool viewer_ray_pixel(int camera_model, const float dir[3], float& u, float& v);
+
 // One-shot upload of the axes/grid overlay (engine_viewer_set_grid). The
 // grid is axis-aligned in the engine's training frame -- the frame splats
 // are saved in -- so grid lines mark round coordinates of the exported

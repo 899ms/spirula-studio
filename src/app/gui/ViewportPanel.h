@@ -19,6 +19,7 @@
 #include "data/DatasetParser.h"
 #include "app/gui/NavCamera.h"
 #include "app/gui/PreviewRenderer.h"
+#include "app/gui/ViewportInput.h"
 
 #include <cstdint>
 #include <functional>
@@ -93,6 +94,20 @@ public:
     // otherwise render at different sizes, which is not a comparison.
     float controls_height() const { return _controls_h; }
     void set_controls_pad(float px) { _controls_pad = px; }
+
+    // An editing tool over this viewport. While one is installed it owns the
+    // left button; the other two stay with navigation, so a tool is never a
+    // dead end. Null detaches.
+    void set_interactor(ViewportInteractor* t) { _interactor = t; }
+    // The navigated frame to camera, row-major 3x4 in the CV convention
+    // viewer_pixel_ray works in, plus the intrinsics for a `W` x `H` image
+    // and which display camera model they belong to.
+    void view_camera(int W, int H, float w2c[12], float& fx, float& fy,
+                     int& camera_model, float eye[3]) const;
+    // Where the last draw put the image on screen, in ImGui coordinates.
+    void image_rect(float& x, float& y, float& w, float& h) const;
+    // A render is due: what a tool calls after changing what is drawn.
+    void invalidate() { _dirty = true; }
 
     // Where this panel's model sits in the SHARED frame the camera navigates
     // (row-major 3x4 similarity, scale*R | t; identity by default). Applied to
@@ -234,6 +249,10 @@ private:
     // The grid's cell in model units, from the same rule both backends use.
     float grid_cell() const;
     void draw_grid_overlay(float x, float y, int line) const;
+    ViewportInteractor* _interactor = nullptr;
+    // The image rectangle of the last draw, which is the frame a tool's
+    // pointer coordinates and its overlay are both in.
+    float _img_x = 0, _img_y = 0, _img_w = 0, _img_h = 0;
     bool _nav_controls = true;
     float _controls_h = 0.0f;
     float _controls_pad = 0.0f;

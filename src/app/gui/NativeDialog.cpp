@@ -25,6 +25,10 @@ namespace gui {
 std::vector<std::string> mac_pick(const std::string& title, bool folder,
                                   const std::vector<std::string>& extensions,
                                   const std::string& start_dir, bool multi);
+std::vector<std::string> mac_save(const std::string& title,
+                                  const std::vector<std::string>& extensions,
+                                  const std::string& start_dir,
+                                  const std::string& suggested);
 #endif
 
 namespace {
@@ -35,6 +39,7 @@ struct Request {
     std::vector<std::string> extensions;
     std::string start_dir;
     bool multi = false;
+    std::string suggested;
 };
 
 #ifdef _WIN32
@@ -66,9 +71,12 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     std::vector<std::string> out;
     const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED |
                                                    COINIT_DISABLE_OLE1DDE);
-    IFileOpenDialog* dlg = nullptr;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr,
-                                CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) {
+    const bool saving = r.mode == NativeDialog::Mode::Save;
+    IFileDialog* dlg = nullptr;
+    if (FAILED(CoCreateInstance(saving ? CLSID_FileSaveDialog
+                                       : CLSID_FileOpenDialog,
+                                nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&dlg)))) {
         if (SUCCEEDED(co)) CoUninitialize();
         return out;
     }
@@ -77,8 +85,11 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     dlg->GetOptions(&opts);
     opts |= FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR;
     if (r.mode == NativeDialog::Mode::Folder) opts |= FOS_PICKFOLDERS;
+    else if (saving)                          opts |= FOS_OVERWRITEPROMPT;
     else if (r.multi)                         opts |= FOS_ALLOWMULTISELECT;
     dlg->SetOptions(opts);
+    if (saving && !r.suggested.empty())
+        dlg->SetFileName(widen(r.suggested).c_str());
 
     const std::wstring title = widen(r.title);
     if (!title.empty()) dlg->SetTitle(title.c_str());
@@ -89,7 +100,7 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     const std::wstring any = L"*.*";
     std::wstring pattern;
     std::vector<COMDLG_FILTERSPEC> specs;
-    if (r.mode == NativeDialog::Mode::File && !r.extensions.empty()) {
+    if (r.mode != NativeDialog::Mode::Folder && !r.extensions.empty()) {
         std::string p;
         for (const std::string& e : r.extensions) {
             if (!p.empty()) p += ";";
@@ -112,8 +123,24 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     }
 
     if (SUCCEEDED(dlg->Show(nullptr))) {
+        if (saving) {
+            IShellItem* it = nullptr;
+            if (SUCCEEDED(dlg->GetResult(&it))) {
+                PWSTR path = nullptr;
+                if (SUCCEEDED(it->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                    out.push_back(narrow(path));
+                    CoTaskMemFree(path);
+                }
+                it->Release();
+            }
+            dlg->Release();
+            if (SUCCEEDED(co)) CoUninitialize();
+            return out;
+        }
         IShellItemArray* items = nullptr;
-        if (SUCCEEDED(dlg->GetResults(&items))) {
+        IFileOpenDialog* open_dlg = nullptr;
+        if (SUCCEEDED(dlg->QueryInterface(IID_PPV_ARGS(&open_dlg))) &&
+            SUCCEEDED(open_dlg->GetResults(&items))) {
             DWORD n = 0;
             items->GetCount(&n);
             for (DWORD i = 0; i < n; i++) {
@@ -128,6 +155,7 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
             }
             items->Release();
         }
+        if (open_dlg) open_dlg->Release();
     }
     dlg->Release();
     if (SUCCEEDED(co)) CoUninitialize();
@@ -139,6 +167,8 @@ bool platform_available() { return true; }
 #elif defined(__APPLE__)
 
 std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
+    if (r.mode == NativeDialog::Mode::Save)
+        return mac_save(r.title, r.extensions, r.start_dir, r.suggested);
     return mac_pick(r.title, r.mode == NativeDialog::Mode::Folder, r.extensions,
                     r.start_dir, r.multi);
 }
@@ -171,11 +201,30 @@ std::vector<std::string> platform_pick(const Request& r,
     const std::string& helper = linux_helper();
     std::vector<std::string> argv{helper};
     const bool folder = r.mode == NativeDialog::Mode::Folder;
+    const bool saving = r.mode == NativeDialog::Mode::Save;
+    // Where a save opens: the folder plus the name it suggests.
+    std::string save_at = r.start_dir;
+    if (saving) {
+        if (save_at.empty()) save_at = ".";
+        save_at += "/" + (r.suggested.empty() ? std::string("untitled")
+                                              : r.suggested);
+    }
 
     if (helper == "kdialog") {
         argv.push_back("--title");
         argv.push_back(r.title);
-        if (folder) {
+        if (saving) {
+            argv.push_back("--getsavefilename");
+            argv.push_back(save_at);
+            if (!r.extensions.empty()) {
+                std::string pat;
+                for (const std::string& e : r.extensions) {
+                    if (!pat.empty()) pat += " ";
+                    pat += "*" + e;
+                }
+                argv.push_back(pat + "|" + r.title);
+            }
+        } else if (folder) {
             argv.push_back("--getexistingdirectory");
             argv.push_back(r.start_dir.empty() ? "." : r.start_dir);
         } else {
@@ -198,9 +247,15 @@ std::vector<std::string> platform_pick(const Request& r,
         argv.push_back("--file-selection");
         argv.push_back("--title=" + r.title);
         if (folder) argv.push_back("--directory");
-        // The trailing separator is what makes zenity read it as the folder
-        // to open in rather than a file name to preselect.
-        if (!r.start_dir.empty()) argv.push_back("--filename=" + r.start_dir + "/");
+        if (saving) {
+            argv.push_back("--save");
+            argv.push_back("--confirm-overwrite");
+            argv.push_back("--filename=" + save_at);
+        } else if (!r.start_dir.empty()) {
+            // The trailing separator is what makes zenity read it as the
+            // folder to open in rather than a file name to preselect.
+            argv.push_back("--filename=" + r.start_dir + "/");
+        }
         if (!folder && r.multi) {
             argv.push_back("--multiple");
             argv.push_back("--separator=\n");
@@ -220,9 +275,13 @@ std::vector<std::string> platform_pick(const Request& r,
     // to toolkit warnings, so a line only counts if it names something that
     // exists.
     std::vector<std::string> out;
-    run_process(argv, "", [&out](const std::string& line) {
+    run_process(argv, "", [&out, saving](const std::string& line) {
         std::error_code ec;
-        if (!line.empty() && line[0] == '/' && fs::exists(line, ec))
+        if (line.empty() || line[0] != '/') return;
+        // A save names a file that does not exist yet, so what has to be
+        // there is its folder.
+        if (saving ? fs::is_directory(fs::path(line).parent_path(), ec)
+                   : fs::exists(line, ec))
             out.push_back(line);
     }, job.cancel);
     return out;
@@ -246,7 +305,8 @@ bool NativeDialog::available() { return platform_available(); }
 
 bool NativeDialog::open(const std::string& title, Mode mode,
                         const std::vector<std::string>& extensions,
-                        const std::string& start_dir, bool multi) {
+                        const std::string& start_dir, bool multi,
+                        const std::string& suggested) {
     if (_job || !available()) return false;
     if (_worker.joinable()) _worker.detach();   // a previous, abandoned picker
 
@@ -256,6 +316,7 @@ bool NativeDialog::open(const std::string& title, Mode mode,
     r.extensions = extensions;
     r.start_dir = start_dir;
     r.multi = multi && mode == Mode::File;
+    r.suggested = suggested;
 
     _results.clear();
     auto job = std::make_shared<Job>();

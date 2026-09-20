@@ -65,6 +65,7 @@ public:
     static constexpr float kDefaultLogH = 150.0f;
     static constexpr float kDefaultPreviewH = 260.0f;
     static constexpr float kDefaultDsPanelW = 560.0f;
+    static constexpr float kEditPanelW = 300.0f;
 
     GuiApp();
     ~GuiApp();
@@ -104,7 +105,8 @@ private:
         PresetFile, DatasetPresetFile, MeshPresetFile, PresetSaveFolder,
         BatchDataset, BatchOutput, BatchPresetFile, BatchDatasetPresetFile,
         BatchMeshPresetFile, BatchSourceImages, BatchSourceVideo, BatchModel,
-        MeshSource, MeshPhotos, MeshOutput, AddSplatFile
+        MeshSource, MeshPhotos, MeshOutput, AddSplatFile, SplatFolder,
+        EditSaveFile, EditSaveFolder
     };
     // Which reconstruction back end the New Dataset screen runs.
     enum class Engine { BuiltIn, Colmap };
@@ -136,7 +138,8 @@ private:
     void open_pick(PickAction a, const std::string& title,
                    FileDialog::Mode mode,
                    const std::vector<std::string>& extensions = {},
-                   const std::string& start_dir = "", bool multi = false);
+                   const std::string& start_dir = "", bool multi = false,
+                   const std::string& suggested_name = {});
 
     // ---- actions ----
     // By value: callers pass elements of _recents, which open_dataset
@@ -510,6 +513,10 @@ private:
     void clear_log();
 
     Screen _screen = Screen::Home;
+    // Which save target the editor's file picker was armed for, and whether
+    // the next model opened is being opened in order to edit it.
+    int _edit_save_target = 0;
+    bool _edit_after_open = false;
     bool _quit = false;
     bool _open_confirm = false;      // arm the stop-training modal
     bool _confirm_shown = false;     // modal currently expected open

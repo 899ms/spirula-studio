@@ -6,6 +6,8 @@
 // handled, so the several settings files this program writes do not each
 // carry their own copy of them.
 
+#include "data/Json.h"
+
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -112,3 +114,28 @@ private:
     std::vector<Frame> _stack;
     bool _pending_key = false;
 };
+
+
+// A parsed document back out, for the one case that reads a file and writes
+// the same shape again: an edited Metashape export saved as Nerfstudio.
+inline void json_write(JsonWriter& w, const JsonValue& v) {
+    switch (v.type) {
+        case JsonValue::Type::Object:
+            w.object();
+            for (const auto& [k, sub] : v.obj) {
+                w.key(k.c_str());
+                json_write(w, sub);
+            }
+            w.end();
+            break;
+        case JsonValue::Type::Array:
+            w.array();
+            for (const auto& sub : v.arr) json_write(w, sub);
+            w.end();
+            break;
+        case JsonValue::Type::String: w.value(v.str); break;
+        case JsonValue::Type::Number: w.value(v.num); break;
+        case JsonValue::Type::Bool:   w.value(v.b); break;
+        default:                      w.raw("null"); break;
+    }
+}

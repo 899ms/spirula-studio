@@ -253,6 +253,63 @@ SplatCloud read_splat_ply(const std::string& path, bool want_sh) {
 }
 
 
+void write_splat_ply(const SplatCloud& c, const std::string& path,
+                     const uint8_t* keep) {
+    const int64_t K = c.dim_sh() - 1;
+    int64_t kept = c.num;
+    if (keep) {
+        kept = 0;
+        for (int64_t i = 0; i < c.num; i++) kept += keep[i] ? 1 : 0;
+    }
+    std::error_code ec;
+    fs::create_directories(fs::path(path).parent_path(), ec);
+    std::ofstream ply(path, std::ios::binary);
+    if (!ply) throw std::runtime_error("cannot open for writing: " + path);
+    ply << "ply\n";
+    ply << "format binary_little_endian 1.0\n";
+    ply << "element vertex " << kept << "\n";
+    ply << "property float x\nproperty float y\nproperty float z\n";
+    ply << "property float nx\nproperty float ny\nproperty float nz\n";
+    ply << "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n";
+    for (int64_t j = 0; j < 3 * K; j++) ply << "property float f_rest_" << j << "\n";
+    ply << "property float opacity\n";
+    ply << "property float scale_0\nproperty float scale_1\nproperty float scale_2\n";
+    ply << "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\n";
+    ply << "end_header\n";
+
+    const int row_floats = (int)(3 + 3 + 3 + 3 * K + 1 + 3 + 4);
+    constexpr int kRowsPerFlush = 1024;
+    std::vector<float> buf((size_t)row_floats * kRowsPerFlush);
+    int rows = 0;
+    auto flush = [&] {
+        if (!rows) return;
+        ply.write(reinterpret_cast<const char*>(buf.data()),
+                  (std::streamsize)rows * row_floats * sizeof(float));
+        rows = 0;
+    };
+    for (int64_t i = 0; i < c.num; i++) {
+        if (keep && !keep[i]) continue;
+        float* row = buf.data() + (size_t)rows * row_floats;
+        int p = 0;
+        for (int a = 0; a < 3; a++) row[p++] = c.means[(size_t)i * 3 + a];
+        row[p++] = 0.0f; row[p++] = 0.0f; row[p++] = 0.0f;   // nx ny nz
+        for (int a = 0; a < 3; a++) row[p++] = c.features_dc[(size_t)i * 3 + a];
+        // A PLY stores f_rest channel-major; SplatCloud holds it
+        // coefficient-major, which is the transposition read_splat_ply undoes.
+        for (int ch = 0; ch < 3; ch++)
+            for (int64_t j = 0; j < K; j++)
+                row[p++] = c.features_sh[((size_t)i * K + j) * 3 + ch];
+        row[p++] = c.opacities[(size_t)i];
+        for (int a = 0; a < 3; a++) row[p++] = c.scales[(size_t)i * 3 + a];
+        for (int a = 0; a < 4; a++) row[p++] = c.quats[(size_t)i * 4 + a];
+        if (++rows == kRowsPerFlush) flush();
+    }
+    flush();
+    ply.flush();
+    if (!ply) throw std::runtime_error("write failed: " + path);
+}
+
+
 std::pair<std::string, std::string> find_splat_ply(const std::string& path) {
     const fs::path p(path);
     std::error_code ec;

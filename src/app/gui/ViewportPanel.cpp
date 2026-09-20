@@ -346,6 +346,38 @@ void ViewportPanel::view_matrix(float out[16]) const {
     out[15] = 1;
 }
 
+// The same pose in the CV convention a selection projects through: the c2w
+// columns are the GL view axes, and CV is (x, -y, -z) of them.
+void ViewportPanel::view_camera(int W, int H, float w2c[12], float& fx,
+                                float& fy, int& camera_model,
+                                float eye[3]) const {
+    float m[12];
+    model_c2w(m);
+    const float sign[3] = {1.0f, -1.0f, -1.0f};
+    for (int r = 0; r < 3; r++) {
+        float t = 0.0f;
+        for (int c = 0; c < 3; c++) {
+            const float v = sign[r] * m[c * 4 + r];
+            w2c[r * 4 + c] = v;
+            t += v * m[c * 4 + 3];
+        }
+        w2c[r * 4 + 3] = -t;
+    }
+    eye[0] = m[3];
+    eye[1] = m[7];
+    eye[2] = m[11];
+    compute_intrinsics(W, H, fx, fy);
+    camera_model = _cam_model;
+}
+
+void ViewportPanel::image_rect(float& x, float& y, float& w, float& h) const {
+    x = _img_x;
+    y = _img_y;
+    w = _img_w;
+    h = _img_h;
+}
+
+
 // ---------------------------------------------------------------------------
 // Attach / detach
 // ---------------------------------------------------------------------------
@@ -519,6 +551,34 @@ void ViewportPanel::upload(const ViewResult& res) {
 void ViewportPanel::handle_input(float /*item_h*/) {
     ImGuiIO& io = ImGui::GetIO();
     bool hovered = ImGui::IsItemHovered();
+    const ImVec2 rmin = ImGui::GetItemRectMin();
+    const ImVec2 rsz = ImGui::GetItemRectSize();
+    _img_x = rmin.x;
+    _img_y = rmin.y;
+    _img_w = rsz.x;
+    _img_h = rsz.y;
+
+    // A tool owns the left button for its whole lifetime, so that "does this
+    // drag orbit or lasso?" is answered once rather than per feature.
+    bool tool_owns_left = false;
+    if (_interactor) {
+        ViewportInput in;
+        in.hovered = hovered;
+        in.x = io.MousePos.x - rmin.x;
+        in.y = io.MousePos.y - rmin.y;
+        in.W = (int)rsz.x;
+        in.H = (int)rsz.y;
+        in.down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        in.clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        in.released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+        in.right_clicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        in.double_clicked = hovered &&
+                            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+        in.shift = io.KeyShift;
+        in.ctrl = io.KeyCtrl;
+        in.alt = io.KeyAlt;
+        tool_owns_left = _interactor->on_viewport_input(in);
+    }
 
     // Pointer (mouse; single-touch and OS touch/trackpad gestures arrive as
     // emulated mouse + wheel events -- one finger orbits, two-finger
@@ -528,6 +588,7 @@ void ViewportPanel::handle_input(float /*item_h*/) {
     if (hovered && !_dragging) {
         for (int b : {ImGuiMouseButton_Left, ImGuiMouseButton_Right,
                       ImGuiMouseButton_Middle}) {
+            if (b == ImGuiMouseButton_Left && tool_owns_left) continue;
             if (ImGui::IsMouseClicked(b)) {
                 _dragging = true;
                 _drag_button = b;
@@ -541,9 +602,14 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         } else {
             float dx = io.MouseDelta.x, dy = io.MouseDelta.y;
             if (dx != 0 || dy != 0) {
+                // With a tool on the left button the middle one has to
+                // orbit, or the view cannot be turned without leaving the
+                // tool.
+                const bool modal = _interactor &&
+                                   _interactor->owns_left_button();
                 bool is_pan = _drag_button == ImGuiMouseButton_Right ||
-                              _drag_button == ImGuiMouseButton_Middle ||
-                              io.KeyShift;
+                              (_drag_button == ImGuiMouseButton_Middle && !modal) ||
+                              (io.KeyShift && !modal);
                 if (spirula::env("NAV_DEBUG"))
                     std::fprintf(stderr,
                         "[nav] btn=%d pan=%d shift=%d d=(%.0f,%.0f) tgt=(%.3f,%.3f,%.3f) pos=(%.3f,%.3f,%.3f)\n",
@@ -566,7 +632,8 @@ void ViewportPanel::handle_input(float /*item_h*/) {
     // (viewer.html pickRecenter). Recorded here as fractional image
     // coordinates; resolved by the mode-specific draw (preview: CPU point
     // pick, engine: depth readback on the next render).
-    if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    if (hovered && !tool_owns_left &&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         ImVec2 mn = ImGui::GetItemRectMin();
         ImVec2 sz = ImGui::GetItemRectSize();
         if (sz.x > 0 && sz.y > 0) {
@@ -587,13 +654,16 @@ void ViewportPanel::handle_input(float /*item_h*/) {
     // Keyboard (viewer.html listens on the window; here: while the pointer
     // is over the viewport or dragging, and no text field wants input).
     if ((hovered || _dragging) && !io.WantTextInput) {
+        // A tool owns the letter keys -- they are its grammar -- so with one
+        // active the camera keeps only what nothing competes for.
+        const bool letters = !(_interactor && _interactor->owns_left_button());
         NavCamera::Keys k;
-        k.w = ImGui::IsKeyDown(ImGuiKey_W);
-        k.a = ImGui::IsKeyDown(ImGuiKey_A);
-        k.s = ImGui::IsKeyDown(ImGuiKey_S);
-        k.d = ImGui::IsKeyDown(ImGuiKey_D);
-        k.e = ImGui::IsKeyDown(ImGuiKey_E);
-        k.q = ImGui::IsKeyDown(ImGuiKey_Q);
+        k.w = letters && ImGui::IsKeyDown(ImGuiKey_W);
+        k.a = letters && ImGui::IsKeyDown(ImGuiKey_A);
+        k.s = letters && ImGui::IsKeyDown(ImGuiKey_S);
+        k.d = letters && ImGui::IsKeyDown(ImGuiKey_D);
+        k.e = letters && ImGui::IsKeyDown(ImGuiKey_E);
+        k.q = letters && ImGui::IsKeyDown(ImGuiKey_Q);
         // The claim is what the Shortcut() calls are for: an unclaimed arrow is
         // ALSO read by imgui's nav, which walks the focus along the toolbar.
         // IsKeyDown still reads it -- ownership only filters the owner-aware.
@@ -1006,6 +1076,16 @@ void ViewportPanel::draw_preview(const ImVec2& avail) {
         }
     }
 
+    if (_interactor) {
+        ViewportOverlay ov;
+        ov.dl = ImGui::GetWindowDrawList();
+        ov.x = _img_x;
+        ov.y = _img_y;
+        ov.w = _img_w;
+        ov.h = _img_h;
+        _interactor->draw_viewport_overlay(ov);
+    }
+
     // A count and what is being counted, which depends on what is being
     // previewed. Labelled rather than inflected ("Triangles: 12", not
     // "12 triangles") so no language needs a plural rule for it, and kept
@@ -1210,6 +1290,15 @@ void ViewportPanel::draw_engine(bool training, const ImVec2& avail, int step) {
         const ImVec2 tl = ImGui::GetItemRectMin();
         draw_grid_overlay(tl.x + 8, tl.y + 6, 0);
         handle_input(size.y);
+        if (_interactor) {
+            ViewportOverlay ov;
+            ov.dl = ImGui::GetWindowDrawList();
+            ov.x = _img_x;
+            ov.y = _img_y;
+            ov.w = _img_w;
+            ov.h = _img_h;
+            _interactor->draw_viewport_overlay(ov);
+        }
     } else {
         ImGui::Dummy(ImVec2(avail.x, avail.y * 0.4f));
         const char* line = _last_error.empty() ? msg::viewport_rendering.get()

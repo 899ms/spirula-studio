@@ -557,6 +557,38 @@ bool viewer_pixel_ray(int camera_model, float u, float v, float dir[3]) {
     return true;
 }
 
+bool viewer_ray_pixel(int camera_model, const float dir[3], float& u, float& v) {
+    constexpr float kPi = 3.14159265358979323846f;
+    const float x = dir[0], y = dir[1], z = dir[2];
+    const float len = std::sqrt(x*x + y*y + z*z);
+    if (!(len > 0.0f)) return false;
+    if (camera_model == 3) {                       // equirectangular
+        u = std::atan2(x, z);
+        v = std::asin(std::clamp(y / len, -1.0f, 1.0f));
+        return true;
+    }
+    if (camera_model == 0) {                       // pinhole
+        if (z <= 1e-9f) return false;
+        u = x / z;
+        v = y / z;
+        return true;
+    }
+    const float r_xy = std::sqrt(x*x + y*y);
+    const float theta = std::atan2(r_xy, z);       // angle off the axis
+    float r;
+    if (camera_model == 1) {                       // fisheye (equidistant)
+        if (theta >= kPi) return false;
+        r = theta;
+    } else {                                       // equisolid
+        r = 2.0f * std::sin(0.5f * theta);
+        if (r >= 2.0f) return false;
+    }
+    const float s = r_xy > 1e-12f ? r / r_xy : 0.0f;
+    u = x * s;
+    v = y * s;
+    return true;
+}
+
 void viewer_upload_grid(const PostSplitCameras& post) {
     // Scene radius in the engine (training/saved) frame = max camera |p|;
     // camera positions are the translation column of c2w (the y/z flip

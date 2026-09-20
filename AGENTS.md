@@ -138,6 +138,10 @@ src/
 │   ├── CrashLog.{h,cpp}    the stack trace every tool leaves in <config>/crash.log
 │   │                         when it faults -- armed for all of them in Main.cpp
 │   ├── gui/                Dear ImGui desktop app (`spirula` with no arguments)
+│   │   └── edit/             selecting parts of a model and deleting them:
+│   │                           one document/selection/tool seam over splats,
+│   │                           sparse points and meshes
+│   │                           -- docs/notes/gui-editing-plan.md
 │   ├── webviewer/          HTTP server + render worker + viewer.html (the ONE
 │   │                         browser client, embedded into the engine library
 │   │                         so the CLI and the GUI serve the same bytes)

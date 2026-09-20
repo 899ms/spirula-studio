@@ -10,6 +10,15 @@ interaction somewhere else — Blender, Photoshop, CloudCompare, MeshLab — and
 the work is deciding what they share so that the eighth one is cheap rather
 than an eighth of the code again.
 
+**Scope: the Vulkan build.** Editing is a GUI feature and the GUI is
+developed against Vulkan; the CUDA build has to keep compiling and training
+exactly as before, and nothing here may cost it a kernel. That turned out to
+cost nothing to honour — see "Where the work happens" below, which is why
+none of this needed a device kernel on either backend.
+
+Phases 1 and 2 of the order of work below are **built**; what shipped is
+recorded at the end of each section.
+
 ## The mistake to avoid
 
 The request reads as seven features. Built as seven features it is seven tool
@@ -59,11 +68,10 @@ and replay from the nearest one.
 
 ### `Selection` — a set, owned by the document and not by any tool
 
-A bit per element, device-resident for the splat and mesh documents, with a
-host mirror pulled only when something needs a count or a histogram. Make it a
-`uint8` weight rather than a bit from the start: a soft edge costs the same
-memory as a hard one, and the training-region-of-interest feature below wants a
-weight anyway.
+A `uint8` weight per element rather than a bit: a soft edge costs the same
+memory as a hard one, and the training-region-of-interest feature below wants
+a weight anyway. It lives on the host, beside the loaded original, because
+that is where the tools that write it run (see "Where the work happens").
 
 Every tool writes into the *same* selection through a combine mode — replace,
 add, subtract, intersect — bound to the usual modifiers. That single decision
@@ -97,19 +105,24 @@ file, which is what makes the whole thing testable without a window.
 ## Making a set
 
 **A 2D region, extruded.** Box, ellipse, lasso, polygon and brush are one
-thing: a screen-space stencil. The tool rasterizes its shape into a bitmask on
-the CPU — that part is cheap and different per shape — and one kernel does the
-rest, projecting each element with the current view matrix and testing the
-bitmask. One kernel, every shape, both backends.
+thing: a screen-space stencil. The tool rasterizes its shape into a bitmask —
+that part is cheap and different per shape — and one loop does the rest,
+projecting each element with the current view and testing the bitmask. One
+loop, every shape, every document.
 
-Two modifiers make it usable rather than a demo: *front-most only*, against the
-depth the render already produced, and a depth range taken from two clicks.
-Without them, a lasso around a chair also takes the wall behind it, which is
-the first thing anyone tries.
+Two modifiers make it usable rather than a demo: *front-most only* and a depth
+range. Without them, a lasso around a chair also takes the wall behind it,
+which is the first thing anyone tries. The depth the front-most test needs is
+NOT the render's: the render's depth buffer is not read back, and a z-buffer
+built from the elements themselves — one pass, 512 px on the long edge, each
+element splatted at its own projected radius — answers the same question for
+Gaussians, points and mesh vertices alike, and is cached per camera so
+dragging the depth range re-trims the last shape without rebuilding it.
 
 A splat is not a point, so the test needs a policy: by centre, or by any part
-of the projected extent. The projection kernel already computes that extent;
-offer both and default to the centre.
+of the projected extent. Offer both; a Gaussian document defaults to the
+extent, because the background splats people most want to catch are the large
+ones whose centre is somewhere else entirely.
 
 **3D primitives.** An oriented box with a gizmo, a sphere, a half-space from a
 plane. These are what "crop the scene" actually means, and unlike a screen
@@ -234,6 +247,19 @@ timeline strip, "key the current view", a curve drawn in the viewport, a scrub
 after the model is retrained. The turntable and orbit presets are the same
 object with the keyframes generated.
 
+## Saving an edited sparse reconstruction
+
+Settled when phase 1 was built, because the alternative is a format matrix
+that grows with every parser: **only COLMAP and Nerfstudio are written**, and
+the write is a ROW FILTER over the file the points were read from, so a COLMAP
+track and a Nerfstudio frame list survive an edit untouched. Each replaced
+file is copied to `<name>.orig` first, once.
+
+A Metashape export is not ours to rewrite, so the edit lands beside it as a
+Nerfstudio `transforms.json` plus its point PLY — which `parse_dataset` reads
+first from then on, so the edited version is what everything downstream
+sees. `src/data/SparseEdit.h`.
+
 ## Splitting and merging a sparse reconstruction
 
 `src/sfm/map/Merge.h` was written for this: `alignReconstructions`, `mergeInto`
@@ -266,25 +292,54 @@ out of memory.
 
 ## Where the code goes
 
+What phases 1 and 2 put there:
+
 ```
 src/app/gui/edit/
-  EditDoc.{h,cpp}     the document, the op list, undo/redo
-  Selection.{h,cpp}   the mask, combine modes, named groups
-  Tool.h              the tool interface and the active-tool stack
-  tools/              SelectBox, SelectLasso, SelectBrush, Transform, Pen, ...
-  Ops.{h,cpp}         delete, transform, recolour, assign to group, ...
+  EditDoc.{h,cpp}      the document, the op list, undo/redo, soft delete
+  SplatDoc.{h,cpp}     ... over a splat PLY in an engine scene slot
+  PointsDoc.{h,cpp}    ... over a sparse reconstruction
+  MeshDoc.{h,cpp}      ... over a triangle mesh (an element is a vertex)
+  Selection.{h,cpp}    the weights, the combine modes, the RLE the history
+                         stores a selection with
+  SelectShape.{h,cpp}  the projection, the stencil, the occlusion buffer
+  ElementGrid.{h,cpp}  the uniform grid: grow/shrink and connected components
+  EditTool.{h,cpp}     the modal state machine over viewport input
+  EditSession.{h,cpp}  what a screen embeds; EditPanel.cpp is its panel
+src/app/gui/ViewportInput.h   the seam ViewportPanel offers a tool
+src/data/SparseEdit.{h,cpp}   writing an edited reconstruction back out
+```
+
+Still to come, as the later phases arrive:
+
+```
+src/app/gui/edit/
   Gizmo.{h,cpp}
   Attributes.{h,cpp}  the per-element scalar table + the brushable histogram
   Trajectory.{h,cpp}
-src/engine/EngineEdit.cpp    engine_select_*, engine_apply_transform, ...
-src/shaders/select.slang     the stencil test and the attribute reduction
 ```
+
+## Where the work happens
+
+The original plan put the selection test in a Slang kernel on both backends.
+It is on the **host**, under OpenMP, and that is the better answer: projecting
+every element is a few tens of milliseconds over a million of them, it runs
+once per committed gesture rather than per frame, it is the same code for
+Gaussians, sparse points and mesh vertices, and it needs neither a kernel nor
+a parity test nor a second implementation per backend. A transform of a subset
+will want the same treatment.
+
+The only device traffic an edit makes is `engine_scene_update`, a memcpy into
+one attribute array of a viewer scene slot: a delete rides on `opacities`
+(below the projection's `ALPHA_THRESHOLD`, so a deleted Gaussian is culled
+before it reaches a tile) and the selection tint rides on `features_dc`. Both
+are 4 and 12 bytes per element, which is what makes a brush stroke over a
+million Gaussians feel like a brush stroke. The mesh and sparse documents
+never touch the device at all: they rebuild `PreviewRenderer`'s GL buffers.
 
 Rules already in force that this work has to obey, listed because each one is
 cheaper to follow than to retrofit:
 
-- Selection and transform kernels are **Slang, on both backends**. Nothing here
-  may become CUDA-only (`AGENTS.md`, "the two-backend rule").
 - Every visible string is a `Msg`: a tool name, a status hint, and an op name
   as it appears in the undo menu — which means it is a sentence with a `{0}`,
   never fragments concatenated.
@@ -305,8 +360,16 @@ widening it.
    box-select tool, "delete selection", "save as" — on the splat document in
    the viewer screen only. This is already the most-asked-for cleanup
    workflow, and everything later is an addition to a working thing.
+   *Built*, and over all three 3D documents rather than one: the seam turned
+   out to cost nothing to widen, and the sparse cloud is the one people most
+   want to clean, because a floater removed before a run is one the run never
+   fits to.
 2. **More ways to select.** Lasso, polygon, brush, invert, grow/shrink, the
    depth modifiers. Nothing else changes.
+   *Built*, plus the ellipse, the connected-piece pick and "select floaters"
+   — those last two are the connected-components machinery of phase 3, pulled
+   forward because they share the grid grow/shrink already needed and because
+   segmenting a messy model is what the whole feature is for.
 3. **The histogram panel and named groups.**
 4. **Transform.** The modal operator, then the gizmo, then SH rotation, then
    baking a placement on save.
@@ -336,8 +399,12 @@ widening it.
   question.
 - **Mouse conventions.** The viewport already orbits on the left button, which
   collides with Blender's "left confirms, right cancels" in a modal operator.
-  Settle it once: with no tool active navigation keeps its buttons, and an
-  active tool owns both buttons for its whole lifetime.
+  Settled: an active tool owns the LEFT button for its whole lifetime, and the
+  other two stay with navigation — middle orbits, right pans — so a tool is
+  never a dead end you have to leave to turn the model. With no tool active
+  the panel navigates exactly as it always did. The letter keys go the same
+  way: a tool owns them, so `WASDQE` fly navigation is off while one is
+  active and the arrow keys and the gamepad are not.
 - **Discoverability.** A modal grammar is invisible. A status strip naming the
   active tool and its two or three keys is not decoration — for this style of
   UI it is the feature.

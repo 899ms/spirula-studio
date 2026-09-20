@@ -6,6 +6,7 @@
 #include "engine/EngineInternal.h"
 #include "engine/EngineState.h"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -127,6 +128,48 @@ void engine_scene_set_color_space(int slot, bool enabled, int transfer,
     s.cs_is_linear = is_linear;
     s.cs_matrix = std::move(color_matrix);
     s.cs_gen++;
+}
+
+
+namespace {
+
+// Bytes per element of a slot attribute, and where it lives, by the name
+// engine_scene_update takes. Returns null for a name that is not one.
+void* scene_field(Scene& s, const std::string& field, size_t& elem_bytes,
+                  int64_t& count) {
+    count = s.max_num_splats;
+    if (field == "means")       { elem_bytes = sizeof(float3); return s.world.means.data_ptr(); }
+    if (field == "quats")       { elem_bytes = sizeof(float4); return s.world.quats.data_ptr(); }
+    if (field == "scales")      { elem_bytes = sizeof(float3); return s.world.scales.data_ptr(); }
+    if (field == "opacities")   { elem_bytes = sizeof(float);  return s.world.opacities.data_ptr(); }
+    if (field == "features_dc") { elem_bytes = sizeof(float3); return s.world.features_dc.data_ptr(); }
+    if (field == "features_sh") {
+        elem_bytes = sizeof(float3) * (size_t)std::max(s.num_sh, 0);
+        return s.world.features_sh.data_ptr();
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+
+void engine_scene_update(int slot, const std::string& field,
+                         TorchTensorView data) {
+    Scene& s = at(slot);
+    if (!s.loaded)
+        throw std::runtime_error("engine_scene_update: slot holds no model");
+    size_t elem_bytes = 0;
+    int64_t count = 0;
+    void* dst = scene_field(s, field, elem_bytes, count);
+    if (!dst)
+        throw std::runtime_error("engine_scene_update: no such field: " + field);
+    if (std::get<0>(data) == 0 || elem_bytes == 0) return;
+    if (std::get<2>(data)[0] != count)
+        throw std::runtime_error("engine_scene_update: " + field +
+                                 " row count does not match the slot");
+    backend::memcpy_sync(dst, (void*)std::get<0>(data),
+                         (size_t)count * elem_bytes,
+                         backend::MemcpyKind::HostToDevice);
 }
 
 

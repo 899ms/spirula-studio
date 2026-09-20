@@ -7,6 +7,7 @@
 #include "checkpoint/SplatPly.h"
 #include "config/TrainConfig.h"
 #include "data/DatasetParser.h"
+#include "data/SparseEdit.h"
 #include "engine/Engine.h"
 #include "i18n/catalog/Gui.h"
 #include "app/TrainerCore.h"
@@ -133,6 +134,21 @@ ViewerRenderConfig SplatViewer::render_config() {
     std::lock_guard<std::mutex> lk(_mu);
     return _cfg;
 }
+std::string SplatViewer::dataset_dir() {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _dataset_dir;
+}
+
+// normalized = (model - centre) / unit: the inverse of the similarity
+// render_config() hands the render worker.
+void SplatViewer::to_view_frame(float out[12]) const {
+    const float inv = _unit > 1e-20f ? 1.0f / _unit : 1.0f;
+    const float t[12] = {inv, 0, 0, -inv * _center[0],
+                         0, inv, 0, -inv * _center[1],
+                         0, 0, inv, -inv * _center[2]};
+    for (int i = 0; i < 12; i++) out[i] = t[i];
+}
+
 std::string SplatViewer::scene_key() {
     std::lock_guard<std::mutex> lk(_mu);
     return _file + ":" + std::to_string(_num_splats.load());
@@ -260,6 +276,47 @@ void SplatViewer::run(std::string path) {
             _sh_degree = 0;
             log(format(msg::viewer_loaded_mesh,
                        {(long long)nv, (long long)nf}));
+            _state = State::Ready;
+            return;
+        }
+
+        // A dataset FOLDER is a thing to look at and to clean up, and it is
+        // the only form a sparse reconstruction comes in. Probed before
+        // find_splat_ply, which reads a directory as a run.
+        std::error_code dir_ec;
+        if (fs::is_directory(path, dir_ec) &&
+            spirula::sparse_format_of(path) != spirula::SparseFormat::None) {
+            log(format(msg::viewer_reading, {path}));
+            DatasetParserConfig dcfg;
+            // Poses and points, not pixels: a reconstruction is worth opening
+            // even when its images are somewhere else.
+            dcfg.require_image_files = false;
+            ParsedDataset ds = parse_dataset(path, dcfg, "");
+            PostSplitCameras post = bake_post_split(ds, false, false);
+            const int64_t n = ds.points.num();
+            float center[3] = {0, 0, 0};
+            float unit = ds.train_frame_scale;
+            {
+                double A[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+                for (int i = 0; i < 16; i++) A[i] = ds.train_to_normalized[i];
+                center[0] = (float)A[3];
+                center[1] = (float)A[7];
+                center[2] = (float)A[11];
+                unit = std::sqrt((float)(A[0]*A[0] + A[4]*A[4] + A[8]*A[8]));
+                if (!(unit > 1e-20f)) unit = 1.0f;
+            }
+            set_frame(center, unit);
+            {
+                std::lock_guard<std::mutex> lk(_mu);
+                _points = std::move(ds);
+                _post = std::move(post);
+                _dataset_dir = path;
+                _file = path;
+            }
+            _kind = Kind::Points;
+            _num_splats = n;
+            _sh_degree = 0;
+            log(format(msg::viewer_loaded_points, {(long long)n}));
             _state = State::Ready;
             return;
         }

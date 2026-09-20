@@ -651,6 +651,12 @@ void engine_scene_set_color_space(int slot, bool enabled, int transfer,
                                   bool is_linear,
                                   std::vector<float> color_matrix);
 
+// Overwrite one attribute array of a loaded slot in place, at the shape
+// engine_scene_set_data_3dgs uploaded it with. `field` names one of means /
+// quats / scales / opacities / features_dc / features_sh.
+void engine_scene_update(int slot, const std::string& field,
+                         TorchTensorView data);
+
 // Bind `slot` to the world buffers. Throws when the slot holds nothing.
 void engine_scene_activate(int slot);
 bool engine_scene_loaded(int slot);

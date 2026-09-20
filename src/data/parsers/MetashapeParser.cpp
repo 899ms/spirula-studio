@@ -250,11 +250,11 @@ std::vector<std::string> split_tokens(const std::string& text) {
 
 
 // ===========================================================================
-// parse_metashape_dataset
+// metashape_meta / parse_metashape_dataset
 // ===========================================================================
 
-ParsedDataset parse_metashape_dataset(const std::string& dataset_dir,
-                                      const DatasetParserConfig& cfg) {
+JsonValue metashape_meta(const std::string& dataset_dir,
+                         const DatasetParserConfig& cfg) {
     fs::path root(dataset_dir);
     if (!fs::is_directory(root))
         throw std::runtime_error("MetashapeParser: dataset dir " + dataset_dir +
@@ -618,5 +618,11 @@ ParsedDataset parse_metashape_dataset(const std::string& dataset_dir,
                 format(dmsg::final_frames,
                        {(long long)meta.find("frames")->arr.size()}).c_str());
 
-    return parse_nerfstudio_meta(meta, dataset_dir, cfg);
+    return meta;
+}
+
+
+ParsedDataset parse_metashape_dataset(const std::string& dataset_dir,
+                                      const DatasetParserConfig& cfg) {
+    return parse_nerfstudio_meta(metashape_meta(dataset_dir, cfg), dataset_dir, cfg);
 }

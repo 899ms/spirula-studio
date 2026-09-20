@@ -19,6 +19,7 @@
 #include "i18n/catalog/Brand.h"
 #include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/Geometry.h"
+#include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
 #include "i18n/catalog/Train.h"
 #include "i18n/catalog/TrainFields.h"
@@ -56,6 +57,7 @@
 namespace fs = std::filesystem;
 namespace i18n = spirula::i18n;
 namespace msg = spirula::i18n::msg::gui;
+namespace emsg = spirula::i18n::msg::edit;
 namespace fld = spirula::i18n::msg::field;
 namespace dmsg = spirula::i18n::msg::dataset;
 namespace gmsg = spirula::i18n::msg::geometry;
@@ -187,6 +189,18 @@ GuiApp::GuiApp() {
         open_pick(PickAction::AddSplatFile, msg::viewer_pick_file.get(),
                   FileDialog::Mode::File, kViewableExtensions);
     });
+    _compare.edit().set_pick_save(
+        [this](int target, const std::string& ext, bool folder,
+               const std::string& suggested) {
+            _edit_save_target = target;
+            open_pick(folder ? PickAction::EditSaveFolder
+                             : PickAction::EditSaveFile,
+                      emsg::save_pick_title.get(),
+                      folder ? FileDialog::Mode::Folder : FileDialog::Mode::Save,
+                      ext.empty() ? std::vector<std::string>{}
+                                  : std::vector<std::string>{ext},
+                      "", false, suggested);
+        });
 }
 
 GuiApp::~GuiApp() = default;
@@ -1043,6 +1057,10 @@ void GuiApp::open_splat(std::string path) {
     detach_session_views();
     _runner.note_engine_taken();
     _compare.open(path);
+    if (_edit_after_open) {
+        _compare.edit_first_when_ready();
+        _edit_after_open = false;
+    }
     add_model_recent(path);
     remember_dir("model", path);
     save_settings();
@@ -1070,7 +1088,12 @@ void GuiApp::request_open_splat(std::string path) {
         _open_confirm = true;
         return;
     }
-    if (native_work_busy()) return;
+    if (native_work_busy()) {
+        // The request is dropped, so the intent behind it goes with it: a
+        // model opened later must not arrive in edit mode by surprise.
+        _edit_after_open = false;
+        return;
+    }
     open_splat(std::move(path));
 }
 
@@ -2131,7 +2154,10 @@ const char* GuiApp::dir_key(PickAction a, FileDialog::Mode m) {
             return m == FileDialog::Mode::File ? "video" : "photos";
         case PickAction::SplatFile:
         case PickAction::AddSplatFile:
+        case PickAction::SplatFolder:
         case PickAction::BatchModel:
+        case PickAction::EditSaveFile:
+        case PickAction::EditSaveFolder:
         case PickAction::MeshSource:        return "model";
         case PickAction::Workspace:
         case PickAction::OutputPrefix:
@@ -2160,7 +2186,8 @@ void GuiApp::remember_dir(const std::string& key, const std::string& path) {
 void GuiApp::open_pick(PickAction a, const std::string& title,
                        FileDialog::Mode mode,
                        const std::vector<std::string>& extensions,
-                       const std::string& start_dir, bool multi) {
+                       const std::string& start_dir, bool multi,
+                       const std::string& suggested_name) {
     _pick = a;
     _pick_key = dir_key(a, mode);
     std::string dir = start_dir;
@@ -2168,7 +2195,7 @@ void GuiApp::open_pick(PickAction a, const std::string& title,
         auto it = _dialog_dirs.find(_pick_key);
         if (it != _dialog_dirs.end()) dir = it->second;
     }
-    _dialog.open(title, mode, extensions, dir, multi);
+    _dialog.open(title, mode, extensions, dir, multi, suggested_name);
 }
 
 void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
@@ -2207,6 +2234,13 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
             break;
         case PickAction::AddSplatFile:
             add_splat(path);
+            break;
+        case PickAction::SplatFolder:
+            request_open_splat(path);
+            break;
+        case PickAction::EditSaveFile:
+        case PickAction::EditSaveFolder:
+            _compare.edit().save_to(_edit_save_target, path);
             break;
         case PickAction::MeshSource:
             set_mesh_source(path);
@@ -2761,6 +2795,15 @@ void GuiApp::draw_home() {
                   FileDialog::Mode::File, kViewableExtensions);
     }
     ui::help_on_hover(msg::home_open_splat_help);
+
+    // A reconstruction is a folder, so the file picker above cannot offer
+    // one -- and cleaning its sparse cloud is a thing to do BEFORE training,
+    // which is why it is on this screen rather than only inside the viewer.
+    if (ui::Button(emsg::open_recon, ImVec2(-1, bh))) {
+        open_pick(PickAction::SplatFolder, emsg::pick_recon.get(),
+                  FileDialog::Mode::Folder);
+    }
+    ui::help_on_hover(emsg::open_recon_help);
 
     if (ui::Button(msg::home_make_mesh, ImVec2(-1, bh))) _screen = Screen::Mesh;
     ui::help_on_hover(msg::home_make_mesh_help);
@@ -5816,6 +5859,14 @@ void GuiApp::draw_dataset_form(float height, bool running) {
                              /*keep_log=*/true);
             }
         }
+        // Cleaning the seed cloud belongs here rather than after training: a
+        // floater removed now is one the run never fits to.
+        ImGui::SameLine();
+        if (ui::Button(emsg::sparse_edit)) {
+            _edit_after_open = true;
+            request_open_splat(st.dir);
+        }
+        ui::help_on_hover(emsg::sparse_edit_help);
     } else if (st.failed) {
         ui::TextColoredWrapped(kErr, dmsg::failed, {st.err});
     } else if (st.cancelled) {
@@ -6063,19 +6114,46 @@ void GuiApp::draw_train() {
 // ===========================================================================
 
 void GuiApp::draw_viewer() {
-    if (ui::Button(msg::back_home)) request_go_home();
+    // Every route off this screen throws the open document away, so each one
+    // goes past the same question first.
+    if (ui::Button(msg::back_home))
+        _compare.confirm_discard_edits([this] { request_go_home(); });
     ImGui::SameLine();
     if (ui::Button(msg::viewer_open_another)) {
-        open_pick(PickAction::SplatFile, msg::viewer_pick_file.get(),
-                  FileDialog::Mode::File, kViewableExtensions);
+        _compare.confirm_discard_edits([this] {
+            open_pick(PickAction::SplatFile, msg::viewer_pick_file.get(),
+                      FileDialog::Mode::File, kViewableExtensions);
+        });
     }
+    ImGui::SameLine();
+    // A reconstruction is a FOLDER, so it needs a door of its own: the file
+    // picker cannot offer one and the point of opening it here is to clean
+    // its sparse cloud up before anything trains on it.
+    if (ui::Button(emsg::open_recon)) {
+        _compare.confirm_discard_edits([this] {
+            open_pick(PickAction::SplatFolder, emsg::pick_recon.get(),
+                      FileDialog::Mode::Folder);
+        });
+    }
+    ui::help_on_hover(emsg::open_recon_help);
     ImGui::SameLine();
     _compare.set_recents(_model_recents);
     _compare.draw_toolbar();
 
     const float log_h = log_height(ImGui::GetContentRegionAvail().y);
     ImGui::BeginChild("##viewer", ImVec2(0, body_height(log_h)));
-    _compare.draw(0.0f);
+    if (_compare.editing() >= 0 && _compare.edit().active()) {
+        const float w = px(kEditPanelW);
+        ImGui::BeginChild("##editpanel", ImVec2(w, 0), ImGuiChildFlags_Borders);
+        _compare.edit().draw_panel();
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##editpanes", ImVec2(0, 0));
+        _compare.draw(0.0f);
+        ImGui::EndChild();
+    } else {
+        _compare.draw(0.0f);
+    }
     ImGui::EndChild();
     draw_log_panel(log_h);
 }
@@ -8485,6 +8563,7 @@ void GuiApp::draw_confirm_modal() {
         if (ui::Button(msg::keep_training, ImVec2(bw, 0))) {
             _pending = Pending::None;
             _pending_path.clear();
+            _edit_after_open = false;
             _confirm_shown = false;
             resume();
             ImGui::CloseCurrentPopup();
@@ -8495,6 +8574,7 @@ void GuiApp::draw_confirm_modal() {
         // Dismissed (Esc / click-away): treat as "keep training".
         _pending = Pending::None;
         _pending_path.clear();
+        _edit_after_open = false;
         _confirm_shown = false;
         resume();
     }

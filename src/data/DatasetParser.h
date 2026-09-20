@@ -268,6 +268,19 @@ ParsedDataset parse_nerfstudio_meta(const JsonValue& meta,
                                     const std::string& dataset_dir,
                                     const DatasetParserConfig& cfg);
 
+// The Metashape front-end's half: the XML read as that same meta. Exposed so
+// an edited reconstruction can be written out as the Nerfstudio dataset the
+// Metashape path already turns it into, rather than a second conversion.
+JsonValue metashape_meta(const std::string& dataset_dir,
+                         const DatasetParserConfig& cfg);
+
+// Which directory under `dataset_dir` holds the COLMAP model the parser would
+// read, "" when none does; `points_text` reports the points3D spelling. One
+// answer, so an editor writes back over the model the trainer reads.
+std::string find_colmap_model(const std::string& dataset_dir,
+                              const std::string& recon_dir_hint,
+                              bool* points_text = nullptr);
+
 // Auto-detect (format = "") or dispatch ("colmap" / "nerfstudio" /
 // "metashape").
 ParsedDataset parse_dataset(const std::string& dataset_dir,

@@ -43,10 +43,12 @@ std::string lower(std::string s) {
 
 void FileDialog::open(const std::string& title, Mode mode,
                       const std::vector<std::string>& extensions,
-                      const std::string& start_dir, bool multi_select) {
+                      const std::string& start_dir, bool multi_select,
+                      const std::string& suggested_name) {
     _title = title;
     _mode = mode;
     _multi = multi_select && mode == Mode::File;
+    _save_name = suggested_name;
     _extensions = extensions;
     std::error_code ec;
     if (!start_dir.empty() && fs::is_directory(start_dir, ec))
@@ -60,10 +62,12 @@ void FileDialog::open(const std::string& title, Mode mode,
         // A second request while one is up is a repeated click, not a reason
         // to put the fallback browser on top of the system picker.
         if (_native.busy()) return;
-        if (_native.open(title,
-                         mode == Mode::Folder ? NativeDialog::Mode::Folder
-                                              : NativeDialog::Mode::File,
-                         extensions, _cwd, _multi))
+        const NativeDialog::Mode nm = mode == Mode::Folder
+                                          ? NativeDialog::Mode::Folder
+                                      : mode == Mode::Save
+                                          ? NativeDialog::Mode::Save
+                                          : NativeDialog::Mode::File;
+        if (_native.open(title, nm, extensions, _cwd, _multi, _save_name))
             return;
     }
     _want_open = true;
@@ -181,11 +185,20 @@ bool FileDialog::draw() {
             } else if (_mode == Mode::File && fs::is_regular_file(_path_edit, ec)) {
                 _results.assign(1, fs::absolute(_path_edit, ec).string());
                 confirmed = true;
+            } else if (_mode == Mode::Save) {
+                const fs::path p = fs::absolute(_path_edit, ec);
+                if (fs::is_directory(p.parent_path(), ec)) {
+                    _cwd = p.parent_path().string();
+                    _save_name = p.filename().string();
+                    _selected.clear();
+                    refresh();
+                }
             }
         }
 
         // ---- listing ----
         float footer = ImGui::GetFrameHeightWithSpacing() + px(8.0f);
+        if (_mode == Mode::Save) footer += ImGui::GetFrameHeightWithSpacing();
         if (ImGui::BeginChild("##list", ImVec2(0, -footer), ImGuiChildFlags_Borders)) {
             for (const auto& e : _entries) {
                 const bool sel = is_selected(e.name);
@@ -195,6 +208,7 @@ bool FileDialog::draw() {
                 if (ui::SelectableRaw(label.c_str(), sel,
                                       ImGuiSelectableFlags_AllowDoubleClick)) {
                     if (e.is_dir) _selected.assign(1, e.name);
+                    else if (_mode == Mode::Save) _save_name = e.name;
                     else toggle(e.name);
                     if (ImGui::IsMouseDoubleClicked(0)) {
                         fs::path full = fs::path(_cwd) / e.name;
@@ -216,7 +230,38 @@ bool FileDialog::draw() {
 
         // ---- footer ----
         bool have_sel = !_selected.empty();
-        if (_mode == Mode::Folder) {
+        if (_mode == Mode::Save) {
+            // The name a save writes under, appended with the first extension
+            // when one was not typed -- "chair" and "chair.ply" mean the same
+            // thing to everyone but the file system.
+            std::string name = _save_name;
+            if (!name.empty() && !_extensions.empty() &&
+                lower(fs::path(name).extension().string()) != _extensions[0])
+                name += _extensions[0];
+            const bool exists = !name.empty() &&
+                                fs::exists(fs::path(_cwd) / name, ec);
+            ImGui::SetNextItemWidth(px(280.0f));
+            if (ui::InputTextRaw("##savename", &_save_name,
+                                 ImGuiInputTextFlags_EnterReturnsTrue) &&
+                !name.empty()) {
+                _results.assign(1, (fs::path(_cwd) / name).string());
+                confirmed = true;
+            }
+            ImGui::SameLine();
+            ui::TextDisabled(msg::fd_file_name);
+            ImGui::SameLine();
+            ImGui::BeginDisabled(name.empty());
+            if (ui::Button(msg::fd_save_here) && !name.empty()) {
+                _results.assign(1, (fs::path(_cwd) / name).string());
+                confirmed = true;
+            }
+            ImGui::EndDisabled();
+            if (exists) {
+                ImGui::SameLine();
+                ui::TextColored(ImVec4(1.0f, 0.78f, 0.35f, 1.0f),
+                                msg::fd_will_replace);
+            }
+        } else if (_mode == Mode::Folder) {
             if (have_sel) {
                 if (ui::Button(msg::fd_select_highlighted)) {
                     _results.assign(1, (fs::path(_cwd) / _selected[0]).string());

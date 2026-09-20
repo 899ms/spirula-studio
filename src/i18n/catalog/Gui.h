@@ -3256,6 +3256,33 @@ SS_MSG(fd_select_files,
     RU("Выбрать файлы ({0})"),
     TR("Dosyaları seç ({0})"));
 
+SS_MSG(fd_save_here,
+    EN("Save"),          JA("保存"),          ZH_HANS("保存"),     ZH_HANT("儲存"),
+    KO("저장"),           DE("Speichern"),    FR("Enregistrer"),
+    ES("Guardar"),       PT("Salvar"),        IT("Salva"),
+    NL("Opslaan"),       RU("Сохранить"),     TR("Kaydet"));
+
+SS_MSG(fd_file_name,
+    EN("File name"),     JA("ファイル名"),     ZH_HANS("文件名"),   ZH_HANT("檔案名稱"),
+    KO("파일 이름"),      DE("Dateiname"),    FR("Nom du fichier"),
+    ES("Nombre del archivo"), PT("Nome do arquivo"), IT("Nome del file"),
+    NL("Bestandsnaam"),  RU("Имя файла"),     TR("Dosya adı"));
+
+SS_MSG(fd_will_replace,
+    EN("A file of that name is there and will be replaced."),
+    JA("同じ名前のファイルがあり、置き換えられます。"),
+    ZH_HANS("同名文件已存在，将被替换。"),
+    ZH_HANT("同名檔案已存在，將被取代。"),
+    KO("같은 이름의 파일이 있어 덮어씁니다."),
+    DE("Eine Datei dieses Namens ist vorhanden und wird ersetzt."),
+    FR("Un fichier de ce nom existe et sera remplacé."),
+    ES("Ya hay un archivo con ese nombre y será reemplazado."),
+    PT("Já existe um arquivo com esse nome e ele será substituído."),
+    IT("Esiste già un file con quel nome e verrà sostituito."),
+    NL("Er is al een bestand met die naam; het wordt vervangen."),
+    RU("Файл с таким именем есть и будет заменён."),
+    TR("Bu adda bir dosya var ve değiştirilecek."));
+
 SS_MSG(fd_multi_hint,
     EN("(click several to add them all)"),
     JA("（複数クリックするとまとめて追加できます）"),

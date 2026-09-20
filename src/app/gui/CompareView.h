@@ -10,7 +10,11 @@
 
 #include "app/gui/SplatViewer.h"
 #include "app/gui/ViewportPanel.h"
+#include "app/gui/edit/EditSession.h"
 #include "i18n/Message.h"
+
+#include <atomic>
+#include <thread>
 
 #include <functional>
 #include <memory>
@@ -47,6 +51,23 @@ public:
     void set_recents(const std::vector<std::string>& r) { _recents = r; }
     // Called when the user asks for a file picker (the owner owns the dialog).
     void set_pick_file(std::function<void()> f) { _pick_file = std::move(f); }
+
+    // ---- editing (docs/notes/gui-editing-plan.md) ----
+    // Open the pane's model for editing, or give it back. One pane at a time:
+    // the tools own that viewport's left button while they are there.
+    void begin_edit(int index);
+    // ... as soon as the first model's loader finishes, which is how a screen
+    // hands a model it has only just asked for straight to the editor.
+    void edit_first_when_ready() { _edit_when_ready = true; }
+    void end_edit();
+    int editing() const { return _edit_index; }
+    bool edit_busy() const { return _edit_loading.load(); }
+    EditSession& edit() { return _edit; }
+    // True while an edit has changes that have not been written out.
+    bool edit_dirty() const;
+    // Ask before those changes are thrown away; `then` runs on a yes. With
+    // nothing unsaved it runs straight away.
+    void confirm_discard_edits(std::function<void()> then);
 
     // Attach panels whose loaders have finished and refresh the placements.
     // Once a frame, before draw().
@@ -108,6 +129,20 @@ private:
     // Tallest control block across the panes on the last draw; the shorter
     // ones are padded to it so every image comes out the same size.
     float _controls_h = 0.0f;
+
+    // Reading a model a second time is what editing costs: the viewer keeps
+    // nothing host-side, and a hundred-megabyte PLY must not block a frame.
+    void finish_edit_load();
+
+    EditSession _edit;
+    int _edit_index = -1;
+    bool _edit_when_ready = false;
+    std::function<void()> _discard_then;
+    bool _ask_discard = false;
+    std::thread _edit_worker;
+    std::atomic<bool> _edit_loading{false};
+    std::unique_ptr<EditDoc> _edit_pending;
+    std::string _edit_error;
 
     std::vector<std::string> _recents;
     std::function<void()> _pick_file;
