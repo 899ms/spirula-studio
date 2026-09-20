@@ -35,6 +35,59 @@ uint64_t mix(uint64_t x) {
     return x ^ (x >> 31);
 }
 
+// Lock-free union-find: path halving on reads and one compare-exchange per
+// link, always pointing the larger index at the smaller so the order two
+// threads reach a pair in cannot matter.
+class UnionFind {
+public:
+    explicit UnionFind(int64_t n)
+        : _p(std::make_unique<std::atomic<int32_t>[]>((size_t)n)) {
+        for (int64_t i = 0; i < n; i++)
+            _p[(size_t)i].store((int32_t)i, std::memory_order_relaxed);
+    }
+    int32_t find(int32_t x) const {
+        while (true) {
+            int32_t p = _p[(size_t)x].load(std::memory_order_relaxed);
+            if (p == x) return x;
+            const int32_t g = _p[(size_t)p].load(std::memory_order_relaxed);
+            _p[(size_t)x].compare_exchange_weak(p, g, std::memory_order_relaxed);
+            x = g;
+        }
+    }
+    void unite(int32_t a, int32_t b) {
+        while (true) {
+            a = find(a);
+            b = find(b);
+            if (a == b) return;
+            if (a > b) std::swap(a, b);
+            int32_t expect = b;
+            if (_p[(size_t)b].compare_exchange_weak(expect, a,
+                                                    std::memory_order_relaxed))
+                return;
+        }
+    }
+
+private:
+    std::unique_ptr<std::atomic<int32_t>[]> _p;
+};
+
+// Roots to dense labels, in first-seen order.
+void label_roots(const UnionFind& uf, const uint8_t* alive, int64_t n,
+                 std::vector<int32_t>& label, std::vector<int64_t>& sizes) {
+    std::vector<int32_t> remap((size_t)n, -1);
+    for (int64_t i = 0; i < n; i++) {
+        if (alive && !alive[i]) continue;
+        const int32_t root = uf.find((int32_t)i);
+        int32_t& l = remap[(size_t)root];
+        if (l < 0) {
+            l = (int32_t)sizes.size();
+            sizes.push_back(0);
+        }
+        label[(size_t)i] = l;
+        sizes[(size_t)l]++;
+    }
+}
+
 uint64_t table_size_for(int64_t n) {
     uint64_t m = 16;
     while (m < (uint64_t)std::max<int64_t>(n, 1) * 2) m <<= 1;
@@ -222,79 +275,75 @@ void ElementGrid::shrink(std::vector<uint8_t>& sel, float radius,
 
 void ElementGrid::components(float radius, const uint8_t* alive, int64_t n,
                              std::vector<int32_t>& label,
-                             std::vector<int64_t>& sizes) const {
+                             std::vector<int64_t>& sizes, const float* radii,
+                             float scale) const {
     label.assign((size_t)n, -1);
     sizes.clear();
     if (!built() || n != _n) return;
 
     const float r2 = radius * radius;
-    const int reach = std::max(1, (int)std::ceil(radius / _cell));
-    // Lock-free union-find: path halving on reads and one compare-exchange
-    // per link, always pointing the larger index at the smaller so the order
-    // two threads reach a pair in cannot matter.
-    auto parent = std::make_unique<std::atomic<int32_t>[]>((size_t)_n);
-    for (int64_t i = 0; i < _n; i++)
-        parent[(size_t)i].store((int32_t)i, std::memory_order_relaxed);
-    auto find = [&parent](int32_t x) {
-        while (true) {
-            int32_t p = parent[(size_t)x].load(std::memory_order_relaxed);
-            if (p == x) return x;
-            const int32_t g = parent[(size_t)p].load(std::memory_order_relaxed);
-            parent[(size_t)x].compare_exchange_weak(p, g,
-                                                    std::memory_order_relaxed);
-            x = g;
-        }
-    };
-    auto unite = [&](int32_t a, int32_t b) {
-        while (true) {
-            a = find(a);
-            b = find(b);
-            if (a == b) return;
-            if (a > b) std::swap(a, b);
-            int32_t expect = b;
-            if (parent[(size_t)b].compare_exchange_weak(
-                    expect, a, std::memory_order_relaxed))
-                return;
-        }
-    };
+    const int base_reach = std::max(1, (int)std::ceil(radius / _cell));
+    UnionFind uf(_n);
 
-    // Half the neighbourhood: an unordered pair only has to be found once, so
-    // the offsets behind this cell in scan order are already accounted for.
+    // With no per-element radius the pair test is symmetric, so half the
+    // neighbourhood covers every pair once. With one it is not: the large
+    // element has to reach the small one, and only its own walk can.
+    const int32_t back = radii ? -1 : 0;
 #pragma omp parallel for schedule(dynamic, 4096)
     for (int64_t i = 0; i < _n; i++) {
         if (alive && !alive[i]) continue;
         const float* p = _pos + i * 3;
+        const float ri = radii ? radii[i] : 0.0f;
+        const int reach = radii
+            ? std::min(std::max(base_reach,
+                                (int)std::ceil(2.0f * scale * ri / _cell)), 8)
+            : base_reach;
         int32_t c[3];
         coords_of(p, c);
-        for (int32_t dz = 0; dz <= reach; dz++)
-        for (int32_t dy = (dz == 0 ? 0 : -reach); dy <= reach; dy++)
-        for (int32_t dx = (dz == 0 && dy == 0 ? 0 : -reach); dx <= reach; dx++) {
+        for (int32_t dz = back * reach; dz <= reach; dz++)
+        for (int32_t dy = (!radii && dz == 0 ? 0 : -reach); dy <= reach; dy++)
+        for (int32_t dx = (!radii && dz == 0 && dy == 0 ? 0 : -reach);
+             dx <= reach; dx++) {
             const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
             const int32_t k = find_cell(cc);
             if (k < 0) continue;
             const bool same = dx == 0 && dy == 0 && dz == 0;
             for (int32_t t = _beg[(size_t)k]; t < _beg[(size_t)k + 1]; t++) {
                 const int32_t j = _items[(size_t)t];
-                if ((same && j <= (int32_t)i) || (alive && !alive[j])) continue;
+                if (j == (int32_t)i || (!radii && same && j < (int32_t)i)) continue;
+                if (alive && !alive[j]) continue;
                 const float* q = _pos + (int64_t)j * 3;
                 const float ex = q[0] - p[0], ey = q[1] - p[1], ez = q[2] - p[2];
-                if (ex * ex + ey * ey + ez * ez <= r2) unite((int32_t)i, j);
+                const float d2 = ex * ex + ey * ey + ez * ez;
+                float lim2 = r2;
+                if (radii) {
+                    const float lim = scale * (ri + radii[j]);
+                    lim2 = std::max(r2, lim * lim);
+                }
+                if (d2 <= lim2) uf.unite((int32_t)i, j);
             }
         }
     }
 
-    std::vector<int32_t> remap((size_t)_n, -1);
-    for (int64_t i = 0; i < _n; i++) {
-        if (alive && !alive[i]) continue;
-        const int32_t root = find((int32_t)i);
-        int32_t& l = remap[(size_t)root];
-        if (l < 0) {
-            l = (int32_t)sizes.size();
-            sizes.push_back(0);
-        }
-        label[(size_t)i] = l;
-        sizes[(size_t)l]++;
+    label_roots(uf, alive, _n, label, sizes);
+}
+
+
+void components_from_pairs(const int32_t* pairs, int64_t n_pairs,
+                           const uint8_t* alive, int64_t n,
+                           std::vector<int32_t>& label,
+                           std::vector<int64_t>& sizes) {
+    label.assign((size_t)n, -1);
+    sizes.clear();
+    if (n <= 0) return;
+    UnionFind uf(n);
+    for (int64_t e = 0; e < n_pairs; e++) {
+        const int32_t a = pairs[e * 2], b = pairs[e * 2 + 1];
+        if (a < 0 || b < 0 || a >= n || b >= n) continue;
+        if (alive && (!alive[a] || !alive[b])) continue;
+        uf.unite(a, b);
     }
+    label_roots(uf, alive, n, label, sizes);
 }
 
 }  // namespace gui

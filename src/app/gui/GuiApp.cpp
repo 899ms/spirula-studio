@@ -157,6 +157,12 @@ bool parse_settings_equal(const TrainConfig& a, const TrainConfig& b) {
 const std::vector<std::string> kViewableExtensions = {".ply", ".obj", ".gltf",
                                                       ".glb", ".stl"};
 
+// What "Open a Model or Reconstruction" shows. The extra four are how a
+// reconstruction is named when the desktop's own picker cannot return a
+// folder: transforms.json, cameras.bin, points3D.txt, a Metashape .xml.
+const std::vector<std::string> kOpenableExtensions = {
+    ".ply", ".obj", ".gltf", ".glb", ".stl", ".json", ".bin", ".txt", ".xml"};
+
 // Can this format carry this color? The child's own answer, asked through the
 // same function it refuses the run with.
 bool mesh_format_carries(int format, int color) {
@@ -187,7 +193,7 @@ GuiApp::GuiApp() {
     if (!builtin_sfm_available()) _engine = Engine::Colmap;
     _compare.set_pick_file([this] {
         open_pick(PickAction::AddSplatFile, msg::viewer_pick_file.get(),
-                  FileDialog::Mode::File, kViewableExtensions);
+                  FileDialog::Mode::FileOrFolder, kOpenableExtensions);
     });
     _compare.edit().set_pick_save(
         [this](int target, const std::string& ext, bool folder,
@@ -1145,6 +1151,10 @@ void GuiApp::detach_session_views() {
 }
 
 void GuiApp::request_close() {
+    if (_compare.edit_dirty()) {
+        _edit_exit_confirm = true;
+        return;
+    }
     if (training_busy()) {
         _pending = Pending::Quit;
         _open_confirm = true;
@@ -2509,6 +2519,7 @@ void GuiApp::frame() {
     }
     draw_preset_save_modal();
     draw_preset_delete_modal();
+    draw_edit_exit_modal();
     draw_confirm_modal();
     draw_data_error_modal();
 
@@ -2792,18 +2803,9 @@ void GuiApp::draw_home() {
 
     if (ui::Button(msg::home_open_splat, ImVec2(-1, bh))) {
         open_pick(PickAction::SplatFile, msg::viewer_pick_file.get(),
-                  FileDialog::Mode::File, kViewableExtensions);
+                  FileDialog::Mode::FileOrFolder, kOpenableExtensions);
     }
     ui::help_on_hover(msg::home_open_splat_help);
-
-    // A reconstruction is a folder, so the file picker above cannot offer
-    // one -- and cleaning its sparse cloud is a thing to do BEFORE training,
-    // which is why it is on this screen rather than only inside the viewer.
-    if (ui::Button(emsg::open_recon, ImVec2(-1, bh))) {
-        open_pick(PickAction::SplatFolder, emsg::pick_recon.get(),
-                  FileDialog::Mode::Folder);
-    }
-    ui::help_on_hover(emsg::open_recon_help);
 
     if (ui::Button(msg::home_make_mesh, ImVec2(-1, bh))) _screen = Screen::Mesh;
     ui::help_on_hover(msg::home_make_mesh_help);
@@ -6122,40 +6124,34 @@ void GuiApp::draw_viewer() {
     if (ui::Button(msg::viewer_open_another)) {
         _compare.confirm_discard_edits([this] {
             open_pick(PickAction::SplatFile, msg::viewer_pick_file.get(),
-                      FileDialog::Mode::File, kViewableExtensions);
+                      FileDialog::Mode::FileOrFolder, kOpenableExtensions);
         });
     }
-    ImGui::SameLine();
-    // A reconstruction is a FOLDER, so it needs a door of its own: the file
-    // picker cannot offer one and the point of opening it here is to clean
-    // its sparse cloud up before anything trains on it.
-    if (ui::Button(emsg::open_recon)) {
-        _compare.confirm_discard_edits([this] {
-            open_pick(PickAction::SplatFolder, emsg::pick_recon.get(),
-                      FileDialog::Mode::Folder);
-        });
-    }
-    ui::help_on_hover(emsg::open_recon_help);
+    ui::help_on_hover(msg::home_open_splat_help);
     ImGui::SameLine();
     _compare.set_recents(_model_recents);
     _compare.draw_toolbar();
 
     const float log_h = log_height(ImGui::GetContentRegionAvail().y);
     ImGui::BeginChild("##viewer", ImVec2(0, body_height(log_h)));
+    draw_compare_panes();
+    ImGui::EndChild();
+    draw_log_panel(log_h);
+}
+
+void GuiApp::draw_compare_panes() {
     if (_compare.editing() >= 0 && _compare.edit().active()) {
-        const float w = px(kEditPanelW);
-        ImGui::BeginChild("##editpanel", ImVec2(w, 0), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("##editpanel", ImVec2(px(kEditPanelW), 0),
+                          ImGuiChildFlags_Borders);
         _compare.edit().draw_panel();
         ImGui::EndChild();
         ImGui::SameLine();
         ImGui::BeginChild("##editpanes", ImVec2(0, 0));
         _compare.draw(0.0f);
         ImGui::EndChild();
-    } else {
-        _compare.draw(0.0f);
+        return;
     }
-    ImGui::EndChild();
-    draw_log_panel(log_h);
+    _compare.draw(0.0f);
 }
 
 
@@ -6462,7 +6458,7 @@ void GuiApp::draw_mesh() {
         ImGui::PopID();
         _compare.set_recents(_model_recents);
         _compare.draw_toolbar();
-        _compare.draw(0.0f);
+        draw_compare_panes();
     } else {
         // A batch owns the options while it runs; what it IS meshing goes here.
         if (_batch_active) {
@@ -8511,6 +8507,45 @@ void GuiApp::draw_data_error_modal() {
     ImGui::SameLine();
     if (ui::Button(msg::stop_and_save, ImVec2(bw, 0))) answer(false);
     ui::help_on_hover(msg::stop_and_save_help);
+    ImGui::EndPopup();
+}
+
+// Unsaved edits at quit: the file is the only place they are recorded, so
+// this is the last chance to write them.
+void GuiApp::draw_edit_exit_modal() {
+    if (_edit_exit_confirm) {
+        ui::OpenPopup(emsg::exit_title);
+        _edit_exit_confirm = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(px(440.0f), 0.0f), ImGuiCond_Appearing);
+    if (!ui::BeginPopupModal(emsg::exit_title)) return;
+    EditSession& e = _compare.edit();
+    EditDoc* doc = e.doc();
+    ui::TextWrapped(emsg::exit_body,
+                    {doc ? fs::path(doc->source_path()).filename().string()
+                         : std::string()});
+    ImGui::BeginDisabled(!e.can_save_in_place());
+    if (ui::Button(emsg::save_over)) {
+        e.save_in_place();
+        ImGui::CloseCurrentPopup();
+        request_close();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!e.can_save_copy());
+    if (ui::Button(emsg::save_copy)) {
+        e.ask_save_copy();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ui::Button(emsg::discard_yes)) {
+        _compare.end_edit();
+        ImGui::CloseCurrentPopup();
+        request_close();
+    }
+    ImGui::SameLine();
+    if (ui::Button(emsg::discard_no)) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 

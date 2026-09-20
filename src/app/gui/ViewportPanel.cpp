@@ -397,7 +397,8 @@ void ViewportPanel::attach_preview(spirula::TrainerSession& session) {
 void ViewportPanel::attach_preview_data(const ParsedDataset& ds,
                                        const PostSplitCameras& post,
                                        const std::string& key, float radius,
-                                       bool with_cameras) {
+                                       bool with_cameras,
+                                       const uint8_t* cam_selected) {
     const bool first = key != _framed_key;
     detach();
     _has_cameras = with_cameras;
@@ -405,7 +406,7 @@ void ViewportPanel::attach_preview_data(const ParsedDataset& ds,
     // watching the cameras find their places. Only on the first attach, so a
     // refresh does not undo the switch.
     if (first) _show_cams = with_cameras;
-    if (!_preview.build(ds, post)) {
+    if (!_preview.build(ds, post, cam_selected)) {
         _last_error = "preview renderer unavailable (OpenGL 3.2 required)";
         return;
     }

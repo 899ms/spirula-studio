@@ -280,18 +280,21 @@ void SplatViewer::run(std::string path) {
             return;
         }
 
-        // A dataset FOLDER is a thing to look at and to clean up, and it is
-        // the only form a sparse reconstruction comes in. Probed before
-        // find_splat_ply, which reads a directory as a run.
+        // Probed before find_splat_ply, which would read the directory as a
+        // run; a .ply is left to the readers below.
         std::error_code dir_ec;
-        if (fs::is_directory(path, dir_ec) &&
-            spirula::sparse_format_of(path) != spirula::SparseFormat::None) {
-            log(format(msg::viewer_reading, {path}));
+        const std::string recon =
+            fs::path(path).extension() == ".ply"
+                ? std::string()
+                : spirula::resolve_sparse_dir(path);
+        if (!recon.empty()) {
+            const std::string& dataset = recon;
+            log(format(msg::viewer_reading, {dataset}));
             DatasetParserConfig dcfg;
             // Poses and points, not pixels: a reconstruction is worth opening
             // even when its images are somewhere else.
             dcfg.require_image_files = false;
-            ParsedDataset ds = parse_dataset(path, dcfg, "");
+            ParsedDataset ds = parse_dataset(dataset, dcfg, "");
             PostSplitCameras post = bake_post_split(ds, false, false);
             const int64_t n = ds.points.num();
             float center[3] = {0, 0, 0};
@@ -310,8 +313,8 @@ void SplatViewer::run(std::string path) {
                 std::lock_guard<std::mutex> lk(_mu);
                 _points = std::move(ds);
                 _post = std::move(post);
-                _dataset_dir = path;
-                _file = path;
+                _dataset_dir = dataset;
+                _file = dataset;
             }
             _kind = Kind::Points;
             _num_splats = n;

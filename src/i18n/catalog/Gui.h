@@ -3324,56 +3324,57 @@ SS_MSG(menu_open_splat,
     TR("Splat dosyası aç…"));
 
 SS_MSG(home_open_splat,
-    EN("View a Trained Model"),
-    JA("学習済みモデルを見る"),
-    ZH_HANS("查看已训练的模型"),
-    ZH_HANT("檢視已訓練的模型"),
-    KO("학습된 모델 보기"),
-    DE("Trainiertes Modell ansehen"),
-    FR("Voir un modèle entraîné"),
-    ES("Ver un modelo entrenado"),
-    PT("Ver um modelo treinado"),
-    IT("Guarda un modello addestrato"),
-    NL("Een getraind model bekijken"),
-    RU("Посмотреть обученную модель"),
-    TR("Eğitilmiş bir modeli görüntüle"));
+    EN("Open a Model or Reconstruction"),
+    JA("モデルまたは再構成を開く"),
+    ZH_HANS("打开模型或重建"),
+    ZH_HANT("開啟模型或重建"),
+    KO("모델 또는 복원 열기"),
+    DE("Modell oder Rekonstruktion öffnen"),
+    FR("Ouvrir un modèle ou une reconstruction"),
+    ES("Abrir un modelo o una reconstrucción"),
+    PT("Abrir um modelo ou uma reconstrução"),
+    IT("Apri un modello o una ricostruzione"),
+    NL("Een model of reconstructie openen"),
+    RU("Открыть модель или реконструкцию"),
+    TR("Bir model veya yeniden yapım aç"));
 
 SS_MSG(home_open_splat_help,
-    EN("Open a .ply file, a checkpoint or a run folder and look around it. "
-       "Models from other Gaussian splatting tools open too, and so does a "
-       "plain point cloud."),
-    JA("PLYファイル・チェックポイント・実行フォルダを開いて自由に見て回れます。"
-       "他のガウススプラッティングツールのモデルや、ただの点群も開けます。"),
-    ZH_HANS("打开 .ply 文件、检查点或运行文件夹，随意观察。也可以打开其他高斯泼溅"
-            "工具的模型，以及普通点云。"),
-    ZH_HANT("開啟 .ply 檔案、檢查點或執行資料夾，隨意觀察。也可以開啟其他高斯潑濺"
-            "工具的模型，以及一般點雲。"),
-    KO(".ply 파일, 체크포인트, 실행 폴더를 열어 자유롭게 둘러봅니다. 다른 가우시안 "
-       "스플래팅 도구의 모델이나 단순한 점군도 열립니다."),
-    DE("Eine .ply-Datei, einen Prüfpunkt oder einen Laufordner öffnen und sich "
-       "darin umsehen. Modelle aus anderen Gaussian-Splatting-Werkzeugen lassen "
-       "sich ebenso öffnen wie eine reine Punktwolke."),
-    FR("Ouvrez un fichier .ply, un point de sauvegarde ou un dossier "
-       "d'exécution et promenez-vous dedans. Les modèles d'autres outils de "
-       "Gaussian splatting s'ouvrent aussi, tout comme un simple nuage de points."),
-    ES("Abra un archivo .ply, un punto de control o una carpeta de ejecución y "
-       "recórralo. También se abren modelos de otras herramientas de Gaussian "
-       "splatting y una simple nube de puntos."),
-    PT("Abra um arquivo .ply, um ponto de verificação ou uma pasta de execução "
-       "e percorra-o. Modelos de outras ferramentas de Gaussian splatting "
-       "também abrem, assim como uma simples nuvem de pontos."),
-    IT("Apra un file .ply, un punto di controllo o una cartella di esecuzione e "
-       "ci si muova dentro. Si aprono anche i modelli di altri strumenti di "
-       "Gaussian splatting e una semplice nuvola di punti."),
-    NL("Open een .ply-bestand, een checkpoint of een uitvoermap en kijk erin "
-       "rond. Modellen uit andere Gaussian-splattingprogramma's openen ook, "
-       "net als een gewone puntenwolk."),
-    RU("Откройте файл .ply, контрольную точку или папку запуска и осмотритесь. "
-       "Модели из других инструментов гауссова сплаттинга тоже открываются, как "
-       "и обычное облако точек."),
-    TR("Bir .ply dosyasını, bir kontrol noktasını veya bir çalışma klasörünü "
-       "açıp içinde gezinin. Başka Gaussian splatting araçlarının modelleri de, "
-       "sıradan bir nokta bulutu da açılır."));
+    EN("A .ply file, a checkpoint, a run folder, or a reconstruction -- its "
+       "dataset folder, or any one of the files that define it. Look around "
+       "it, and clean it up."),
+    JA("PLYファイル、チェックポイント、実行フォルダ、または再構成 -- そのデータ"
+       "セットフォルダでも、それを定めるファイルのどれか一つでも構いません。"
+       "自由に見て回り、不要なところを取り除けます。"),
+    ZH_HANS("可以是 .ply 文件、检查点、运行文件夹，或一个重建——它的数据集文件夹，"
+            "或定义它的任意一个文件。可以随意观察，也可以清理。"),
+    ZH_HANT("可以是 .ply 檔案、檢查點、執行資料夾，或一個重建——它的資料集資料夾，"
+            "或定義它的任意一個檔案。可以隨意觀察，也可以清理。"),
+    KO(".ply 파일, 체크포인트, 실행 폴더, 또는 복원 -- 그 데이터셋 폴더나 그것을 "
+       "이루는 파일 중 하나. 둘러보고 정리할 수 있습니다."),
+    DE("Eine .ply-Datei, ein Prüfpunkt, ein Laufordner oder eine Rekonstruktion "
+       "-- ihr Datensatzordner oder eine der Dateien, die sie ausmachen. Darin "
+       "umsehen und aufräumen."),
+    FR("Un fichier .ply, un point de sauvegarde, un dossier d'exécution ou une "
+       "reconstruction -- son dossier de jeu de données, ou l'un des fichiers "
+       "qui la définissent. À parcourir, et à nettoyer."),
+    ES("Un archivo .ply, un punto de control, una carpeta de ejecución o una "
+       "reconstrucción: su carpeta de datos, o cualquiera de los archivos que "
+       "la definen. Para recorrerla y para limpiarla."),
+    PT("Um arquivo .ply, um ponto de verificação, uma pasta de execução ou uma "
+       "reconstrução -- a pasta do conjunto, ou qualquer um dos arquivos que a "
+       "definem. Para percorrer e para limpar."),
+    IT("Un file .ply, un punto di controllo, una cartella di esecuzione o una "
+       "ricostruzione -- la sua cartella di dati, o uno qualsiasi dei file che "
+       "la definiscono. Da percorrere e da ripulire."),
+    NL("Een .ply-bestand, een checkpoint, een uitvoermap of een reconstructie "
+       "-- de gegevensmap ervan, of een van de bestanden die hem vormen. Om in "
+       "rond te kijken en om op te ruimen."),
+    RU("Файл .ply, контрольная точка, папка запуска или реконструкция -- её "
+       "папка набора данных или любой из файлов, которые её задают. Чтобы "
+       "осмотреться и чтобы почистить."),
+    TR("Bir .ply dosyası, bir kontrol noktası, bir çalışma klasörü ya da bir "
+       "yeniden yapım -- veri kümesi klasörü veya onu tanımlayan dosyalardan "
+       "herhangi biri. İçinde gezinmek ve temizlemek için."));
 
 SS_MSG(viewer_pick_file,
     EN("Choose a splat file, checkpoint or run folder"),

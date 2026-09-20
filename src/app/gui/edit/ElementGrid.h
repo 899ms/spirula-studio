@@ -36,12 +36,12 @@ public:
     void shrink(std::vector<uint8_t>& sel, float radius, const uint8_t* alive,
                 int64_t n) const;
 
-    // Connected components over the live elements, linked when they are
-    // within `radius`. `label` is -1 for a dead element; `sizes` is indexed
-    // by label.
+    // Connected components over the live elements within `radius`; `label`
+    // is -1 for a dead one. With `radii` they also link when they OVERLAP,
+    // which is what joins one big sky Gaussian to its neighbours.
     void components(float radius, const uint8_t* alive, int64_t n,
-                    std::vector<int32_t>& label,
-                    std::vector<int64_t>& sizes) const;
+                    std::vector<int32_t>& label, std::vector<int64_t>& sizes,
+                    const float* radii = nullptr, float scale = 1.0f) const;
 
 private:
     void coords_of(const float* p, int32_t c[3]) const;
@@ -62,5 +62,13 @@ private:
     std::vector<int32_t> _hval;
     uint64_t _hmask = 0;
 };
+
+// The same over a topology given outright -- a mesh's edges, two int32 per
+// pair. Exact, and the only right answer where one exists: a distance rule
+// calls a sparse floater several pieces and a dense wall one.
+void components_from_pairs(const int32_t* pairs, int64_t n_pairs,
+                           const uint8_t* alive, int64_t n,
+                           std::vector<int32_t>& label,
+                           std::vector<int64_t>& sizes);
 
 }  // namespace gui

@@ -15,7 +15,10 @@ namespace gui {
 
 class FileDialog {
 public:
-    enum class Mode { Folder, File, Save };
+    // FileOrFolder: a model is a file and a reconstruction is a directory.
+    // The desktop's own picker returns only one of the two, so there it is a
+    // file picker and a reconstruction is named by a file inside it.
+    enum class Mode { Folder, File, Save, FileOrFolder };
 
     // Whether to prefer the desktop's picker. Persisted by GuiApp; the
     // built-in browser is what a user who cannot get the system one to appear

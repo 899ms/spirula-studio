@@ -17,6 +17,9 @@ namespace {
 // How far the pointer has to travel before a lasso or brush records another
 // point: below this the path is a few thousand duplicates of one pixel.
 constexpr float kPathStep = 3.0f;
+// Clicking this near the first corner closes a polygon, the way every other
+// polygon tool works -- Enter still does it for a corner too small to hit.
+constexpr float kCloseRadius = 10.0f;
 
 }  // namespace
 
@@ -33,13 +36,13 @@ ShapeKind shape_of(ToolId t) {
 
 const ToolRow* tool_table() {
     static const ToolRow rows[kNumTools] = {
-        {ToolId::Navigate, "Q", ImGuiKey_Q},
-        {ToolId::Box,      "B", ImGuiKey_B},
-        {ToolId::Ellipse,  "E", ImGuiKey_E},
-        {ToolId::Lasso,    "L", ImGuiKey_L},
-        {ToolId::Polygon,  "P", ImGuiKey_P},
-        {ToolId::Brush,    "C", ImGuiKey_C},
-        {ToolId::Piece,    "F", ImGuiKey_F},
+        {ToolId::Navigate, "Q", ImGuiKey_Q, true},
+        {ToolId::Box,      "B", ImGuiKey_B, false},
+        {ToolId::Ellipse,  "E", ImGuiKey_E, true},
+        {ToolId::Lasso,    "L", ImGuiKey_L, false},
+        {ToolId::Polygon,  "P", ImGuiKey_P, false},
+        {ToolId::Brush,    "C", ImGuiKey_C, false},
+        {ToolId::Piece,    "F", ImGuiKey_F, false},
     };
     return rows;
 }
@@ -100,6 +103,13 @@ bool EditTool::update(const ViewportInput& in, ShapeStroke& out, bool& consumed)
         // Click-to-place rather than drag, so a corner can be put down
         // precisely and the camera left alone in between.
         if (in.hovered && in.clicked) {
+            if (_active && _pts.size() >= 6) {
+                const float dx = in.x - _pts[0], dy = in.y - _pts[1];
+                if (dx * dx + dy * dy <= kCloseRadius * kCloseRadius) {
+                    consumed = true;
+                    return commit_pending(out);
+                }
+            }
             _active = true;
             _pts.push_back(in.x);
             _pts.push_back(in.y);
@@ -121,7 +131,12 @@ bool EditTool::update(const ViewportInput& in, ShapeStroke& out, bool& consumed)
         _pts.push_back(in.x);
         _pts.push_back(in.y);
         consumed = true;
-        return false;
+        // A press and release in one frame is an ordinary fast click; without
+        // this the stroke never ends and the tool sticks.
+        if (!in.released) return false;
+        _pts.push_back(in.x);
+        _pts.push_back(in.y);
+        return commit_pending(out);
     }
 
     consumed = true;

@@ -57,7 +57,8 @@ public:
     // file has none to show, a live model is half about them.
     void attach_preview_data(const ParsedDataset& ds, const PostSplitCameras& post,
                              const std::string& key, float radius = 1.0f,
-                             bool with_cameras = false);
+                             bool with_cameras = false,
+                             const uint8_t* cam_selected = nullptr);
     // The same GL preview over an extracted triangle mesh, shaded.
     // `to_normalized` is the row-major 3x4 similarity into the navigated
     // frame (PreviewRenderer's convention); nullptr for identity.

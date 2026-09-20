@@ -82,6 +82,21 @@ bool ViewProjection::project(const float p[3], float& px, float& py,
 }
 
 
+bool ViewProjection::unproject(float px, float py, float origin[3],
+                               float dir[3]) const {
+    float cam[3];
+    if (!viewer_pixel_ray(camera_model, (px - cx) / fx, (py - cy) / fy, cam))
+        return false;
+    // w2c's rows are the camera axes in the navigated frame, so its transpose
+    // takes a camera direction back out.
+    for (int r = 0; r < 3; r++)
+        dir[r] = w2c[0 * 4 + r] * cam[0] + w2c[1 * 4 + r] * cam[1] +
+                 w2c[2 * 4 + r] * cam[2];
+    for (int r = 0; r < 3; r++) origin[r] = eye[r];
+    return true;
+}
+
+
 void rasterize_shape(const ShapeStroke& s, int W, int H, Stencil& out) {
     out.W = W;
     out.H = H;
@@ -254,24 +269,28 @@ SelectResult select_by_stencil(const EditDoc& doc, const ViewProjection& view,
 
 int64_t pick_element(const EditDoc& doc, const ViewProjection& view,
                      float px, float py, float radius_px) {
+    if (const int64_t hit = doc.pick(view, px, py); hit >= 0) return hit;
     const int64_t n = doc.count();
     const float* pos = doc.positions();
     const uint8_t* alive = doc.alive();
-    const float r2 = radius_px * radius_px;
-    int64_t best = -1;
-    float best_d = kFar;
-    for (int64_t i = 0; i < n; i++) {
-        if (!alive[i]) continue;
-        float ux, uy, d;
-        if (!view.project(pos + i * 3, ux, uy, d) || d <= 0.0f) continue;
-        const float dx = ux - px, dy = uy - py;
-        if (dx * dx + dy * dy > r2) continue;
-        if (d < best_d) {
-            best_d = d;
-            best = i;
+    for (float r = radius_px; r <= radius_px * 8.0f + 1.0f; r *= 2.0f) {
+        const float r2 = r * r;
+        int64_t best = -1;
+        float best_d = kFar;
+        for (int64_t i = 0; i < n; i++) {
+            if (!alive[i]) continue;
+            float ux, uy, d;
+            if (!view.project(pos + i * 3, ux, uy, d) || d <= 0.0f) continue;
+            const float dx = ux - px, dy = uy - py;
+            if (dx * dx + dy * dy > r2) continue;
+            if (d < best_d) {
+                best_d = d;
+                best = i;
+            }
         }
+        if (best >= 0) return best;
     }
-    return best;
+    return -1;
 }
 
 }  // namespace gui

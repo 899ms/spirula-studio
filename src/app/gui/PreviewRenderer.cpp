@@ -706,7 +706,8 @@ bool PreviewRenderer::build(const meshing::MeshData& mesh,
     return true;
 }
 
-bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& post) {
+bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& post,
+                            const uint8_t* cam_selected) {
     destroy_gl();
     if (!ensure_program()) return false;
 
@@ -763,9 +764,10 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
     // distinct intrinsics), rotated into the normalized frame. Bright verts
     // (border + anchors) first, dim interior gridlines after, so render()
     // can draw the two ranges with different colors.
-    std::vector<VL> bright, dim;
+    std::vector<VL> hot, bright, dim;
     std::unordered_map<std::string, FrustumTemplate> templates;
     for (int64_t i = 0; i < ds.num_cameras; i++) {
+        const bool selected = cam_selected && cam_selected[i];
         const float* M = &ds.c2w[i*12];
         float c[3];
         float t[3] = {M[3], M[7], M[11]};
@@ -810,7 +812,7 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
             out.push_back(v);
         };
         for (const FrustumLine& line : tmpl.lines) {
-            std::vector<VL>& out = line.dim ? dim : bright;
+            std::vector<VL>& out = selected ? hot : (line.dim ? dim : bright);
             size_t n = line.pts.size();
             for (size_t j = 0; j + 1 < n; j++) {
                 emit(out, line.pts[j]);
@@ -824,14 +826,17 @@ bool PreviewRenderer::build(const ParsedDataset& ds, const PostSplitCameras& pos
         // Anchor lines: apex -> corner / view direction, subdivided so they
         // curve correctly under nonlinear display projections.
         for (const P3& p : tmpl.anchors) {
+            std::vector<VL>& out = selected ? hot : bright;
             for (int j = 0; j < kASeg; j++) {
-                emit(bright, {p.x*j/kASeg, p.y*j/kASeg, p.z*j/kASeg});
-                emit(bright, {p.x*(j+1)/kASeg, p.y*(j+1)/kASeg, p.z*(j+1)/kASeg});
+                emit(out, {p.x*j/kASeg, p.y*j/kASeg, p.z*j/kASeg});
+                emit(out, {p.x*(j+1)/kASeg, p.y*(j+1)/kASeg, p.z*(j+1)/kASeg});
             }
         }
     }
+    _num_cam_sel = (int64_t)hot.size();
     _num_cam_bright = (int64_t)bright.size();
-    std::vector<VL> cams = std::move(bright);
+    std::vector<VL> cams = std::move(hot);
+    cams.insert(cams.end(), bright.begin(), bright.end());
     cams.insert(cams.end(), dim.begin(), dim.end());
     _num_cam_verts = (int64_t)cams.size();
     fill_line_deltas(cams, /*delta_from_aux=*/true);
@@ -1007,12 +1012,19 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
         glx::Uniform1f(_u_scale, fs);
         glx::Uniform1f(_u_dscale, fs);
         glx::BindVertexArray(_vao_cam);
+        // Selected first, in a colour the frusta are not already drawn in:
+        // theirs is orange, which is what a selected POINT is tinted.
+        if (_num_cam_sel > 0) {
+            glx::Uniform4f(_u_color, 0.25f, 0.92f, 1.0f, 1.0f);
+            glDrawArrays(GL_LINES, 0, (GLsizei)_num_cam_sel);
+        }
         glx::Uniform4f(_u_color, 1.0f, 0.62f, 0.25f, 1.0f);
-        glDrawArrays(GL_LINES, 0, (GLsizei)_num_cam_bright);
-        if (_num_cam_verts > _num_cam_bright) {
+        glDrawArrays(GL_LINES, (GLint)_num_cam_sel, (GLsizei)_num_cam_bright);
+        const int64_t rest = _num_cam_verts - _num_cam_sel - _num_cam_bright;
+        if (rest > 0) {
             glx::Uniform4f(_u_color, 0.5f, 0.31f, 0.125f, 1.0f);
-            glDrawArrays(GL_LINES, (GLint)_num_cam_bright,
-                         (GLsizei)(_num_cam_verts - _num_cam_bright));
+            glDrawArrays(GL_LINES, (GLint)(_num_cam_sel + _num_cam_bright),
+                         (GLsizei)rest);
         }
     }
 
@@ -1064,7 +1076,7 @@ void PreviewRenderer::destroy_gl() {
         _fbo_w = _fbo_h = 0;
     }
     _built = false;
-    _num_points = _num_cam_verts = 0;
+    _num_points = _num_cam_verts = _num_cam_sel = _num_cam_bright = 0;
 }
 
 }  // namespace gui

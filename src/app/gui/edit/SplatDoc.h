@@ -24,8 +24,6 @@ public:
              const float to_view[12], int slot, std::mutex* mu);
 
     Kind kind() const override { return Kind::Splats; }
-    const spirula::i18n::Msg& element_name() const override;
-    const float* radii() const override { return _radius.data(); }
     std::vector<SaveTarget> save_targets() const override;
     void save(int target, const std::string& path) override;
     std::string default_save_path(int target) const override;
@@ -36,7 +34,6 @@ protected:
 
 private:
     spirula::SplatCloud _c;
-    std::vector<float> _radius;
     std::vector<float> _opacity;      // upload scratch, alive-masked
     std::vector<float> _dc;           // upload scratch, selection-tinted
     int _slot = -1;

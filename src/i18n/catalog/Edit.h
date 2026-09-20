@@ -1673,6 +1673,115 @@ SS_MSG(open_recon_help,
     RU("Папка COLMAP, Nerfstudio или Metashape: её камеры и разреженное облако, которое можно почистить здесь до обучения."),
     TR("Bir COLMAP, Nerfstudio veya Metashape klasörü: kameraları ve seyrek bulutu; üzerinde bir şey eğitilmeden önce burada temizlenebilir."));
 
+// ===========================================================================
+// Camera editing and the history list
+// ===========================================================================
+
+SS_MSG(elem_camera,
+    EN("Cameras"),
+    JA("カメラ"),
+    ZH_HANS("相机"),
+    ZH_HANT("相機"),
+    KO("카메라"),
+    DE("Kameras"),
+    FR("Caméras"),
+    ES("Cámaras"),
+    PT("Câmeras"),
+    IT("Camere"),
+    NL("Camera's"),
+    RU("Камеры"),
+    TR("Kameralar"));
+
+SS_MSG(layer_help,
+    EN("Which of the two a tool works on. They have their own selections and their own place in the history."),
+    JA("ツールがどちらに効くか。選択も履歴もそれぞれ別に持ちます。"),
+    ZH_HANS("工具作用在哪一个上。它们各自有自己的选择和历史记录。"),
+    ZH_HANT("工具作用在哪一個上。它們各自有自己的選取和歷史記錄。"),
+    KO("도구가 둘 중 어느 쪽에 작용할지. 각각 자기 선택과 기록을 가집니다."),
+    DE("Worauf ein Werkzeug wirkt. Beide haben ihre eigene Auswahl und ihren eigenen Platz im Verlauf."),
+    FR("Sur lequel des deux un outil agit. Chacun a sa sélection et sa place dans l'historique."),
+    ES("Sobre cuál de los dos actúa una herramienta. Cada uno tiene su selección y su lugar en el historial."),
+    PT("Sobre qual dos dois uma ferramenta age. Cada um tem sua seleção e seu lugar no histórico."),
+    IT("Su quale dei due agisce uno strumento. Ognuno ha la sua selezione e il suo posto nella cronologia."),
+    NL("Waarop een gereedschap werkt. Elk heeft zijn eigen selectie en zijn eigen plek in de geschiedenis."),
+    RU("На что действует инструмент. У каждого своё выделение и своё место в истории."),
+    TR("Bir aracın hangisine etki ettiği. Her birinin kendi seçimi ve geçmişteki kendi yeri var."));
+
+SS_MSG(hist_original,
+    EN("Before any edit"),
+    JA("編集前"),
+    ZH_HANS("编辑之前"),
+    ZH_HANT("編輯之前"),
+    KO("편집 전"),
+    DE("Vor jeder Änderung"),
+    FR("Avant toute modification"),
+    ES("Antes de cualquier cambio"),
+    PT("Antes de qualquer edição"),
+    IT("Prima di ogni modifica"),
+    NL("Vóór elke bewerking"),
+    RU("До правок"),
+    TR("Her değişiklikten önce"));
+
+SS_MSG(save_confirm_title,
+    EN("Overwrite it?"),
+    JA("上書きしますか?"),
+    ZH_HANS("要覆盖吗?"),
+    ZH_HANT("要覆寫嗎?"),
+    KO("덮어쓸까요?"),
+    DE("Überschreiben?"),
+    FR("Écraser ?"),
+    ES("¿Sobrescribir?"),
+    PT("Sobrescrever?"),
+    IT("Sovrascrivere?"),
+    NL("Overschrijven?"),
+    RU("Перезаписать?"),
+    TR("Üzerine yazılsın mı?"));
+
+SS_MSG(save_confirm_body,
+    EN("{0} will be replaced by the edited version."),
+    JA("{0} は編集後のもので置き換えられます。"),
+    ZH_HANS("{0} 将被编辑后的版本替换。"),
+    ZH_HANT("{0} 將被編輯後的版本取代。"),
+    KO("{0} 이(가) 편집한 것으로 바뀝니다."),
+    DE("{0} wird durch die bearbeitete Fassung ersetzt."),
+    FR("{0} sera remplacé par la version modifiée."),
+    ES("{0} será reemplazado por la versión editada."),
+    PT("{0} será substituído pela versão editada."),
+    IT("{0} sarà sostituito dalla versione modificata."),
+    NL("{0} wordt vervangen door de bewerkte versie."),
+    RU("{0} будет заменён изменённой версией."),
+    TR("{0} düzenlenmiş sürümüyle değiştirilecek."));
+
+SS_MSG(exit_title,
+    EN("Save the edits before closing?"),
+    JA("終了する前に保存しますか?"),
+    ZH_HANS("关闭前要保存编辑吗?"),
+    ZH_HANT("關閉前要儲存編輯嗎?"),
+    KO("닫기 전에 편집을 저장할까요?"),
+    DE("Änderungen vor dem Schließen speichern?"),
+    FR("Enregistrer les modifications avant de fermer ?"),
+    ES("¿Guardar los cambios antes de cerrar?"),
+    PT("Salvar as edições antes de fechar?"),
+    IT("Salvare le modifiche prima di chiudere?"),
+    NL("Bewerkingen opslaan voor het sluiten?"),
+    RU("Сохранить правки перед выходом?"),
+    TR("Kapatmadan önce değişiklikler kaydedilsin mi?"));
+
+SS_MSG(exit_body,
+    EN("{0} has edits that have not been saved."),
+    JA("{0} に保存していない編集があります。"),
+    ZH_HANS("{0} 有尚未保存的编辑。"),
+    ZH_HANT("{0} 有尚未儲存的編輯。"),
+    KO("{0} 에 저장하지 않은 편집이 있습니다."),
+    DE("{0} hat ungespeicherte Änderungen."),
+    FR("{0} a des modifications non enregistrées."),
+    ES("{0} tiene cambios sin guardar."),
+    PT("{0} tem edições não salvas."),
+    IT("{0} ha modifiche non salvate."),
+    NL("{0} heeft niet-opgeslagen bewerkingen."),
+    RU("В {0} есть несохранённые правки."),
+    TR("{0} kaydedilmemiş değişiklikler içeriyor."));
+
 
 }  // namespace edit
 }  // namespace msg

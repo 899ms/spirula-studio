@@ -340,9 +340,10 @@ void CompareView::begin_edit(int index) {
             _edit.open(std::make_unique<PointsDoc>(
                            std::move(ds), std::move(post), src, dir,
                            [panel, key](const ParsedDataset& d,
-                                        const PostSplitCameras& p) {
+                                        const PostSplitCameras& p,
+                                        const uint8_t* cam_sel) {
                                panel->attach_preview_data(d, p, key, 1.0f,
-                                                          p.n_post > 0);
+                                                          p.n_post > 0, cam_sel);
                            }),
                        panel);
             break;

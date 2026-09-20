@@ -49,6 +49,13 @@ Each already has a reader, a renderer and a writer. What none of them has is a
 **mutable document with a history**. That object is the whole of phase 1, and
 the four kinds differ only in what an element is.
 
+One of them has TWO kinds of element at once: a sparse reconstruction is
+points and cameras, and "drop the three frames that landed in the wrong
+place" is as much an edit as "drop the floaters". So a document carries
+LAYERS, each with its own elements, selection and place in the history, and
+an op records the layer it was made on. Nothing above this line changes for
+the documents that have one.
+
 ## The four objects
 
 ### `EditDoc` — what is open, and what has been done to it
@@ -146,12 +153,24 @@ this composed with a region, and it needs nothing new — paint roughly over the
 tree with the brush, then *intersect* with a colour and opacity box. That
 composition is the feature; neither half is.
 
-**Connected components.** A grid-backed union-find over element positions.
-This is "remove the floaters" and it is also the machinery the sparse-model
-split below needs.
+**Connected components.** A union-find over whatever says what is joined to
+what. That is NOT one rule: a mesh has faces and they are exact, so a mesh
+uses them; a Gaussian cloud has extents, so two Gaussians link when they
+overlap rather than when their centres are close; a sparse cloud has only
+distance. Getting this wrong is visible immediately -- a distance rule over a
+mesh calls one coarse floater a dozen pieces and a dense wall one piece.
+
+This is "remove the floaters", it is "select the thing I clicked", and it is
+also the machinery the sparse-model split below needs.
 
 **Grow, shrink, smooth.** A k-NN dilation of the selection. Small, and the
 difference between a brush selection that is usable and one that is not.
+
+All three of those want a neighbour radius, and the honest one is MEASURED
+rather than derived: a volume estimate from the element count comes out ten
+times too large, because these elements sit on surfaces. One counting pass
+converging on about four elements per cell gives the real spacing, and every
+radius here is a multiple of it.
 
 ## Doing something with it
 
@@ -369,7 +388,8 @@ widening it.
    *Built*, plus the ellipse, the connected-piece pick and "select floaters"
    — those last two are the connected-components machinery of phase 3, pulled
    forward because they share the grid grow/shrink already needed and because
-   segmenting a messy model is what the whole feature is for.
+   segmenting a messy model is what the whole feature is for. Camera
+   selection on a sparse reconstruction came with the layers above.
 3. **The histogram panel and named groups.**
 4. **Transform.** The modal operator, then the gizmo, then SH rotation, then
    baking a placement on save.
@@ -407,7 +427,19 @@ widening it.
   active and the arrow keys and the gamepad are not.
 - **Discoverability.** A modal grammar is invisible. A status strip naming the
   active tool and its two or three keys is not decoration — for this style of
-  UI it is the feature.
+  UI it is the feature. So is printing the key in the corner of the button it
+  belongs to, for every button and not only the tools; and so is a history
+  LIST, because a state ten steps back should be one click rather than ten.
+- **Picking is not one function.** The nearest projected element is the right
+  answer for a cloud and the wrong one for a mesh, whose vertices on a flat
+  surface are a long way from where the cursor is. A mesh intersects its own
+  faces; a cloud searches outward from the cursor rather than at a fixed
+  radius, or a coarse surface picks nothing at all.
+- **A fly key is not a tool key.** The viewport navigates on WASDQE, and two
+  of those are also tool shortcuts. Settled: while Navigate is the active
+  tool the camera keeps all six and the colliding shortcuts are not read;
+  under any other tool the camera gives the letters up and keeps the arrows,
+  the wheel and the gamepad.
 
 ## Testing it
 

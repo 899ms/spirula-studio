@@ -9,6 +9,7 @@
 // show itself in. The file keeps its texture.
 
 #include "app/gui/edit/EditDoc.h"
+#include "app/gui/edit/SelectShape.h"
 #include "mesh/MeshExport.h"
 
 #include <functional>
@@ -25,7 +26,16 @@ public:
             std::function<void(const meshing::MeshData&, const float*)> show);
 
     Kind kind() const override { return Kind::Mesh; }
-    const spirula::i18n::Msg& element_name() const override;
+    // The face under the cursor, by ray intersection: on a surface of big
+    // flat triangles the nearest VERTEX is somewhere else entirely.
+    int64_t pick(const ViewProjection& view, float px, float py) const override;
+
+    // A mesh knows what is joined to what; a distance grid would call a
+    // sparse floater several pieces and a dense wall one.
+    const int32_t* topology(int64_t& pairs) const override {
+        pairs = (int64_t)_edges.size() / 2;
+        return _edges.data();
+    }
     std::vector<SaveTarget> save_targets() const override;
     void save(int target, const std::string& path) override;
     std::string default_save_path(int target) const override;
@@ -39,6 +49,7 @@ protected:
 private:
     meshing::MeshData _m;
     meshing::MeshData _display;
+    std::vector<int32_t> _edges;      // vertex pairs, three per face
     float _t2n[12] = {1,0,0,0, 0,1,0,0, 0,0,1,0};
     int64_t _live_faces = 0;
     std::function<void(const meshing::MeshData&, const float*)> _show;

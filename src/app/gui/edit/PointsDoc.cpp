@@ -15,13 +15,27 @@ namespace {
 
 constexpr uint8_t kTint[3] = {255, 108, 13};
 
+// Keep the rows of every per-camera array a parser filled. A dataset that
+// carries none of an optional array keeps carrying none.
+template <typename T>
+void keep_rows(std::vector<T>& v, int64_t n, int stride, const uint8_t* keep) {
+    if ((int64_t)v.size() != n * stride) return;
+    std::vector<T> out;
+    out.reserve(v.size());
+    for (int64_t i = 0; i < n; i++) {
+        if (!keep[i]) continue;
+        out.insert(out.end(), v.begin() + (ptrdiff_t)(i * stride),
+                   v.begin() + (ptrdiff_t)((i + 1) * stride));
+    }
+    v.swap(out);
+}
+
 }  // namespace
 
 
-PointsDoc::PointsDoc(
-    ParsedDataset ds, PostSplitCameras post, const std::string& source,
-    const std::string& dataset_dir,
-    std::function<void(const ParsedDataset&, const PostSplitCameras&)> show)
+PointsDoc::PointsDoc(ParsedDataset ds, PostSplitCameras post,
+                     const std::string& source, const std::string& dataset_dir,
+                     Show show)
     : _ds(std::move(ds)), _post(std::move(post)), _dataset_dir(dataset_dir),
       _show(std::move(show)) {
     if (!_dataset_dir.empty()) _fmt = spirula::sparse_format_of(_dataset_dir);
@@ -34,48 +48,126 @@ PointsDoc::PointsDoc(
         for (int i = 0; i < 16; i++) T[i] = _ds.train_to_normalized[i];
         dsparse::invert_affine4x4(T, A);
     }
+    auto map = [&A](const double* p, float* out) {
+        for (int r = 0; r < 3; r++)
+            out[r] = (float)(A[r*4+0]*p[0] + A[r*4+1]*p[1] + A[r*4+2]*p[2] +
+                             A[r*4+3]);
+    };
+
     const int64_t n = _ds.points.num();
     std::vector<float> pos((size_t)n * 3);
-    for (int64_t i = 0; i < n; i++) {
-        const double* p = &_ds.points.xyz[(size_t)i * 3];
-        for (int r = 0; r < 3; r++)
-            pos[(size_t)i * 3 + r] = (float)(A[r*4+0]*p[0] + A[r*4+1]*p[1] +
-                                             A[r*4+2]*p[2] + A[r*4+3]);
+    for (int64_t i = 0; i < n; i++)
+        map(&_ds.points.xyz[(size_t)i * 3], &pos[(size_t)i * 3]);
+    set_source(source);
+    add_layer(msg::elem_point, n, std::move(pos));
+
+    // A camera is its centre: the translation column of its camera-to-world.
+    const int64_t nc = _ds.num_cameras;
+    if (nc > 0) {
+        std::vector<float> cam((size_t)nc * 3);
+        for (int64_t i = 0; i < nc; i++) {
+            const double c[3] = {_ds.c2w[(size_t)i * 12 + 3],
+                                 _ds.c2w[(size_t)i * 12 + 7],
+                                 _ds.c2w[(size_t)i * 12 + 11]};
+            map(c, &cam[(size_t)i * 3]);
+        }
+        add_layer(msg::elem_camera, nc, std::move(cam));
     }
+
     _display = _ds;
-    init(n, std::move(pos), source);
+    _post_display = _post;
+    rebuild_display(false);
 }
 
-const spirula::i18n::Msg& PointsDoc::element_name() const {
-    return msg::elem_point;
-}
 
-void PointsDoc::publish_impl(bool) {
-    if (!_show) return;
-    const int64_t n = count();
-    const uint8_t* alive = this->alive();
-    const uint8_t* sel = this->sel().data();
+// ---------------------------------------------------------------------------
+// Display
+// ---------------------------------------------------------------------------
+
+void PointsDoc::rebuild_display(bool cameras_changed) {
+    static const std::vector<uint8_t> kNoCameras;
+    const std::vector<uint8_t>& pk = alive_of(kPoints);
+    const std::vector<uint8_t>& ck =
+        layer_count() > kCameras ? alive_of(kCameras) : kNoCameras;
+
+    // Re-baking the split table costs what a dataset's camera count costs, so
+    // it happens when that set changes rather than on every point deleted.
+    if (cameras_changed && !ck.empty()) {
+        _display = _ds;
+        const int64_t nc = _ds.num_cameras;
+        keep_rows(_display.camera_models, nc, 1, ck.data());
+        keep_rows(_display.camera_distortions, nc, 1, ck.data());
+        keep_rows(_display.image_filenames, nc, 1, ck.data());
+        keep_rows(_display.mask_filenames, nc, 1, ck.data());
+        keep_rows(_display.depth_filenames, nc, 1, ck.data());
+        keep_rows(_display.normal_filenames, nc, 1, ck.data());
+        keep_rows(_display.widths, nc, 1, ck.data());
+        keep_rows(_display.heights, nc, 1, ck.data());
+        keep_rows(_display.c2w, nc, 12, ck.data());
+        keep_rows(_display.intrins, nc, 4, ck.data());
+        keep_rows(_display.dist_coeffs, nc, 8, ck.data());
+        keep_rows(_display.redistort, nc, 1, ck.data());
+        keep_rows(_display.exif_quarter_turns, nc, 1, ck.data());
+        _display.num_cameras = (int64_t)_display.widths.size();
+        // The split table is derived, so it is rebuilt rather than filtered;
+        // its rows are per FACE, which is not one per camera.
+        _display.train_indices.resize((size_t)_display.num_cameras);
+        for (size_t i = 0; i < _display.train_indices.size(); i++)
+            _display.train_indices[i] = (int32_t)i;
+        _display.val_indices.clear();
+        _post_display = bake_post_split(_display, false, false);
+    }
+
+    // The points, filtered and tinted.
+    const int64_t n = (int64_t)pk.size();
     ColmapPoints3D& out = _display.points;
     out.xyz.clear();
     out.rgb.clear();
-    out.xyz.reserve((size_t)alive_count() * 3);
-    out.rgb.reserve((size_t)alive_count() * 3);
+    out.xyz.reserve((size_t)n * 3);
+    out.rgb.reserve((size_t)n * 3);
+    const uint8_t* psel_w = sel_of(kPoints).data();
     for (int64_t i = 0; i < n; i++) {
-        if (!alive[i]) continue;
+        if (!pk[(size_t)i]) continue;
         for (int k = 0; k < 3; k++) out.xyz.push_back(_ds.points.xyz[(size_t)i*3+k]);
         for (int k = 0; k < 3; k++) {
             const uint8_t base = _ds.points.rgb.empty()
                                      ? (uint8_t)200
                                      : _ds.points.rgb[(size_t)i * 3 + k];
-            out.rgb.push_back(sel[i] ? kTint[k] : base);
+            out.rgb.push_back(psel_w && psel_w[i] ? kTint[k] : base);
         }
     }
-    _show(_display, _post);
+
+    // One flag per camera of the DISPLAY dataset, which is the live subset in
+    // its own order -- what the frusta are drawn from.
+    _cam_highlight.assign((size_t)_display.num_cameras, 0);
+    if (ck.empty()) return;
+    const Selection& csel = sel_of(kCameras);
+    size_t live = 0;
+    for (size_t i = 0; i < ck.size() && live < _cam_highlight.size(); i++) {
+        if (!ck[i]) continue;
+        _cam_highlight[live++] = csel.weight((int64_t)i) ? 1 : 0;
+    }
+}
+
+void PointsDoc::publish_impl(bool geometry) {
+    if (!_show) return;
+    const int64_t live_cams =
+        layer_count() > kCameras ? alive_count_of(kCameras) : 0;
+    const bool cameras_changed = geometry && live_cams != _live_cameras;
+    _live_cameras = live_cams;
+    rebuild_display(cameras_changed);
+    _show(_display, _post_display,
+          _cam_highlight.empty() ? nullptr : _cam_highlight.data());
 }
 
 void PointsDoc::revert_display() {
-    if (_show) _show(_ds, _post);
+    if (_show) _show(_ds, _post, nullptr);
 }
+
+
+// ---------------------------------------------------------------------------
+// Saving
+// ---------------------------------------------------------------------------
 
 std::vector<SaveTarget> PointsDoc::save_targets() const {
     std::vector<SaveTarget> t;
@@ -104,14 +196,19 @@ void PointsDoc::save(int target, const std::string& path) {
     const std::vector<SaveTarget> t = save_targets();
     if (target < 0 || target >= (int)t.size()) return;
     if (t[(size_t)target].folder) {
-        std::vector<uint8_t> keep(_alive.begin(), _alive.end());
+        spirula::SparseKeep keep;
+        keep.points = alive_of(kPoints);
+        const std::vector<uint8_t>& ck = alive_of(kCameras);
+        for (size_t i = 0; i < ck.size(); i++)
+            if (!ck[i] && i < _ds.image_filenames.size())
+                keep.drop_images.push_back(_ds.image_filenames[i]);
         spirula::sparse_write_filtered(path, keep);
         return;
     }
     spirula::write_ply_points(
         path, _ds.points.xyz.data(),
         _ds.points.rgb.empty() ? nullptr : _ds.points.rgb.data(),
-        _ds.points.num(), alive());
+        _ds.points.num(), alive_of(kPoints).data());
 }
 
 }  // namespace gui

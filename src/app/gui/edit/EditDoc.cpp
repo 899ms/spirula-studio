@@ -18,16 +18,33 @@ namespace {
 constexpr size_t kMaxHistoryBytes = 256u << 20;
 constexpr int kMaxHistoryOps = 96;
 
+// The layer an op was made on, restored however the op returns.
+class LayerScope {
+public:
+    LayerScope(EditDoc& doc, int layer) : _doc(doc), _was(doc.layer()) {
+        _doc.set_layer(layer);
+    }
+    ~LayerScope() { _doc.set_layer(_was); }
+
+private:
+    EditDoc& _doc;
+    int _was;
+};
+
 }  // namespace
 
 
-void EditDoc::init(int64_t n, std::vector<float> positions, std::string source) {
-    _count = n;
-    _pos = std::move(positions);
-    _source = std::move(source);
-    _alive.assign((size_t)n, 1);
-    _alive_count = n;
-    _sel.resize(n);
+void EditDoc::add_layer(const spirula::i18n::Msg& name, int64_t n,
+                        std::vector<float> positions,
+                        std::vector<float> radius) {
+    Layer L;
+    L.name = &name;
+    L.count = n;
+    L.pos = std::move(positions);
+    L.radius = std::move(radius);
+    L.alive.assign((size_t)n, 1);
+    L.alive_count = n;
+    L.sel.resize(n);
 
     // The median distance from the median point, as the viewer frames a model
     // by: a trained scene has floaters, so a bounding box puts every default
@@ -39,36 +56,46 @@ void EditDoc::init(int64_t n, std::vector<float> positions, std::string source) 
         tmp.reserve((size_t)(n / step + 1));
         for (int d = 0; d < 3; d++) {
             tmp.clear();
-            for (int64_t i = 0; i < n; i += step) tmp.push_back(_pos[(size_t)i * 3 + d]);
+            for (int64_t i = 0; i < n; i += step) tmp.push_back(L.pos[(size_t)i * 3 + d]);
             std::nth_element(tmp.begin(), tmp.begin() + tmp.size() / 2, tmp.end());
             c[d] = tmp[tmp.size() / 2];
         }
         tmp.clear();
         for (int64_t i = 0; i < n; i += step) {
-            const float dx = _pos[(size_t)i * 3 + 0] - c[0];
-            const float dy = _pos[(size_t)i * 3 + 1] - c[1];
-            const float dz = _pos[(size_t)i * 3 + 2] - c[2];
+            const float dx = L.pos[(size_t)i * 3 + 0] - c[0];
+            const float dy = L.pos[(size_t)i * 3 + 1] - c[1];
+            const float dz = L.pos[(size_t)i * 3 + 2] - c[2];
             tmp.push_back(dx * dx + dy * dy + dz * dz);
         }
         std::nth_element(tmp.begin(), tmp.begin() + tmp.size() / 2, tmp.end());
-        _extent = 2.0f * std::sqrt(std::max(tmp[tmp.size() / 2], 1e-24f));
+        L.extent = 2.0f * std::sqrt(std::max(tmp[tmp.size() / 2], 1e-24f));
     }
-    for (int d = 0; d < 3; d++) _middle[d] = c[d];
-    _extent = std::max(_extent, 1e-6f);
-    const double side = 2.0 * (double)_extent;
-    _radius_hint = (float)(1.5 * side / std::cbrt((double)std::max<int64_t>(n, 1)));
-    _radius_hint = std::clamp(_radius_hint, _extent * 1e-4f, _extent * 0.25f);
+    L.extent = std::max(L.extent, 1e-6f);
+    for (int d = 0; d < 3; d++) L.middle[d] = c[d];
+    const double side = 2.0 * (double)L.extent;
+    L.radius_hint = (float)(1.5 * side / std::cbrt((double)std::max<int64_t>(n, 1)));
+    L.radius_hint = std::clamp(L.radius_hint, L.extent * 1e-4f, L.extent * 0.25f);
+    _layers.push_back(std::move(L));
+}
+
+void EditDoc::set_layer(int i) {
+    if (i >= 0 && i < layer_count()) _cur = i;
+}
+
+const spirula::i18n::Msg& EditDoc::layer_name(int i) const {
+    return *at(std::clamp(i, 0, layer_count() - 1)).name;
 }
 
 void EditDoc::set_alive(int64_t i, bool a) {
-    uint8_t& v = _alive[(size_t)i];
+    Layer& L = at(_cur);
+    uint8_t& v = L.alive[(size_t)i];
     if ((v != 0) == a) return;
     v = a ? 1 : 0;
-    _alive_count += a ? 1 : -1;
+    L.alive_count += a ? 1 : -1;
 }
 
 void EditDoc::set_selection(const std::vector<uint8_t>& w) {
-    _sel.assign(w);
+    at(_cur).sel.assign(w);
 }
 
 void EditDoc::run(std::unique_ptr<EditOp> op) {
@@ -100,6 +127,12 @@ void EditDoc::redo() {
     _edited = true;
 }
 
+void EditDoc::goto_step(int head) {
+    head = std::clamp(head, 0, (int)_ops.size());
+    while (_head > head) undo();
+    while (_head < head) redo();
+}
+
 const spirula::i18n::Msg* EditDoc::undo_name() const {
     return can_undo() ? &_ops[(size_t)_head - 1]->name() : nullptr;
 }
@@ -129,10 +162,13 @@ namespace {
 // is why nothing here carries a copy of the data.
 class HideOp : public EditOp {
 public:
-    HideOp(std::vector<int32_t> idx, std::vector<uint8_t> was, bool invert)
-        : _idx(std::move(idx)), _was(std::move(was)), _invert(invert) {}
+    HideOp(int layer, std::vector<int32_t> idx, std::vector<uint8_t> was,
+           bool invert)
+        : _layer(layer), _idx(std::move(idx)), _was(std::move(was)),
+          _invert(invert) {}
 
     void apply(EditDoc& doc) override {
+        LayerScope scope(doc, _layer);
         std::vector<uint8_t> w = doc.sel().weights();
         for (size_t k = 0; k < _idx.size(); k++) {
             doc.set_alive(_idx[k], false);
@@ -144,6 +180,7 @@ public:
         doc.mark_geometry_dirty();
     }
     void undo(EditDoc& doc) override {
+        LayerScope scope(doc, _layer);
         std::vector<uint8_t> w = doc.sel().weights();
         for (size_t k = 0; k < _idx.size(); k++) {
             doc.set_alive(_idx[k], true);
@@ -160,6 +197,7 @@ public:
     }
 
 private:
+    int _layer;
     std::vector<int32_t> _idx;
     std::vector<uint8_t> _was;
     bool _invert;
@@ -167,12 +205,15 @@ private:
 
 class RevealOp : public EditOp {
 public:
-    explicit RevealOp(std::vector<int32_t> idx) : _idx(std::move(idx)) {}
+    RevealOp(int layer, std::vector<int32_t> idx)
+        : _layer(layer), _idx(std::move(idx)) {}
     void apply(EditDoc& doc) override {
+        LayerScope scope(doc, _layer);
         for (int32_t i : _idx) doc.set_alive(i, true);
         doc.mark_geometry_dirty();
     }
     void undo(EditDoc& doc) override {
+        LayerScope scope(doc, _layer);
         for (int32_t i : _idx) doc.set_alive(i, false);
         doc.mark_geometry_dirty();
     }
@@ -180,14 +221,15 @@ public:
     size_t bytes() const override { return _idx.size() * sizeof(int32_t) + 32; }
 
 private:
+    int _layer;
     std::vector<int32_t> _idx;
 };
 
 class SelectOp : public EditOp {
 public:
-    SelectOp(std::vector<uint8_t> prev, std::vector<uint8_t> next,
+    SelectOp(int layer, std::vector<uint8_t> prev, std::vector<uint8_t> next,
              const spirula::i18n::Msg& name)
-        : _prev(rle_encode(prev)), _next(rle_encode(next)),
+        : _layer(layer), _prev(rle_encode(prev)), _next(rle_encode(next)),
           _n(prev.size()), _name(&name) {}
 
     void apply(EditDoc& doc) override { put(doc, _next); }
@@ -197,11 +239,13 @@ public:
 
 private:
     void put(EditDoc& doc, const std::vector<uint8_t>& rle) {
+        LayerScope scope(doc, _layer);
         std::vector<uint8_t> w(_n, 0);
         rle_decode(rle, w);
         doc.set_selection(w);
         doc.mark_display_dirty();
     }
+    int _layer;
     std::vector<uint8_t> _prev, _next;
     size_t _n;
     const spirula::i18n::Msg* _name;
@@ -221,7 +265,8 @@ std::unique_ptr<EditOp> make_hide_op(EditDoc& doc, bool invert) {
         idx.push_back((int32_t)i);
         was.push_back(s.weight(i));
     }
-    return std::make_unique<HideOp>(std::move(idx), std::move(was), invert);
+    return std::make_unique<HideOp>(doc.layer(), std::move(idx), std::move(was),
+                                    invert);
 }
 
 std::unique_ptr<EditOp> make_reveal_op(EditDoc& doc) {
@@ -229,12 +274,13 @@ std::unique_ptr<EditOp> make_reveal_op(EditDoc& doc) {
     const uint8_t* alive = doc.alive();
     for (int64_t i = 0; i < doc.count(); i++)
         if (!alive[i]) idx.push_back((int32_t)i);
-    return std::make_unique<RevealOp>(std::move(idx));
+    return std::make_unique<RevealOp>(doc.layer(), std::move(idx));
 }
 
 std::unique_ptr<EditOp> make_select_op(EditDoc& doc, std::vector<uint8_t> next,
                                        const spirula::i18n::Msg& name) {
-    return std::make_unique<SelectOp>(doc.sel().weights(), std::move(next), name);
+    return std::make_unique<SelectOp>(doc.layer(), doc.sel().weights(),
+                                      std::move(next), name);
 }
 
 }  // namespace gui

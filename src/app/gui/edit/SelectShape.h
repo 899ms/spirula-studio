@@ -31,6 +31,8 @@ struct ViewProjection {
     // Pixel and the distance in front of the camera. False where the model
     // has no image for that direction.
     bool project(const float p[3], float& px, float& py, float& depth) const;
+    // And back: the ray through a pixel, in the same frame.
+    bool unproject(float px, float py, float origin[3], float dir[3]) const;
 };
 
 enum class ShapeKind { Box = 0, Ellipse, Lasso, Polygon, Brush };
@@ -97,8 +99,9 @@ SelectResult select_by_stencil(const EditDoc& doc, const ViewProjection& view,
                                const OcclusionBuffer* occ,
                                std::vector<uint8_t>& out);
 
-// The live element nearest the ray through a pixel, or -1. This is what a
-// click picks and what "the component under the cursor" starts from.
+// The live element under a pixel, or -1: the document's own answer where it
+// has one (a mesh intersects its faces), else the nearest projected element,
+// searched OUTWARD -- a flat surface's vertices are a long way apart.
 int64_t pick_element(const EditDoc& doc, const ViewProjection& view,
                      float px, float py, float radius_px);
 

@@ -46,6 +46,12 @@ MeshDoc::MeshDoc(meshing::MeshData mesh, const std::string& source,
                                      _t2n[r*4+2]*p[2] + _t2n[r*4+3];
     }
     _live_faces = (int64_t)_m.F.size();
+    _edges.reserve(_m.F.size() * 6);
+    for (const auto& f : _m.F)
+        for (int k = 0; k < 3; k++) {
+            _edges.push_back(f[k]);
+            _edges.push_back(f[(k + 1) % 3]);
+        }
 
     _display.V = _m.V;
     _display.N = _m.N;
@@ -56,11 +62,51 @@ MeshDoc::MeshDoc(meshing::MeshData mesh, const std::string& source,
         else if (_m.C.size() == _m.V.size()) _display.C[i] = _m.C[i];
         else _display.C[i] = {184, 184, 184};
     }
-    init(n, std::move(pos), source);
+    set_source(source);
+    add_layer(msg::elem_vertex, n, std::move(pos));
 }
 
-const spirula::i18n::Msg& MeshDoc::element_name() const {
-    return msg::elem_vertex;
+int64_t MeshDoc::pick(const ViewProjection& view, float px, float py) const {
+    float ro[3], rd[3];
+    if (!view.unproject(px, py, ro, rd)) return -1;
+    const float* P = positions();
+    const uint8_t* live = alive();
+    int64_t best = -1;
+    float best_t = 1e30f;
+    // Moller-Trumbore over the live faces. A click is not a frame, so brute
+    // force is the right amount of machinery for it.
+    for (const auto& f : _m.F) {
+        if (!(live[f[0]] && live[f[1]] && live[f[2]])) continue;
+        const float* a = P + (size_t)f[0] * 3;
+        const float* b = P + (size_t)f[1] * 3;
+        const float* c = P + (size_t)f[2] * 3;
+        float e1[3], e2[3], pv[3];
+        for (int k = 0; k < 3; k++) {
+            e1[k] = b[k] - a[k];
+            e2[k] = c[k] - a[k];
+        }
+        pv[0] = rd[1]*e2[2] - rd[2]*e2[1];
+        pv[1] = rd[2]*e2[0] - rd[0]*e2[2];
+        pv[2] = rd[0]*e2[1] - rd[1]*e2[0];
+        const float det = e1[0]*pv[0] + e1[1]*pv[1] + e1[2]*pv[2];
+        if (std::fabs(det) < 1e-20f) continue;
+        const float inv = 1.0f / det;
+        float tv[3];
+        for (int k = 0; k < 3; k++) tv[k] = ro[k] - a[k];
+        const float u = (tv[0]*pv[0] + tv[1]*pv[1] + tv[2]*pv[2]) * inv;
+        if (u < 0.0f || u > 1.0f) continue;
+        float qv[3];
+        qv[0] = tv[1]*e1[2] - tv[2]*e1[1];
+        qv[1] = tv[2]*e1[0] - tv[0]*e1[2];
+        qv[2] = tv[0]*e1[1] - tv[1]*e1[0];
+        const float v = (rd[0]*qv[0] + rd[1]*qv[1] + rd[2]*qv[2]) * inv;
+        if (v < 0.0f || u + v > 1.0f) continue;
+        const float t = (e2[0]*qv[0] + e2[1]*qv[1] + e2[2]*qv[2]) * inv;
+        if (t <= 1e-6f || t >= best_t) continue;
+        best_t = t;
+        best = f[0];
+    }
+    return best;
 }
 
 void MeshDoc::publish_impl(bool geometry) {
@@ -103,11 +149,12 @@ std::string MeshDoc::default_save_path(int) const { return source_path(); }
 void MeshDoc::save(int target, const std::string& path) {
     static const char* kFmt[] = {"ply", "obj", "glb", "stl"};
     const int t = std::clamp(target, 0, 3);
+    const std::vector<uint8_t>& keep = alive_of(0);
 
     // Drop the faces a deleted vertex took with it, then the vertices nothing
     // refers to any more -- a file full of orphans is not what was asked for.
     meshing::MeshData out;
-    const uint8_t* alive = this->alive();
+    const uint8_t* alive = keep.data();
     std::vector<int> remap(_m.V.size(), -1);
     out.F.reserve(_m.F.size());
     for (const auto& f : _m.F) {

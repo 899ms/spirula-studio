@@ -182,7 +182,8 @@ bool FileDialog::draw() {
                 _cwd = fs::absolute(_path_edit, ec).string();
                 _selected.clear();
                 refresh();
-            } else if (_mode == Mode::File && fs::is_regular_file(_path_edit, ec)) {
+            } else if (_mode != Mode::Save && _mode != Mode::Folder &&
+                       fs::is_regular_file(_path_edit, ec)) {
                 _results.assign(1, fs::absolute(_path_edit, ec).string());
                 confirmed = true;
             } else if (_mode == Mode::Save) {
@@ -218,7 +219,7 @@ bool FileDialog::draw() {
                             refresh();
                             break;   // _entries invalidated
                         }
-                        if (_mode == Mode::File) {
+                        if (_mode == Mode::File || _mode == Mode::FileOrFolder) {
                             _results.assign(1, full.string());
                             confirmed = true;
                         }
@@ -261,7 +262,7 @@ bool FileDialog::draw() {
                 ui::TextColored(ImVec4(1.0f, 0.78f, 0.35f, 1.0f),
                                 msg::fd_will_replace);
             }
-        } else if (_mode == Mode::Folder) {
+        } else if (_mode == Mode::Folder || _mode == Mode::FileOrFolder) {
             if (have_sel) {
                 if (ui::Button(msg::fd_select_highlighted)) {
                     _results.assign(1, (fs::path(_cwd) / _selected[0]).string());

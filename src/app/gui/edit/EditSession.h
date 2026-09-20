@@ -43,6 +43,13 @@ public:
     }
     // The owner's answer, once the user has chosen.
     void save_to(int target, const std::string& path);
+    // Save over what the document came from, which is what the panel's Save
+    // button and the quit dialog both mean.
+    void save_in_place();
+    // Ask for a place to save, the way the panel's "Save a copy" does.
+    void ask_save_copy();
+    bool can_save_in_place() const;
+    bool can_save_copy() const;
 
     // Anything the session wants said in the log panel.
     std::vector<std::string> drain_log();
@@ -59,15 +66,35 @@ public:
     void draw_viewport_overlay(const ViewportOverlay& v) override;
 
 private:
+    // The last thing that produced a selection, so that changing a setting it
+    // used re-runs it in place instead of leaving a stale answer on screen.
+    struct LastAction {
+        enum Kind { None, Stencil, Grow, Shrink, Piece, Floaters };
+        Kind kind = None;
+        int layer = 0;
+        std::vector<uint8_t> before;
+        Combine combine = Combine::Replace;
+        ShapeStroke shape;          // Stencil
+        ViewProjection view;        // Stencil
+        int64_t seed = -1;          // Piece
+    };
+
     void apply_stroke(const ShapeStroke& s, const ViewportInput& in);
+    // Re-run the last selection, replacing it rather than stacking a second.
+    void reapply_last();
+    void run_last(bool fresh);
     void run_select(std::vector<uint8_t> w, const spirula::i18n::Msg& name);
-    void reapply_depth();
     Combine combine_now(bool shift, bool ctrl) const;
+    void set_layer(int i);
     float reach();
     void ensure_grid();
+    void components(std::vector<int32_t>& label, std::vector<int64_t>& sizes);
     void grow_shrink(bool grow);
+    void select_seed(int64_t seed);
     void select_component_under(float px, float py);
-    void keep_largest_components(int keep);
+    void keep_largest_components();
+    void select_all(bool on);
+    void invert_selection();
     void handle_keys();
     void note(const std::string& s);
     bool view(ViewProjection& out) const;
@@ -80,20 +107,15 @@ private:
     int _combine = 0;                 // Combine, when no modifier is held
     int _save_target = 0;
     float _radius_mul = 2.0f;
-    float _spacing = 0.0f;            // measured once per document
+    float _spacing = 0.0f;            // measured once per layer
     int _keep_components = 1;
 
-    // The last stencil run, kept so the depth sliders can re-trim it without
-    // the user drawing the shape again.
-    bool _have_last = false;
-    ShapeStroke _last_shape;
-    ViewProjection _last_view;
-    Combine _last_combine = Combine::Replace;
-    std::vector<uint8_t> _before_last;
+    LastAction _last;
     SelectResult _last_result;
 
     OcclusionBuffer _occ;
     bool _occ_dirty = true;
+    int64_t _occ_alive = -1;
     float _occ_pose[12] = {};
 
     std::function<void(int, const std::string&, bool, const std::string&)>
@@ -101,7 +123,9 @@ private:
     std::vector<std::string> _log;
     std::string _status;              // formatted, already translated
     bool _status_err = false;
-    int64_t _occ_alive = -1;          // the live count the buffer was built at
+    // Set when the Save button is pressed; the panel puts the question up and
+    // clears it when it is answered.
+    bool _ask_overwrite = false;
 };
 
 }  // namespace gui

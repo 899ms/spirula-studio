@@ -38,10 +38,11 @@ public:
     // context (GUI thread) and the session's load_dataset() to have
     // completed. Returns false when GL init fails (missing functions).
     bool build(const spirula::TrainerSession& session);
-    // The same, from the parsed data alone. A point cloud opened in the
-    // viewer has no session behind it and no cameras at all (`post` empty,
-    // ds.num_cameras == 0), which this handles: it simply draws no frusta.
-    bool build(const ParsedDataset& ds, const PostSplitCameras& post);
+    // The same over parsed data alone, with no cameras at all handled (a
+    // point file has none, and then no frusta are drawn). `cam_selected` is
+    // one flag per camera of `ds`, drawn in the highlight colour.
+    bool build(const ParsedDataset& ds, const PostSplitCameras& post,
+               const uint8_t* cam_selected = nullptr);
     // A triangle mesh, drawn shaded instead of a point cloud. `to_normalized`
     // is the similarity that maps the mesh's own coordinates into the frame
     // the viewport navigates (scale + center, as SplatViewer computes for a
@@ -131,8 +132,11 @@ private:
     // Host copy of the displayed (stride-sampled, normalized-frame) points
     // for double-click picking. CPU RAM only.
     std::vector<float> _pick_xyz;
-    int64_t _num_cam_verts = 0;    // total frustum verts (bright then dim)
-    int64_t _num_cam_bright = 0;   // border + anchor verts (drawn full-color)
+    // Frustum verts, in draw order: the selected cameras' lines, then the
+    // rest's borders and anchors, then the rest's dimmed interior gridlines.
+    int64_t _num_cam_verts = 0;
+    int64_t _num_cam_sel = 0;
+    int64_t _num_cam_bright = 0;
     float _base_cam_size = 0.1f;
 
     unsigned _fbo = 0, _color_tex = 0, _depth_rb = 0;

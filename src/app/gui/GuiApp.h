@@ -153,6 +153,10 @@ private:
     // Route for user-initiated opens: confirms first when training.
     void request_open_dataset(std::string dir);
 
+    // The comparison panes, with the editing panel beside them when a pane is
+    // being edited. The viewer screen and the meshing preview share it.
+    void draw_compare_panes();
+
     // The viewer screen: a splat file (or a checkpoint / run directory) opened
     // for looking at. Takes the engine over, so it goes through the same
     // confirmation as any other session-destroying action.
@@ -517,6 +521,10 @@ private:
     // the next model opened is being opened in order to edit it.
     int _edit_save_target = 0;
     bool _edit_after_open = false;
+    // Quitting with unsaved edits: the question is asked before the training
+    // one, because the answer decides whether anything is written at all.
+    bool _edit_exit_confirm = false;
+    void draw_edit_exit_modal();
     bool _quit = false;
     bool _open_confirm = false;      // arm the stop-training modal
     bool _confirm_shown = false;     // modal currently expected open

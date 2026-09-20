@@ -40,7 +40,7 @@ SplatDoc::SplatDoc(spirula::SplatCloud cloud, const std::string& source,
                                   to_view[4] * to_view[4] +
                                   to_view[8] * to_view[8]);
     std::vector<float> pos((size_t)n * 3);
-    _radius.resize((size_t)n);
+    std::vector<float> radius((size_t)n);
     for (int64_t i = 0; i < n; i++) {
         const float* m = &_c.means[(size_t)i * 3];
         for (int r = 0; r < 3; r++)
@@ -50,15 +50,12 @@ SplatDoc::SplatDoc(spirula::SplatCloud cloud, const std::string& source,
         const float s = std::max(std::max(_c.scales[(size_t)i * 3],
                                           _c.scales[(size_t)i * 3 + 1]),
                                  _c.scales[(size_t)i * 3 + 2]);
-        _radius[(size_t)i] = std::exp(std::min(s, 8.0f)) * scale;
+        radius[(size_t)i] = std::exp(std::min(s, 8.0f)) * scale;
     }
     _opacity.resize((size_t)n);
     _dc.resize((size_t)n * 3);
-    init(n, std::move(pos), source);
-}
-
-const spirula::i18n::Msg& SplatDoc::element_name() const {
-    return msg::elem_gaussian;
+    set_source(source);
+    add_layer(msg::elem_gaussian, n, std::move(pos), std::move(radius));
 }
 
 void SplatDoc::publish_impl(bool geometry) {
