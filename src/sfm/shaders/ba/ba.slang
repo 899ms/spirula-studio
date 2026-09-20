@@ -66,7 +66,7 @@ static const uint kNoMember = 0xFFFFFFFFu;
 [[vk::binding(28)]] RWStructuredBuffer<Real> u_res;         // weighted residual (2 per obs)
 
 // ---- rigs (bindings 29..44 are cg.slang's) ----
-[[vk::binding(45)]] StructuredBuffer<uint4> u_member_info;  // (per member) x=ext offset, y=ext column base, z=n_free, w=0
+[[vk::binding(45)]] StructuredBuffer<uint4> u_member_info;  // (per member) x=ext offset, y=ext column base, z=n_free, w=free-parameter mask
 [[vk::binding(46)]] RWStructuredBuffer<Real> u_exts;        // (6 per member) cam_from_rig
 
 // packed lower-triangular index, row >= col
@@ -171,13 +171,14 @@ void jac_impl<M : ICameraModel, let RIG : int>(uint tid) {
     // (D50). The loops stay unrolled over the static DOF and predicate.
     const int NE = RIG != 0 ? 6 : 0;
     const int DOF = 6 + NE + M.kNumIntr;
-    uint mfree = 0;
+    uint mfree = 0, mmask = 0;
     Real ext[6];
     for (int i = 0; i < 6; i++) ext[i] = Real(0.0);
     if (RIG != 0) {
         uint4 mi = u_member_info[ii.y];
         for (int i = 0; i < 6; i++) ext[i] = u_exts[mi.x + i];
         mfree = mi.z;
+        mmask = mfree != 0 ? mi.w : 0;
     }
 
     Real Jc[2][DOF];
@@ -226,8 +227,9 @@ void jac_impl<M : ICameraModel, let RIG : int>(uint tid) {
             dst = uint(a);
             write = true;
         } else if (a < 6 + NE) {
-            dst = uint(a);
-            write = mfree != 0;
+            uint i = uint(a - 6);
+            dst = 6 + countbits(mmask & ((1u << i) - 1u));
+            write = ((mmask >> i) & 1u) != 0;
         } else {
             uint i = uint(a - 6 - NE);
             dst = 6 + mfree + i;
@@ -605,9 +607,13 @@ void ext_update(uint3 t : SV_DispatchThreadID) {
     uint m = t.x;
     if (m >= u0) return;
     uint4 mi = u_member_info[m];
-    for (uint j = 0; j < mi.z; j++) {
+    if (mi.z == 0) return;
+    uint j = 0;
+    for (uint i = 0; i < 6; i++) {
+        if (((mi.w >> i) & 1u) == 0) continue;
         Real d = u_g[mi.y + j];
-        if (isfinite(d)) u_exts[mi.x + j] = u_exts[mi.x + j] - d;
+        j++;
+        if (isfinite(d)) u_exts[mi.x + i] = u_exts[mi.x + i] - d;
     }
 }
 

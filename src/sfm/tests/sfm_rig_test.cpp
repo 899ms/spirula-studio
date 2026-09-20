@@ -5,6 +5,7 @@
 //   sfm_rig_test [--device N] [--real double|df|float]
 //
 // Prints PASS/FAIL per case and returns 0/1. See docs/testing.md.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -15,6 +16,8 @@
 #include "sfm/ba/Problem.h"
 #include "sfm/ba/Solver.h"
 #include "sfm/core/Rig.h"
+#include "sfm/feature/Pairing.h"
+#include "sfm/feature/RigPairs.h"
 #include "sfm/map/Mapper.h"
 #include "sfm/map/Merge.h"
 #include "sfm/tests/SyntheticBA.h"
@@ -56,9 +59,9 @@ SolverOptions baseOptions(RealCfg real, int device, bool cg) {
 
 // One assembly and one step, device against host, then the whole solve.
 void testParity(uint32_t model, uint32_t rig, bool rig_free, bool cg, RealCfg real, int device,
-                double tol) {
-    const BAProblem base =
-        synth::makeProblem(model, 9, 120, 1, 0.2, 40 + model + 3 * rig, -1, rig, rig_free);
+                double tol, uint32_t rig_mask = kExtAll) {
+    const BAProblem base = synth::makeProblem(model, 9, 120, 1, 0.2, 40 + model + 3 * rig, -1,
+                                              rig, rig_free, rig_mask);
     char name[96];
     const char* path = cg ? "cg" : "dense";
 
@@ -74,11 +77,11 @@ void testParity(uint32_t model, uint32_t rig, bool rig_free, bool cg, RealCfg re
         BundleSolver sc(Pc, oc);
         sc.init();
         sc.debugAssemble(1e-2f);
-        snprintf(name, sizeof name, "S   model=%u rig=%u%s", model, rig,
-                 rig && !rig_free ? " held" : "");
+        snprintf(name, sizeof name, "S   model=%u rig=%u%s mask=%x", model, rig,
+                 rig && !rig_free ? " held" : "", rig_mask);
         report(name, relMax(sg.debugPackedS(), sc.debugPackedS()), tol);
-        snprintf(name, sizeof name, "g   model=%u rig=%u%s", model, rig,
-                 rig && !rig_free ? " held" : "");
+        snprintf(name, sizeof name, "g   model=%u rig=%u%s mask=%x", model, rig,
+                 rig && !rig_free ? " held" : "", rig_mask);
         report(name, relMax(sg.debugG(), sc.debugG()), tol);
     }
 
@@ -105,6 +108,40 @@ void testParity(uint32_t model, uint32_t rig, bool rig_free, bool cg, RealCfg re
         snprintf(name, sizeof name, "%s extrinsics model=%u rig=%u", path, model, rig);
         report(name, relMax(Pg.exts, Pc.exts), tol);
     }
+}
+
+// ---- which pairs a rig implies ---------------------------------------------
+
+void testPairSources() {
+    using namespace sfm;
+    auto has = [](const std::vector<std::pair<uint32_t, uint32_t>>& v, uint32_t a, uint32_t b) {
+        return std::binary_search(v.begin(), v.end(), std::make_pair(a, b));
+    };
+    // Two folders of 40: the window stays inside each, and reaches 16 and 32.
+    std::vector<uint32_t> run(80);
+    for (uint32_t i = 0; i < 80; i++) run[i] = i / 40;
+    const auto seq = sequentialPairs(80, 10, true, run);
+    report("pairs: window reaches +10", has(seq, 0, 10) && !has(seq, 0, 11) ? 0.0 : 1.0, 0.5);
+    report("pairs: quadratic reaches +16, +32", has(seq, 0, 16) && has(seq, 3, 35) ? 0.0 : 1.0,
+           0.5);
+    report("pairs: no window across folders", !has(seq, 39, 40) && !has(seq, 30, 46) ? 0.0 : 1.0,
+           0.5);
+    report("pairs: plain window unchanged",
+           sequentialPairs(80, 10, false) == generatePairs(80, PairMode::Sequential, 10) ? 0.0
+                                                                                           : 1.0,
+           0.5);
+
+    // A dual fisheye of three frames: cam0 = images 0..2, cam1 = 3..5.
+    RigDef d;
+    d.members = {RigMemberDef{"cam0"}, RigMemberDef{"cam1"}};
+    d.kind = "dual-fisheye";
+    applyRigKind(d);
+    const RigTable t = buildRigTable(
+        {"cam0/a", "cam0/b", "cam0/c", "cam1/a", "cam1/b", "cam1/c"}, {d});
+    const auto mates = rigMatePairs(t, {{0, 1}, {0, 5}, {0, 3}, {3, 4}}, 60.0);
+    report("rig pairs: cam0-cam1 brings cam1-cam0", has(mates, 2, 3) ? 0.0 : 1.0, 0.5);
+    report("rig pairs: a seed is not its own mate", !has(mates, 3, 4) && !has(mates, 0, 1) ? 0.0 : 1.0, 0.5);
+    report("rig pairs: nothing else", mates.size() == 1 ? 0.0 : 1.0, 0.5);
 }
 
 // ---- the mapper on a rig ---------------------------------------------------
@@ -383,11 +420,15 @@ int run(int argc, char** argv) {
         testParity(7, rig, true, false, got, device, tol);   // full_opencv: dof 24
         testParity(6, rig, true, true, got, device, tol);
         testParity(3, rig, true, true, got, device, tol);
+        testParity(6, rig, true, false, got, device, tol, 0x27);
+        testParity(6, rig, true, true, got, device, tol, 0x27);
+        testParity(3, rig, true, false, got, device, tol, 0x20);
     }
     // The rig-free problem still takes the plain kernels.
     testParity(3, 0, true, false, got, device, tol);
     testParity(3, 0, true, true, got, device, tol);
 
+    testPairSources();
     testRigAlignment();
     testMapperRig(device);
 

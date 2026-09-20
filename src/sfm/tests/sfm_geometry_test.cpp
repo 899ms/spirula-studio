@@ -57,6 +57,21 @@ int cmdGeomSelftest(int, char**) {
 
     int fails = 0;
 
+    // ---- angle-axis round trip, up to and at 180 degrees ----
+    {
+        double worst = 0;
+        std::uniform_real_distribution<double> u(-1, 1), ue(1, 16);
+        for (int k = 0; k < 20000; k++) {
+            const Vec3 n = Vec3{u(rng), u(rng), u(rng)}.normalized();
+            const double th = k % 2 ? M_PI - std::pow(10.0, -ue(rng)) : M_PI * 0.5 * (1 + u(rng));
+            const Mat3 R = angleAxisToRotation(n * th);
+            const Mat3 R2 = angleAxisToRotation(rotationToAngleAxis(R));
+            for (int i = 0; i < 9; i++) worst = std::max(worst, std::fabs(R[i] - R2[i]));
+        }
+        printf("angle-axis round trip near pi: %.2e\n", worst);
+        if (worst > 1e-12) { printf("  FAIL: angle-axis round trip\n"); fails++; }
+    }
+
     // ---- non-planar scene with noise + outliers ----
     {
         std::vector<Vec2> p1, p2;

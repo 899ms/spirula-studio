@@ -225,6 +225,48 @@ static int cmdManifestTest(int, char**) {
               "and then the manifest's mask_dir is what is used");
     }
 
+    // A rig kind fills in the extrinsics it implies and survives a round trip;
+    // an explicit member refine does too.
+    {
+        write_file(dir + "/kind.yaml",
+                   "rigs:\n"
+                   "  - kind: dual-fisheye\n"
+                   "    members: [cam0, cam1]\n"
+                   "  - members:\n"
+                   "      - prefix: v0\n"
+                   "        rotation: [1, 0, 0, 0]\n"
+                   "        translation: [0, 0, 0]\n"
+                   "      - prefix: v1\n"
+                   "        rotation: [0, 0, 1, 0]\n"
+                   "        translation: [0, 0, 0]\n"
+                   "        fixed: false\n"
+                   "        refine: translation\n");
+        Manifest k = manifest_read(dir + "/kind.yaml");
+        check(k.rigs.size() == 2 && k.rigs[0].kind == "dual-fisheye" &&
+                  k.rigs[0].members[1].has_ext && k.rigs[0].members[1].dof == kRigDofAxial &&
+                  !k.rigs[0].members[1].ext_fixed &&
+                  std::fabs(k.rigs[0].members[1].ext.R[0] + 1.0) < 1e-12 &&
+                  std::fabs(k.rigs[0].members[1].ext.R[8] + 1.0) < 1e-12,
+              "dual-fisheye: back to back, axial baseline");
+        check(k.rigs[1].members[1].dof == kRigDofTranslation, "refine: translation");
+        write_file(dir + "/kind2.yaml", manifest_write(k));
+        check(manifest_write(manifest_read(dir + "/kind2.yaml")) == manifest_write(k),
+              "kind and refine read back");
+        RigDef d;
+        check(parseRigArg("dual-fisheye=a/cam0,a/cam1", d).empty() && d.kind == "dual-fisheye" &&
+                  d.members.size() == 2 && d.members[1].prefix == "a/cam1" &&
+                  d.members[1].dof == kRigDofAxial,
+              "--rig dual-fisheye=...");
+        write_file(dir + "/badkind.yaml", "rigs:\n  - kind: trifocal\n    members: [a, b]\n");
+        bool bad_kind = false;
+        try {
+            manifest_read(dir + "/badkind.yaml");
+        } catch (const std::exception& e) {
+            bad_kind = std::string(e.what()).find("trifocal") != std::string::npos;
+        }
+        check(bad_kind, "an unknown rig kind names itself");
+    }
+
     // An unknown lens is caught where it is written, not 40 minutes in.
     write_file(dir + "/bad.yaml", "cameras:\n  - prefix: cam0\n    model: banana\n");
     threw = false;

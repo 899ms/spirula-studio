@@ -1419,6 +1419,14 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
 // Video -> frames
 // ---------------------------------------------------------------------------
 
+// Whether one stem's frames were taken at one instant: a 360 packing's views
+// are cut from one decoded canvas; separate tracks only under `sync_tracks`,
+// which only the built-in decoder does.
+static bool lockstep_extraction(const PrepJob& job, const PrepInput& in, bool builtin) {
+    if (in.pano360.valid()) return job.pano.mode != app::Pano360Mode::Off;
+    return builtin && job.sync_tracks;
+}
+
 bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
                                 const std::string& images,
                                 const std::string& masks, PrepResult& out,
@@ -1437,7 +1445,10 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
             // Kept frames of unknown provenance: the file's own rate is the
             // built-in extractor's convention, and a wrong one is refused
             // downstream by the gyro-against-poses check, not misused.
-            out.captures.push_back({in.subdir, in.path, 0.0});
+            out.captures.push_back(
+                {in.subdir, in.path, 0.0,
+                 lockstep_extraction(job, in, !job.force_external_decode &&
+                                                  native_decode_reason().empty())});
             // Masks a previous run left. Not when this one is re-doing them:
             // `masked` is what makes run() skip the masking pass entirely.
             if (job.mask_enable && !job.redo_masks) {
@@ -1455,7 +1466,7 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
         !job.force_external_decode && native_decode_reason().empty();
     if (want_builtin) {
         if (extract_video_builtin(job, in, images, out, error)) {
-            out.captures.push_back({in.subdir, in.path, 0.0});
+            out.captures.push_back({in.subdir, in.path, 0.0, lockstep_extraction(job, in, true)});
             return true;
         }
         if (_cancel.load()) return false;
@@ -1469,8 +1480,9 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
     // The stems are candidate numbers, and the candidates were resampled at
     // the kept rate times the group -- which is the rate that times them.
     if (ok)
-        out.captures.push_back(
-            {in.subdir, in.path, (double)input_fps(job, in) * candidate_group(job)});
+        out.captures.push_back({in.subdir, in.path,
+                                (double)input_fps(job, in) * candidate_group(job),
+                                lockstep_extraction(job, in, false)});
     return ok;
 }
 

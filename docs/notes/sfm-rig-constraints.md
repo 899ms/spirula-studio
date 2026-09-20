@@ -319,3 +319,123 @@ and then some:
 
 Every budget now reconstructs whole in one model, including the one where the
 old code came apart into four.
+
+## Known lens geometry, and matching
+
+Written 2026-09-19. Everything above estimates a rig from the reconstruction:
+a member is only used once enough frames registered it on its own, and then
+held to within `--rig-max-spread` of that estimate. For the cameras that
+produce most rigs, the geometry is known before the first image is read, and
+two more things follow from knowing it: a tighter parameterization, and a say
+in which pairs get matched.
+
+### What the cameras are
+
+Calibrated `cam1_from_cam0` of three dual-fisheye cameras, against the
+nominal "back to back, turned 180 degrees about the image's vertical"
+(`dualFisheyeNominal`, `Rig.h`):
+
+| camera | source | rotation off nominal | translation (lateral, axial) |
+|---|---|---|---|
+| PortalCam, fisheyes 0 and 1 | the device's own sparse model, 856 frames | 0.83 deg | 0.4 mm, 87.7 mm |
+| DJI Osmo 360 | this pipeline, metric via the IMU, 36 frames | 1.4 deg | 0.9 mm, 26.3 mm |
+| Insta360 X5 | this pipeline, two captures | 0.8-1.0 deg | see below |
+
+The rotation is right to a degree -- the lenses are mounted, not machined to
+the axis -- which at a fisheye focal of ~550 px is 8-12 px: good as a start,
+wrong as a constraint. So `kind: dual-fisheye` starts the rotation there and
+refines it. The translation is the other way round: the baseline lies on the
+optical axis to under a millimetre on both cameras measured against something
+metric, so it is one parameter, `t.z` in the second lens's frame (`refine:
+axial`, `BAProblem::Member::mask` 0x27).
+
+The Insta360 is the open case. Refined freely, its lateral component comes
+out at 30-50% of the axial one on both captures (`t_y` 0.0019 against
+`t_z` -0.0035). Held to the axis on the same pairs, the model has more points
+and lower error: 194103 points at 0.914 px against 178478 at 0.966 px on a
+470-image walk. A physical offset would do the opposite, so the lateral term
+is more likely absorbing something that is not a rigid offset (the two
+sensors read out in different directions); `refine: all` is the escape hatch
+if a camera turns out to need it.
+
+A GoPro `.360`'s views are cut from one canvas at rotations the extraction
+chose (`app/Pano360.h`), and the five of one lens share its centre. The rig
+calibrated from a 2090-image capture agrees with those rotations to 0.12-0.46
+deg, and part of that residual is real: held at the cut rotations, the same
+capture ends at 0.785 px; started there and refined, at 0.679 px, level with
+the estimated rig (0.682 px, 321551 points against 322327). So Spirula Studio
+starts every view at its cut rotation and refines it -- `refine: rotation` for
+the views of the reference lens, whose translation is exactly zero, `all` for
+the other lens's.
+
+Two things surfaced on the way, both general. `rotationToAngleAxis` lost the
+axis of a rotation within ~1e-6 rad of 180 degrees -- the skew-part formula
+divides rounding noise by the sine -- and returned roughly the identity; two of
+the other lens's views sit at exactly 180 degrees about a tilted axis, so they
+came out turned half a revolution. It now goes through the quaternion
+(`core/Pose.h`, and a round trip in `sfm_geometry_test`). And a known member
+is established before it has observed anything, so a view on the sky could
+enter a solve refined on next to nothing; `BundleOptions::rig_min_obs` (100)
+holds a member with fewer observations in the problem than that.
+
+### What knowing it buys
+
+- **The rig from the seed.** An established member is used by the first
+  registration, so frames register as frames from the start instead of lens
+  by lens until `calibrateRigs` has three frames to average.
+- **No early estimate to get wrong.** The estimated calibration is taken from
+  the first three to five frames that registered both lenses, and on a
+  1048-image Osmo 360 walk that estimate is where the run is decided: once it
+  declined the second lens as unsynchronized (1.76 deg spread) before taking
+  it, and in another run of the same frames it accepted one from four frames
+  with a translation a hundred times the real baseline, after which the rig
+  placed 251 images on its word alone and the model ended with 251489 points
+  at 1.85 px. A known member is never estimated early, and never declined.
+
+The same walk, one change at a time (`--quality medium`, 1048 images):
+
+| run | registered | points | error | mapping |
+|---|---|---|---|---|
+| estimated rig, old pairing | 1046 | 359341 | 1.52 px | 3:39 |
+| `dual-fisheye`, old pairing | 1042 | 401979 | 1.47 px | 3:38 |
+| estimated rig, new pairing | 1040 | 251489 | 1.85 px | 4:31 |
+| `dual-fisheye`, new pairing | 1040 | 401718 | 1.47 px | 5:15 |
+
+The last row spent its extra mapping time on 24% more correspondences and on
+seeding sub-models around four frames looking straight down at a paved slope
+from close range, which the first row had registered lens by lens at 6-20%
+inlier ratios.
+
+### Rig-mates in matching
+
+With the member rotations known, a verified pair says more than that two
+images overlap: if `cam0/i` matches `cam0/j`, frames i and j face the same
+way, so `cam1/i` faces `cam1/j`; if `cam0/i` matches `cam1/j`, the camera
+turned round between them and `cam1/i` faces `cam0/j`. On a dual fisheye the
+two lenses see disjoint halves of the scene, so content-based pair selection
+ranking one lens's pair says nothing about the other's -- and a frame link
+resting on one lens is exactly the weak link a split walk breaks at.
+`--rig-pairs` (`feature/RigPairs.h`) matches those rig-mates in a second
+verification pass, seeded by pairs that verified with
+`--rig-pair-min-inliers` (30), for frame pairs the first pass joined with at
+most a quarter of the rig's members.
+
+How it was arrived at, on the dual fisheyes and the `.360`:
+
+| variant | capture | mates tried | verified |
+|---|---|---|---|
+| mates of every shortlist pair, before verification | PortalCam, 1712 images | 12333 | ~25%, 4x the matching time |
+| mates of verified pairs | PortalCam | 7953 | 72% |
+| mates of verified pairs | Osmo 360 walk, 1048 images | 4235 | 95% |
+| mates of verified pairs | Insta360 X5 at 400 features | 406 | 62% |
+| mates of verified pairs, weak frame links only | `.360`, 10 views, 700 features | 9479 | 8% |
+| ... and only lenses facing away from the seed's | same | 5622 | 6% |
+
+So it applies to `kind: dual-fisheye` rigs alone. "The seed pair faced alike"
+is true to within the lenses' overlap for two ~190-degree fisheyes; two 90-degree
+views overlap at 60 degrees apart, and their counterparts then do not. A `.360`
+would need each seed's measured relative rotation rather than the assumption:
+the verifier's inliers give it for the price of an essential decomposition, and
+a mate could then be verified with a 2-point translation RANSAC and gated on
+agreeing with its seed. That is the same machinery the telemetry proposals need
+for gyro-predicted rotations, and it is not built.

@@ -392,6 +392,8 @@ std::string applyPresets(SfmConfig& cfg, const std::set<std::string>& seen,
         // intrinsics. Give every image its own (D20).
         presetSet(seen, moved, "camera-mode", cfg.camera_mode, std::string("image"));
         cfg.camera_mode_pinned = true;
+        // Downloaded photos are in no order, so their file order links nothing.
+        presetSet(seen, moved, "prefilter-sequential", cfg.prefilter_sequential, false);
     } else {
         return "unknown --data-type '" + cfg.data_type + "' (individual, video or internet)";
     }

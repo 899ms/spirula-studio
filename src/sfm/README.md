@@ -399,6 +399,18 @@ pair selection. Two things fix it, and `auto` uses both:
   Forced on that same capture it also produced one model (249 images), for 1.6 s
   of selection and 2.5x the pairs to match. `--no-loop-closure` is the old
   behaviour.
+- **`--prefilter-sequential` (on by default) is the converse, above the
+  cutoff**: pair selection takes the sequential window too, so a weak link the
+  content score ranked just outside an image's top-k is still matched when the
+  file order says the two are neighbours. It applies to a folder of photos as
+  much as to video (named in shooting order, it is the same thing); the
+  `internet` preset turns it off. On a 470-image `.insv` walk the shortlist
+  held only 1540 of the window's 5990 pairs, and 3644 of the 4450 it added
+  verified (median 53 inliers, against 223 for the shortlist's own).
+
+Every sequential window runs per folder -- a rig's lenses, several clips --
+and, with `--quadratic-overlap` (on), also links each image to the ones 16,
+32, 64 ... ahead, up to 2^(overlap-1), as COLMAP's `quadratic_overlap` does.
 
 Everything else has a default that a beginner should not have to touch.
 
@@ -566,14 +578,44 @@ spirula sfm auto IMAGES/ -o ws/ --rig cam0,cam1            # cam0/x.jpg + cam1/x
 spirula sfm auto IMAGES/ -o ws/ --rig 'clip1,clip2:cam0,cam1'   # one rig behind two videos
 spirula sfm auto IMAGES/ -o ws/ --rig '*:cam0,cam1'        # ... behind every top-level folder
 spirula sfm auto IMAGES/ -o ws/ --rig cam0,cam1 --rig cam2,cam3   # two rigs
+spirula sfm auto IMAGES/ -o ws/ --rig dual-fisheye=cam0,cam1     # a 360 camera's two lenses
 ```
 
 The form with captures keeps frames apart per capture (a stem repeats across
 clips) while the calibration is one. The manifest's `rigs:` list spells the same
 thing, and may carry a member's known `cam_from_rig` (quaternion and
 translation; a zero translation is honoured as such, a nonzero one is used for
-its rotation until the model has a scale). `spirula sfm map` takes `--rig` too.
-An image claimed by two rigs, or a member no image matches, is an error.
+its rotation until the model has a scale) and, with `refine:`, which of its
+parameters bundle adjustment may move: `all`, `axial` (the rotation and the
+translation along the lens's own optical axis), `baseline` (that translation
+alone), `translation` or `none`. Members without extrinsics are estimated from
+the frames against the first member that has them. `spirula sfm map` takes
+`--rig` too. An image claimed by two rigs, or a member no image matches, is an
+error.
+
+**Known lens geometry.** A rig whose rotations are given is used from the seed
+pair on, instead of after enough frames registered each lens on its own.
+`kind: dual-fisheye` (`--rig dual-fisheye=...`) says the first two members are
+the back-to-back lenses of one 360 camera: the second turned 180 degrees about
+the image's vertical, the baseline between them its only translation (`axial`).
+Insta360 X, DJI Osmo 360 and a PortalCam's two fisheyes all calibrate within
+0.8-1.4 degrees of that rotation, so it is refined; the Osmo and the PortalCam,
+measured against something metric, put the baseline within a millimetre of
+the axis. Spirula Studio sets it for an `.insv` or `.OSV` whose tracks were
+extracted in lockstep, starts a `.360`'s views at the rotations it cut them at
+(the views of one lens sharing its centre), and offers
+it for two photo folders on one rig. `docs/notes/sfm-rig-constraints.md`,
+"Known lens geometry", has the measurements.
+
+**Rig-mates in matching.** On a `dual-fisheye` rig, `--rig-pairs` (on)
+extends every pair of two frames that verified with at least
+`--rig-pair-min-inliers` (30) to the other lens: cam0-cam0 brings cam1-cam1,
+cam0-cam1 (the camera turned round) brings cam1-cam0. It is a second, smaller
+verification pass over what the first one confirmed, only for frame pairs the
+first pass joined weakly, so it composes with pair selection, the sequential
+window and loop closure alike. 72-95% of the mates verify on the dual fisheyes
+measured; on a `.360`'s narrow views 6% did, which is why it stops there
+(`docs/notes/sfm-rig-constraints.md`, "Rig-mates in matching").
 
 What the run does with it, in the order it happens:
 

@@ -106,6 +106,9 @@ struct SfmJob {
     // so a capture that comes back on itself links across the seam instead of
     // breaking into one model per unbroken run of frames.
     bool loop_closure = true;
+    // Pair selection only: also match each image with its neighbours in file
+    // order, the converse of the above.
+    bool prefilter_sequential = false;
     float init_focal_px = 0.0f;       // 0 = guess from EXIF / image size
     // Starting distortion, "k1,k2,..." in the lens model's own order; empty
     // starts at zero.
@@ -174,6 +177,14 @@ struct SfmJob {
     // flags into the GUI.
     std::string extra_args;
 };
+
+// Whether a sequential window can run, and so whether `overlap` means
+// anything: named, or what "auto" resolves to for a short video, or taken
+// alongside pair selection.
+inline bool sequential_window_applies(const SfmJob& j) {
+    return j.pairs == 2 || (j.pairs == 0 && j.data_type == 1) ||
+           ((j.pairs == 0 || j.pairs == 3) && j.prefilter_sequential);
+}
 
 // What a learned frontend still has to fetch, in order; empty for SIFT with
 // brute force, and empty once both artifacts are cached.
@@ -264,7 +275,8 @@ private:
 #ifdef SS_TOOL_SFM
     // The panel's per-input lens and focal rows, as the file the run reads.
     sfm::Manifest build_manifest(const SfmJob& job, const PrepResult& prep);
-    static std::vector<sfm::RigDef> build_rigs(const PrepJob& prep);
+    static std::vector<sfm::RigDef> build_rigs(const PrepJob& prep,
+                                               const PrepResult* res = nullptr);
 #endif
     std::vector<std::string> recon_args(const SfmJob& job,
                                         const PrepResult& prep);

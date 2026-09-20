@@ -226,6 +226,7 @@ private:
         frame_.resize(nImg_);
         eoff_.resize(nImg_);
         efree_.resize(nImg_);
+        emask_.resize(nImg_);
         std::vector<uint32_t> guse(P_.groups.size(), 0);
         for (uint32_t i = 0; i < nImg_; i++) guse[P_.image_group[i]]++;
         for (uint32_t i = 0; i < nImg_; i++) {
@@ -236,6 +237,7 @@ private:
             frame_[i] = P_.image_frame[i];
             eoff_[i] = m == kNoMember ? kNoSlot : P_.members[m].ext_offset;
             efree_[i] = (uint8_t)(m == kNoMember ? 0 : P_.members[m].n_free);
+            emask_[i] = (uint8_t)(efree_[i] ? P_.members[m].mask : 0);
             dof_[i] = (uint8_t)(6 + efree_[i] + g.n_intr);
             gz_[i] = (uint8_t)g.n_intr;
             icol_[i] = g.intr_col;
@@ -508,6 +510,7 @@ private:
                     for (uint32_t o = P_.obs_ranges[p]; o < P_.obs_ranges[p + 1]; o++) {
                         const uint32_t img = P_.obs_image[o];
                         const uint32_t dofw = dof_[img], ne = efree_[img], gz = gz_[img];
+                        const uint32_t emask = emask_[img];
                         double* jc = &Jc_[P_.jc_off[o]];
                         double* jp = &Jp_[6 * (size_t)o];
                         const double* pose = &P_.poses[6 * (size_t)frame_[img]];
@@ -530,7 +533,9 @@ private:
                             for (int row = 0; row < 2; row++) {
                                 const double* src = jcf + row * DOF;
                                 double* dst = jc + row * dofw;
-                                for (uint32_t a = 0; a < 6 + ne; a++) dst[a] = src[a] * sw;
+                                for (uint32_t a = 0; a < 6; a++) dst[a] = src[a] * sw;
+                                for (uint32_t i = 0, k = 6; i < 6; i++)
+                                    if ((emask >> i) & 1u) dst[k++] = src[6 + i] * sw;
                                 for (uint32_t i = 0; i < gz; i++)
                                     dst[6 + ne + i] = src[6 + NE + i] * sw;
                                 for (int j = 0; j < 3; j++) jp[row * 3 + j] = jpf[row * 3 + j] * sw;
@@ -1101,8 +1106,11 @@ private:
         for (uint32_t i = 0; i < poseDim_; i++)
             if (std::isfinite(g_[i])) P_.poses[i] -= g_[i];
         for (const BAProblem::Member& m : P_.members)
-            for (uint32_t j = 0; j < m.n_free; j++)
-                if (std::isfinite(g_[m.ext_col + j])) P_.exts[m.ext_offset + j] -= g_[m.ext_col + j];
+            for (uint32_t i = 0, j = 0; m.n_free && i < 6; i++) {
+                if (!((m.mask >> i) & 1u)) continue;
+                if (std::isfinite(g_[m.ext_col + j])) P_.exts[m.ext_offset + i] -= g_[m.ext_col + j];
+                j++;
+            }
         for (const BAProblem::Group& g : P_.groups)
             for (uint32_t j = 0; j < g.n_intr; j++)
                 if (std::isfinite(g_[g.intr_col + j])) P_.intr[g.intr_offset + j] -= g_[g.intr_col + j];
@@ -1116,7 +1124,7 @@ private:
     double lossParam_ = 1.0;
 
     uint32_t n_ = 0, poseDim_ = 0, tail_ = 0, nImg_ = 0, nPts_ = 0, nObs_ = 0;
-    std::vector<uint8_t> dof_, gz_, model_, efree_;
+    std::vector<uint8_t> dof_, gz_, model_, efree_, emask_;
     std::vector<uint32_t> icol_, ioff_, frame_, eoff_;  // eoff_: into exts, or kNoSlot
     bool exclusive_ = true;
 

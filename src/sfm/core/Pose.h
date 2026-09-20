@@ -47,22 +47,17 @@ inline Mat3 quaternionToRotation(const Quat& q) {
             2 * (x * z - w * y),     2 * (y * z + w * x),     1 - 2 * (x * x + y * y)};
 }
 
+// Through the quaternion everywhere: the skew-part formula divides rounding
+// noise by sin(angle) within ~1e-6 rad of pi, which turned a .360 view's
+// exact 180-degree rotation into the identity.
 inline Vec3 rotationToAngleAxis(const Mat3& R) {
-    double tr = (R[0] + R[4] + R[8] - 1.0) * 0.5;
-    tr = std::max(-1.0, std::min(1.0, tr));
-    double angle = std::acos(tr);
-    Vec3 axis = {R[7] - R[5], R[2] - R[6], R[3] - R[1]};
-    double s = 2.0 * std::sin(angle);
-    if (std::fabs(angle) < 1e-8) return {0, 0, 0};
-    if (std::fabs(s) < 1e-8) {  // angle near pi: extract from diagonal
-        // fall back to quaternion path
-        Quat q = rotationToQuaternion(R);
-        double vn = std::sqrt(q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
-        if (vn < 1e-12) return {0, 0, 0};
-        double a = 2.0 * std::atan2(vn, q[0]);
-        return {q[1] / vn * a, q[2] / vn * a, q[3] / vn * a};
-    }
-    return {axis.x / s * angle, axis.y / s * angle, axis.z / s * angle};
+    Quat q = rotationToQuaternion(R);
+    if (q[0] < 0)
+        for (double& v : q) v = -v;
+    const double vn = std::sqrt(q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (vn < 1e-12) return {0, 0, 0};
+    const double a = 2.0 * std::atan2(vn, q[0]);
+    return {q[1] / vn * a, q[2] / vn * a, q[3] / vn * a};
 }
 
 inline Mat3 angleAxisToRotation(const Vec3& aa) {

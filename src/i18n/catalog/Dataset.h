@@ -7074,6 +7074,127 @@ SS_MSG(mapper_schedule_help,
        "yukarı plan görünüm çizgesini küçük öbeklere böler, her birini ayrı "
        "yeniden oluşturur ve yukarı doğru birleştirir."));
 
+SS_MSG(prefilter_sequential,
+    EN("Also match neighbouring frames"),
+    JA("隣り合うフレームもマッチングする"),
+    ZH_HANS("同时匹配相邻帧"),
+    ZH_HANT("同時比對相鄰影格"),
+    KO("이웃 프레임도 매칭"),
+    DE("Auch benachbarte Bilder zuordnen"),
+    FR("Apparier aussi les images voisines"),
+    ES("Emparejar también los fotogramas vecinos"),
+    PT("Comparar também os quadros vizinhos"),
+    IT("Abbinare anche i fotogrammi vicini"),
+    NL("Ook naburige beelden matchen"),
+    RU("Сопоставлять и соседние кадры"),
+    TR("Komşu kareleri de eşleştir"));
+
+SS_MSG(prefilter_sequential_help,
+    EN("GPU pre-selection keeps each image's best partners by content, and a "
+       "real but weak link can fall just outside them -- one such gap is enough "
+       "to split a 360 walk into models stacked on top of each other. This also "
+       "matches each image with its neighbours in file order within its folder "
+       "(the next few, then 16, 32, 64 ... apart), which costs some extra "
+       "matching. Photos named in shooting order benefit as much as video. "
+       "Under \"Automatic\" it applies from 100 images, where pre-selection "
+       "takes over."),
+    JA("GPU による事前選択は内容から各画像の最良の相手だけを残すため、本物でも"
+       "弱いつながりはそのすぐ外にこぼれることがあります。そうした穴が1つある"
+       "だけで、360 の歩き撮りが上下に重なった複数のモデルに割れてしまいます。"
+       "これを有効にすると、同じフォルダー内でファイル順に隣り合う画像（直後の"
+       "数枚と、16、32、64 … 枚離れた画像）ともマッチングします。マッチングは"
+       "少し増えます。撮影順の名前の写真にも動画と同じく効きます。「自動」では"
+       "事前選択に切り替わる 100 枚以上のときに適用されます。"),
+    ZH_HANS("GPU 预筛选只按内容为每张图像保留最好的几个配对，真实但较弱的连接可能"
+            "刚好落在外面——只要有一处这样的缺口，360 的步行拍摄就会碎成上下叠在"
+            "一起的多个模型。开启后还会把每张图像与同一文件夹内按文件顺序相邻的"
+            "图像（紧接的几张，以及相隔 16、32、64 … 张的）做匹配，匹配量会稍有"
+            "增加。按拍摄顺序命名的照片和视频一样受益。在“自动”下，从 100 张起"
+            "（改用预筛选时）生效。"),
+    ZH_HANT("GPU 預篩選只按內容為每張影像保留最好的幾個配對，真實但較弱的連結可能"
+            "剛好落在外面——只要有一處這樣的缺口，360 的步行拍攝就會碎成上下疊在"
+            "一起的多個模型。開啟後還會把每張影像與同一資料夾內按檔案順序相鄰的"
+            "影像（緊接的幾張，以及相隔 16、32、64 … 張的）做比對，比對量會稍有"
+            "增加。依拍攝順序命名的相片和影片一樣受益。在「自動」下，從 100 張起"
+            "（改用預篩選時）生效。"),
+    KO("GPU 사전 선별은 내용으로 각 이미지의 가장 좋은 짝만 남기므로, 진짜지만 "
+       "약한 연결이 그 바로 밖으로 빠질 수 있습니다. 그런 틈이 하나만 있어도 "
+       "360 걷기 촬영이 위아래로 겹친 여러 모델로 갈라집니다. 이 옵션은 각 "
+       "이미지를 같은 폴더 안 파일 순서상의 이웃(바로 다음 몇 장, 그리고 16, "
+       "32, 64 … 장 떨어진 것)과도 매칭하며, 매칭이 조금 늘어납니다. 촬영 "
+       "순서대로 이름 붙은 사진도 동영상만큼 효과를 봅니다. '자동'에서는 사전 "
+       "선별로 바뀌는 100장부터 적용됩니다."),
+    DE("Die GPU-Vorauswahl behält für jedes Bild nur die inhaltlich besten "
+       "Partner, und eine echte, aber schwache Verbindung kann knapp "
+       "herausfallen -- eine einzige solche Lücke genügt, um einen 360-Rundgang "
+       "in übereinanderliegende Modelle zu zerlegen. Dies ordnet jedes Bild "
+       "zusätzlich seinen Nachbarn in Dateireihenfolge innerhalb seines Ordners "
+       "zu (die nächsten paar, dann 16, 32, 64 ... entfernt), was etwas mehr "
+       "Zuordnung kostet. Fotos, die in Aufnahmereihenfolge benannt sind, "
+       "profitieren wie Video. Unter „Automatisch“ gilt es ab 100 Bildern, wo die "
+       "Vorauswahl übernimmt."),
+    FR("La présélection GPU ne garde pour chaque image que ses meilleurs "
+       "partenaires par le contenu, et un lien réel mais faible peut tomber "
+       "juste à côté -- un seul trou de ce genre suffit à découper une "
+       "promenade à 360 en modèles empilés les uns sur les autres. Ceci apparie "
+       "aussi chaque image avec ses voisines dans l'ordre des fichiers de son "
+       "dossier (les quelques suivantes, puis à 16, 32, 64 ...), au prix d'un "
+       "peu plus d'appariement. Des photos nommées dans l'ordre de prise en "
+       "profitent autant qu'une vidéo. Sous « Automatique », cela s'applique à "
+       "partir de 100 images, quand la présélection prend le relais."),
+    ES("La preselección en GPU conserva para cada imagen solo sus mejores "
+       "parejas por contenido, y un enlace real pero débil puede quedar justo "
+       "fuera; basta un hueco así para partir un recorrido 360 en modelos "
+       "apilados unos sobre otros. Esto empareja además cada imagen con sus "
+       "vecinas en el orden de archivos de su carpeta (las siguientes, y luego "
+       "a 16, 32, 64 ...), a cambio de algo más de emparejamiento. Las fotos "
+       "nombradas en orden de toma se benefician igual que el vídeo. En "
+       "«Automático» se aplica desde 100 imágenes, cuando entra la "
+       "preselección."),
+    PT("A pré-seleção na GPU guarda para cada imagem só os melhores parceiros "
+       "por conteúdo, e uma ligação real mas fraca pode ficar logo de fora; "
+       "basta uma lacuna assim para partir uma caminhada 360 em modelos "
+       "empilhados uns sobre os outros. Isto também compara cada imagem com as "
+       "vizinhas na ordem dos arquivos da sua pasta (as próximas, e depois a "
+       "16, 32, 64 ...), ao custo de um pouco mais de correspondência. Fotos "
+       "nomeadas na ordem da captura se beneficiam tanto quanto vídeo. Em "
+       "\"Automático\" vale a partir de 100 imagens, quando entra a "
+       "pré-seleção."),
+    IT("La preselezione su GPU tiene per ogni immagine solo i partner migliori "
+       "per contenuto, e un legame reale ma debole può restare appena fuori: "
+       "basta un buco così per spezzare una camminata a 360 in modelli "
+       "impilati uno sull'altro. Questo abbina anche ogni immagine alle vicine "
+       "nell'ordine dei file della sua cartella (le successive, poi a 16, 32, "
+       "64 ...), al costo di un po' più di abbinamento. Le foto nominate "
+       "nell'ordine di scatto ne beneficiano quanto un video. Con "
+       "\"Automatico\" vale da 100 immagini, quando subentra la "
+       "preselezione."),
+    NL("GPU-voorselectie houdt per beeld alleen de inhoudelijk beste partners "
+       "over, en een echte maar zwakke verbinding kan er net buiten vallen -- "
+       "één zo'n gat is genoeg om een 360-wandeling in op elkaar gestapelde "
+       "modellen te breken. Dit matcht elk beeld ook met zijn buren in "
+       "bestandsvolgorde binnen zijn map (de volgende paar, daarna 16, 32, "
+       "64 ... verder), wat wat extra matchen kost. Foto's die in opnamevolgorde "
+       "heten, hebben er net zoveel aan als video. Onder \"Automatisch\" geldt "
+       "het vanaf 100 beelden, waar de voorselectie het overneemt."),
+    RU("Предварительный отбор на GPU оставляет каждому снимку только лучших "
+       "партнёров по содержанию, и настоящая, но слабая связь может оказаться "
+       "сразу за чертой -- одной такой прорехи хватает, чтобы 360-прогулка "
+       "распалась на модели, лежащие друг на друге. Этот флажок сопоставляет "
+       "каждый снимок и с соседями по порядку файлов в его папке (несколько "
+       "следующих, затем через 16, 32, 64 ...), что немного добавляет "
+       "сопоставлений. Фото, названные в порядке съёмки, выигрывают так же, "
+       "как видео. В режиме «Автоматически» действует от 100 снимков, когда "
+       "включается предварительный отбор."),
+    TR("GPU ön seçimi her görüntü için içerikçe en iyi eşleri tutar ve gerçek "
+       "ama zayıf bir bağ hemen dışarıda kalabilir; böyle tek bir boşluk bir 360 "
+       "yürüyüşünü üst üste binmiş modellere bölmeye yeter. Bu seçenek her "
+       "görüntüyü klasöründeki dosya sırasına göre komşularıyla da (sonraki "
+       "birkaç, ardından 16, 32, 64 ... uzaktakiler) eşleştirir; biraz daha "
+       "eşleştirme gerektirir. Çekim sırasıyla adlandırılmış fotoğraflar da "
+       "video kadar yararlanır. \"Otomatik\" altında ön seçimin devreye girdiği "
+       "100 görüntüden itibaren geçerlidir."));
+
 SS_MSG(sequential_overlap,
     EN("Sequential overlap"),
     JA("逐次マッチングの重なり"),
@@ -7940,6 +8061,115 @@ SS_MSG(rig_own,
     FR("Les objectifs de cette entrée"), ES("Las lentes de esta entrada"),
     PT("As lentes desta entrada"), IT("Gli obiettivi di questo ingresso"),
     NL("De lenzen van deze invoer"), RU("Объективы этого входа"), TR("Bu girdinin lensleri"));
+
+SS_MSG(rig_dual_fisheye,
+    EN("Rig {0}: {1} and {2} are the two lenses of one dual-fisheye camera"),
+    JA("リグ {0}: {1} と {2} は 1 台のデュアル魚眼カメラの 2 つのレンズ"),
+    ZH_HANS("装置 {0}：{1} 和 {2} 是同一台双鱼眼相机的两个镜头"),
+    ZH_HANT("裝置 {0}：{1} 和 {2} 是同一台雙魚眼相機的兩個鏡頭"),
+    KO("리그 {0}: {1} 와 {2} 는 한 듀얼 어안 카메라의 두 렌즈"),
+    DE("Rig {0}: {1} und {2} sind die zwei Objektive einer Dual-Fisheye-Kamera"),
+    FR("Rig {0} : {1} et {2} sont les deux objectifs d'une caméra double fisheye"),
+    ES("Rig {0}: {1} y {2} son las dos lentes de una cámara de doble ojo de pez"),
+    PT("Rig {0}: {1} e {2} são as duas lentes de uma câmera olho de peixe dupla"),
+    IT("Rig {0}: {1} e {2} sono i due obiettivi di una fotocamera doppio fisheye"),
+    NL("Rig {0}: {1} en {2} zijn de twee lenzen van één dual-fisheyecamera"),
+    RU("Риг {0}: {1} и {2} -- два объектива одной камеры с двумя «рыбьими глазами»"),
+    TR("Düzenek {0}: {1} ve {2}, tek bir çift balıkgözü kameranın iki merceği"));
+
+SS_MSG(rig_dual_fisheye_help,
+    EN("For frames taken from a dual-fisheye 360 camera (Insta360, DJI Osmo "
+       "360 and similar) whose two lenses were written to two folders, one "
+       "image per lens with the same file names. The reconstruction then "
+       "starts from the lenses looking in opposite directions instead of "
+       "waiting to measure it, and lets them differ only by a small rotation "
+       "and the distance between them along their shared axis. Leave it off "
+       "if the frames of the two folders were not taken at the same instants. "
+       "A video from such a camera is recognised without this."),
+    JA("デュアル魚眼の 360 カメラ（Insta360、DJI Osmo 360 など）のフレームで、"
+       "2 つのレンズが 2 つのフォルダーに、レンズごとに同じファイル名で書き出されて"
+       "いる場合に使います。再構成は、測定を待たずにレンズが正反対を向いている状態"
+       "から始め、両者の違いを小さな回転と共通の軸に沿った距離だけに制限します。"
+       "2 つのフォルダーのフレームが同じ瞬間に撮られていない場合はオフのままに"
+       "してください。こうしたカメラの動画はこれがなくても認識されます。"),
+    ZH_HANS("用于双鱼眼 360 相机（Insta360、大疆 Osmo 360 等）的帧：两个镜头分别写入"
+            "两个文件夹，每个镜头一张图、文件名相同。重建会直接从两个镜头朝向相反"
+            "开始，而不是等着测量，并且只允许两者相差一个小旋转和沿公共轴的距离。"
+            "如果两个文件夹的帧不是同一时刻拍的，请不要勾选。这类相机的视频无需"
+            "勾选也会被识别。"),
+    ZH_HANT("用於雙魚眼 360 相機（Insta360、DJI Osmo 360 等）的影格：兩個鏡頭分別寫入"
+            "兩個資料夾，每個鏡頭一張圖、檔名相同。重建會直接從兩個鏡頭朝向相反"
+            "開始，而不是等著測量，並且只允許兩者相差一個小旋轉和沿共同軸的距離。"
+            "如果兩個資料夾的影格不是同一時刻拍的，請不要勾選。這類相機的影片無需"
+            "勾選也會被辨識。"),
+    KO("듀얼 어안 360 카메라(Insta360, DJI Osmo 360 등)의 프레임으로, 두 렌즈가 두 "
+       "폴더에 렌즈마다 같은 파일 이름으로 저장된 경우에 씁니다. 재구성은 측정을 "
+       "기다리지 않고 렌즈가 서로 반대를 향한 상태에서 시작하며, 둘의 차이를 작은 "
+       "회전과 공통 축을 따른 거리로만 제한합니다. 두 폴더의 프레임이 같은 순간에 "
+       "찍히지 않았다면 끄세요. 이런 카메라의 동영상은 이것 없이도 인식됩니다."),
+    DE("Für Bilder einer Dual-Fisheye-360-Kamera (Insta360, DJI Osmo 360 und "
+       "ähnliche), deren zwei Objektive in zwei Ordner geschrieben wurden, ein "
+       "Bild pro Objektiv mit gleichen Dateinamen. Die Rekonstruktion beginnt "
+       "dann mit entgegengesetzt blickenden Objektiven, statt das erst zu "
+       "messen, und erlaubt nur eine kleine Drehung und den Abstand entlang der "
+       "gemeinsamen Achse zwischen ihnen. Aus lassen, wenn die Bilder der beiden "
+       "Ordner nicht zu denselben Zeitpunkten entstanden. Ein Video einer "
+       "solchen Kamera wird auch ohne dies erkannt."),
+    FR("Pour des images d'une caméra 360 double fisheye (Insta360, DJI Osmo "
+       "360 et semblables) dont les deux objectifs ont été écrits dans deux "
+       "dossiers, une image par objectif avec les mêmes noms de fichiers. La "
+       "reconstruction part alors d'objectifs regardant en sens opposé au lieu "
+       "d'attendre de le mesurer, et ne leur laisse qu'une petite rotation et "
+       "la distance le long de leur axe commun. Laisser décoché si les images "
+       "des deux dossiers n'ont pas été prises aux mêmes instants. Une vidéo "
+       "d'une telle caméra est reconnue sans cela."),
+    ES("Para fotogramas de una cámara 360 de doble ojo de pez (Insta360, DJI "
+       "Osmo 360 y similares) cuyas dos lentes se escribieron en dos carpetas, "
+       "una imagen por lente con los mismos nombres de archivo. La "
+       "reconstrucción parte entonces de lentes que miran en sentidos opuestos "
+       "en lugar de esperar a medirlo, y solo les deja una pequeña rotación y "
+       "la distancia a lo largo de su eje común. Déjelo desactivado si los "
+       "fotogramas de las dos carpetas no se tomaron en los mismos instantes. "
+       "Un vídeo de esa cámara se reconoce sin esto."),
+    PT("Para quadros de uma câmera 360 olho de peixe dupla (Insta360, DJI Osmo "
+       "360 e semelhantes) cujas duas lentes foram gravadas em duas pastas, uma "
+       "imagem por lente com os mesmos nomes de arquivo. A reconstrução parte "
+       "então de lentes olhando em sentidos opostos em vez de esperar para "
+       "medir isso, e só lhes deixa uma pequena rotação e a distância ao longo "
+       "do eixo comum. Deixe desligado se os quadros das duas pastas não foram "
+       "tirados nos mesmos instantes. Um vídeo de uma câmera assim é "
+       "reconhecido sem isto."),
+    IT("Per fotogrammi di una fotocamera 360 doppio fisheye (Insta360, DJI "
+       "Osmo 360 e simili) i cui due obiettivi sono stati scritti in due "
+       "cartelle, un'immagine per obiettivo con gli stessi nomi di file. La "
+       "ricostruzione parte allora da obiettivi rivolti in versi opposti invece "
+       "di aspettare di misurarlo, e lascia loro solo una piccola rotazione e "
+       "la distanza lungo l'asse comune. Lasciare spento se i fotogrammi delle "
+       "due cartelle non sono stati presi negli stessi istanti. Un video di una "
+       "tale fotocamera è riconosciuto anche senza."),
+    NL("Voor beelden van een dual-fisheye-360-camera (Insta360, DJI Osmo 360 "
+       "en dergelijke) waarvan de twee lenzen naar twee mappen zijn geschreven, "
+       "één beeld per lens met dezelfde bestandsnamen. De reconstructie begint "
+       "dan met lenzen die tegengesteld kijken in plaats van dat eerst te "
+       "meten, en staat alleen een kleine draaiing en de afstand langs hun "
+       "gemeenschappelijke as toe. Uit laten als de beelden van de twee mappen "
+       "niet op dezelfde momenten zijn gemaakt. Een video van zo'n camera "
+       "wordt ook zonder dit herkend."),
+    RU("Для кадров двухобъективной 360-камеры с «рыбьими глазами» (Insta360, "
+       "DJI Osmo 360 и подобные), у которой два объектива записаны в две "
+       "папки, по снимку на объектив с одинаковыми именами файлов. "
+       "Реконструкция тогда сразу исходит из того, что объективы смотрят в "
+       "противоположные стороны, а не ждёт, пока это будет измерено, и "
+       "допускает между ними лишь небольшой поворот и расстояние вдоль общей "
+       "оси. Не включайте, если кадры двух папок сняты не в одни и те же "
+       "моменты. Видео с такой камеры распознаётся и без этого."),
+    TR("Çift balıkgözü bir 360 kameranın (Insta360, DJI Osmo 360 ve benzerleri) "
+       "iki merceği iki klasöre, mercek başına aynı dosya adlarıyla bir "
+       "görüntü olarak yazılmış kareleri için. Yeniden oluşturma bunu ölçmeyi "
+       "beklemek yerine merceklerin zıt yönlere baktığı durumdan başlar ve "
+       "aralarında yalnızca küçük bir dönmeye ve ortak eksen boyunca mesafeye "
+       "izin verir. İki klasörün kareleri aynı anlarda çekilmediyse kapalı "
+       "bırakın. Böyle bir kameranın videosu bu olmadan da tanınır."));
 
 SS_MSG(rig_help,
     EN("Lenses on one rig keep a fixed relative pose, and the reconstruction "

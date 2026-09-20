@@ -91,6 +91,18 @@ struct SfmConfig {
     // SequentialMatching.loop_detection does with a vocabulary tree.
     // Sequential only; the other modes already consider every pair.
     bool loop_closure = true;
+    // Every sequential window also links i to i + 2^k for k < overlap
+    // (COLMAP's SequentialMatching.quadratic_overlap).
+    bool quadratic_overlap = false;
+    // The converse of loop_closure: pair selection also takes the sequential
+    // window, so a link the content score ranked just out of an image's top-k
+    // is still matched when the file order says the two are neighbours.
+    bool prefilter_sequential = false;
+    // Match the rig-mates of every chosen pair of two rig frames, by what the
+    // members' known rotations say faces what (sfm/feature/RigPairs.h).
+    bool rig_pairs = true;
+    double rig_pair_angle = 30.0;
+    int rig_pair_min_inliers = 30;
 
     // The one geometric tolerance, in extraction pixels (D47): the two-view
     // verifier's inlier radius and the mapper's reprojection cap are the same
@@ -291,6 +303,16 @@ struct SfmConfig {
       overlap)                                                                                     \
     F(loop_closure, "loop-closure", CMD_AUTO | CMD_MATCH, Tier::Advanced, "pipeline", 0, 0, "",    \
       loop_closure)                                                                                \
+    F(quadratic_overlap, "quadratic-overlap", CMD_AUTO | CMD_MATCH, Tier::Advanced, "pipeline", 0, \
+      0, "", quadratic_overlap)                                                                    \
+    F(prefilter_sequential, "prefilter-sequential", CMD_AUTO | CMD_MATCH, Tier::Advanced,          \
+      "pipeline", 0, 0, "", prefilter_sequential)                                                  \
+    F(rig_pairs, "rig-pairs", CMD_AUTO | CMD_MATCH, Tier::Advanced, "pipeline", 0, 0, "",          \
+      rig_pairs)                                                                                   \
+    F(rig_pair_angle, "rig-pair-angle", CMD_AUTO | CMD_MATCH, Tier::Advanced, "pipeline", 0, 180,  \
+      "", rig_pair_angle)                                                                          \
+    F(rig_pair_min_inliers, "rig-pair-min-inliers", CMD_AUTO | CMD_MATCH, Tier::Advanced,          \
+      "pipeline", 0, 100000, "", rig_pair_min_inliers)                                             \
     F(max_error, "max-error", CMD_AUTO | CMD_MATCH | CMD_MAP, Tier::Advanced, "pipeline", 0.1,     \
       100, "", max_error)                                                                          \
     F(max_image_size, "max-image-size", CMD_AUTO | CMD_EXTRACT, Tier::Advanced, "pipeline", 0,     \

@@ -537,8 +537,11 @@ reconstruction's resolution unchanged; the WebAssembly viewer does exactly that.
 
 The ten views of a frame share one file stem under `cam0/` .. `cam9/`, so
 `--rig cam0,cam1,...,cam9` (Spirula Studio: the input's rig row, on by
-default for a `.360`) reconstructs them as one pose per frame with the
-inter-view poses calibrated from the capture -- `src/sfm/README.md` "Rigs".
+default for a `.360`) reconstructs them as one pose per frame. Spirula Studio
+also hands the reconstruction the rotation it cut each view at, as the start
+of a refinement in which the five views of one lens keep its centre --
+`src/sfm/README.md` "Rigs". Without that (a bare `--rig`) the inter-view poses
+are calibrated from the capture instead.
 
 `src/app/Pano360.h` is the one implementation: it recognises the packing,
 plans the views, and resamples them. Both decode paths go through it -- ffmpeg
@@ -655,9 +658,8 @@ rectilinear face would take 4/pi = 1.27x, and the extra goes to the corners.
 Ten views per frame multiply the image count, and the views of one frame share
 no features: they are held together by pairs across TIME, so pairing must stay
 content-based (`--pairs auto`, or COLMAP's vocabulary tree) rather than
-sequential, which would give ten disconnected chains. A rig constraint would
-tie them together directly -- `docs/notes/sfm-rig-constraints.md` surveys what
-that would take.
+sequential, which would give ten disconnected chains. The rig ties them
+together directly -- `docs/notes/sfm-rig-constraints.md`.
 
 Equirectangular remains available and is one image per frame, but it puts both
 lenses into one spherical camera, seam and all, and reconstruction downsamples

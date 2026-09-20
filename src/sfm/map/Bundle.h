@@ -101,6 +101,8 @@ struct BundleOptions {
     // its extrinsic is refined rather than held; below that, the two would
     // trade off against each other.
     int rig_min_frames = 3;
+    // ... and observations of the member's images in the problem.
+    int rig_min_obs = 100;
 };
 
 // The problem built from a reconstruction, plus what writing the solution back
@@ -276,8 +278,14 @@ inline BundleLayout buildBundle(Reconstruction& rec, const BundleOptions& bopt) 
         }
         bundle_detail::packPose(fp, &P.poses[6 * f]);
     }
-    // Members: cam_from_rig from the calibration, refined when asked and when
-    // enough frames tie the member to the rest of its rig.
+    // Members: cam_from_rig from the calibration, refined when asked, when
+    // enough frames tie the member to its rig, and when it sees enough: a known
+    // member is established before it has observed anything (a lens on the sky).
+    std::vector<uint32_t> memberObs(L.memberOf.size(), 0);
+    for (uint32_t o = 0; o < P.num_obs; o++) {
+        const uint32_t m = P.image_member[P.obs_image[o]];
+        if (m != kNoMember) memberObs[m]++;
+    }
     P.members.resize(L.memberOf.size());
     P.exts.resize(6 * L.memberOf.size());
     P.ext_dim = 0;
@@ -285,11 +293,14 @@ inline BundleLayout buildBundle(Reconstruction& rec, const BundleOptions& bopt) 
         const RigCalib& c = rec.rigs[L.memberOf[m].first];
         const uint32_t member = L.memberOf[m].second;
         bundle_detail::packPose(c.cam_from_rig[member], &P.exts[6 * m]);
+        const uint32_t mask = rigs->rigs[L.memberOf[m].first].members[member].dof;
         const bool held = !bopt.refine_rigs || (int)member == c.ref ||
-                          (member < c.fixed.size() && c.fixed[member]) ||
-                          (int)memberCo[m] < bopt.rig_min_frames;
-        P.members[m] = {6 * m, P.ext_dim, held ? 0u : 6u};
-        if (!held) P.ext_dim += 6;
+                          (member < c.fixed.size() && c.fixed[member]) || mask == 0 ||
+                          (int)memberCo[m] < bopt.rig_min_frames ||
+                          (int)memberObs[m] < bopt.rig_min_obs;
+        const uint32_t nf = held ? 0u : extFreeCount(mask);
+        P.members[m] = {6 * m, P.ext_dim, nf, mask};
+        P.ext_dim += nf;
     }
 
     // Intrinsics groups. Model + parameter count are per group (each camera may

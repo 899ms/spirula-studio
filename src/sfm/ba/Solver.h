@@ -358,7 +358,7 @@ public:
             mi.push_back(m.ext_offset);
             mi.push_back(m.ext_col);
             mi.push_back(m.n_free);
-            mi.push_back(0);
+            mi.push_back(m.mask);
         }
         std::vector<VkContext::UploadItem> up = {
             {&bObs_, obs.data(), obs.size()},

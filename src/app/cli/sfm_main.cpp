@@ -158,7 +158,7 @@ static void ownOptionsAuto(FILE* out) {
     helpLine(out, "-o, --output DIR", H::word_required.get(),
              H::opt_auto_output.get());
     helpLine(out, "--manifest FILE", "", H::opt_manifest.get());
-    helpLine(out, "--rig PREFIX,PREFIX,...", "", H::opt_rig.get());
+    helpLine(out, "--rig [KIND=]PREFIX,PREFIX,...", "", H::opt_rig.get());
     helpLine(out, "--no-masks", "", H::opt_no_masks.get());
     helpLine(out, "--no-manage", "", H::opt_no_manage_auto.get());
     helpLine(out, "--progress-dir DIR", "", H::opt_progress_dir.get());
@@ -175,7 +175,7 @@ static void ownOptionsMatch(FILE* out) {
 }
 static void ownOptionsMap(FILE* out) {
     helpLine(out, "-o, --output DIR", "", H::opt_map_output.get());
-    helpLine(out, "--rig PREFIX,PREFIX,...", "", H::opt_rig.get());
+    helpLine(out, "--rig [KIND=]PREFIX,PREFIX,...", "", H::opt_rig.get());
     helpLine(out, "--audit", "", H::opt_map_audit.get());
     helpLine(out, "--no-manage", "", H::opt_no_manage_map.get());
     helpLine(out, "--progress-dir DIR", "", H::opt_progress_dir.get());

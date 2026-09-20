@@ -46,6 +46,7 @@
 #include "sfm/feature/Matcher.h"
 #include "sfm/feature/PairSelection.h"
 #include "sfm/feature/Pairing.h"
+#include "sfm/feature/RigPairs.h"
 #include "sfm/feature/Sift.h"
 #include "sfm/feature/Verification.h"
 #include "sfm/geometry/TwoView.h"
@@ -1355,6 +1356,8 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
     if (int rc = loadFeatureDir(featdir, cfg, /*with_descriptors=*/true, feats, db)) return rc;
     const size_t n_images = feats.size();
     stats.images = n_images;
+    std::vector<std::string> image_names(n_images);
+    for (size_t i = 0; i < n_images; i++) image_names[i] = db.images[i].name;
 
     std::vector<std::pair<uint32_t, uint32_t>> pairs;
     // Pair selection is minutes on a large capture and used to look like a
@@ -1389,8 +1392,24 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                    {(long long)pairs.size(), (long long)stats.scored,
                     popt.num_features, popt.num_neighbors,
                     format_duration(stats.select_seconds)});
+        // The shortlist keeps each image's top-k by a subsampled score, and a
+        // weak but real link just below the cut is gone for good; the file
+        // order still knows it.
+        if (cfg.prefilter_sequential) {
+            const size_t sel = pairs.size();
+            const std::vector<std::pair<uint32_t, uint32_t>> win = sequentialPairs(
+                (uint32_t)n_images, cfg.overlap, cfg.quadratic_overlap, folderRuns(image_names));
+            pairs.insert(pairs.end(), win.begin(), win.end());
+            std::sort(pairs.begin(), pairs.end());
+            pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+            L::err(Tag::Match, M::match_sequential_added,
+                   {(long long)(pairs.size() - sel), (long long)sel, (long long)win.size()});
+        }
     } else {
-        pairs = generatePairs((uint32_t)n_images, mode, cfg.overlap);
+        pairs = mode == PairMode::Exhaustive
+                    ? generatePairs((uint32_t)n_images, mode)
+                    : sequentialPairs((uint32_t)n_images, cfg.overlap, cfg.quadratic_overlap,
+                                      folderRuns(image_names));
         // Loop closure. A sequential chain has no link between the start and
         // end of a walk that comes back on itself, so one weak step splits the
         // reconstruction; the pair-selection shortlist supplies the missing
@@ -1423,7 +1442,7 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                 mode == PairMode::Exhaustive ? "exhaustive"
                 : mode == PairMode::Sequential
                     ? (cfg.loop_closure ? "sequential + loop closure" : "sequential")
-                    : "prefilter"});
+                    : (cfg.prefilter_sequential ? "prefilter + sequential" : "prefilter")});
     if (verbose && mode == PairMode::Prefilter)
         L::err(Tag::Match, M::match_prefilter_params,
                {popt.num_features, popt.num_neighbors});
@@ -1586,9 +1605,6 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
         std::vector<TwoViewMatches> fresh =
             verifyPairs(feats, todo, matchFn, vopt, &putative, progress);
         stats.putative += putative;
-        journal.close();
-        sfm::progress::flush();
-        events::stage_end(Stage::Match);
         // Back into the pair list's order, whichever run produced each entry:
         // the mapper's seed ranking breaks ties on it, so a resumed run must
         // hand it over in the order a single run would have.
@@ -1608,6 +1624,63 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                     db.pairs.push_back(std::move(fresh[n->second]));
             }
         }
+        // Rig-mates, as a second pass over what verified: only a link the
+        // images confirmed is extended to the other lenses (on a PortalCam
+        // walk, three in four mates of unverified shortlist pairs failed).
+        if (cfg.rig_pairs && !cfg.rigs.empty()) {
+            std::vector<std::pair<uint32_t, uint32_t>> seeds, mates;
+            try {
+                const RigTable rt = buildRigTable(image_names, cfg.rigs);
+                for (const TwoViewMatches& t : db.pairs)
+                    if ((int)t.matches.size() >= cfg.rig_pair_min_inliers)
+                        seeds.emplace_back(t.image1, t.image2);
+                mates = rigMatePairs(rt, seeds, cfg.rig_pair_angle);
+            } catch (const std::exception&) {
+                // A definition the names do not fit is the mapper's to report.
+            }
+            mates.erase(std::remove_if(mates.begin(), mates.end(),
+                                       [&](const std::pair<uint32_t, uint32_t>& q) {
+                                           return std::binary_search(pairs.begin(),
+                                                                     pairs.end(), q);
+                                       }),
+                        mates.end());
+            std::vector<std::pair<uint32_t, uint32_t>> mates_todo;
+            for (const auto& q : mates)
+                if (!done_set.count(resume::pairKey(q.first, q.second))) mates_todo.push_back(q);
+            std::vector<TwoViewMatches> more;
+            if (!mates_todo.empty()) {
+                auto mateFn = [&](size_t b, size_t e,
+                                  std::vector<std::vector<FeatureMatch>>& mout) {
+                    matcher->matchBatch(feats, mates_todo, b, e, mout);
+                };
+                vopt.progress_done_base = pairs.size();
+                vopt.progress_total = pairs.size() + mates_todo.size();
+                uint64_t put2 = 0;
+                more = verifyPairs(feats, mates_todo, mateFn, vopt, &put2, progress);
+                stats.putative += put2;
+            }
+            // In the mates' order whichever run verified each, as above.
+            std::unordered_map<uint64_t, size_t> at;
+            for (size_t i = 0; i < more.size(); i++)
+                at[resume::pairKey(more[i].image1, more[i].image2)] = i;
+            size_t kept = 0;
+            for (const auto& q : mates) {
+                const uint64_t key = resume::pairKey(q.first, q.second);
+                const auto old = done_kept.find(key);
+                if (old != done_kept.end()) db.pairs.push_back(std::move(old->second));
+                else if (const auto n = at.find(key); n != at.end())
+                    db.pairs.push_back(std::move(more[n->second]));
+                else continue;
+                kept++;
+            }
+            stats.pairs += mates.size();
+            if (!mates.empty())
+                L::err(Tag::Match, M::match_rig_pairs_added,
+                       {(long long)kept, (long long)mates.size(), (long long)seeds.size()});
+        }
+        journal.close();
+        sfm::progress::flush();
+        events::stage_end(Stage::Match);
         for (const TwoViewMatches& tvm : db.pairs) stats.inliers += tvm.matches.size();
     } else {
         const size_t batch = std::max(1, opt.batch_pairs);

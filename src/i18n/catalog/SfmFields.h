@@ -227,6 +227,178 @@ SS_MSG(loop_closure_help,
        "çiftleri de eşleştir; böylece aynı yere dönen bir çekim oraya geri "
        "bağlanır"));
 
+SS_MSG(quadratic_overlap_help,
+    EN("A sequential window also pairs each image with the ones 16, 32, 64 ... "
+       "apart in file order, up to 2^(overlap-1), as COLMAP does"),
+    JA("逐次ウィンドウで、各画像をファイル順で 16、32、64 … 離れた画像とも"
+       "組にします（2^(overlap-1) まで、COLMAP と同じ）"),
+    ZH_HANS("顺序窗口也把每张图像与文件顺序中相隔 16、32、64 … 张的图像配对，"
+            "直到 2^(overlap-1)，与 COLMAP 相同"),
+    ZH_HANT("循序視窗也把每張影像與檔案順序中相隔 16、32、64 … 張的影像配對，"
+            "直到 2^(overlap-1)，與 COLMAP 相同"),
+    KO("순차 창에서 각 이미지를 파일 순서로 16, 32, 64 … 장 떨어진 이미지와도 "
+       "짝짓습니다(2^(overlap-1)까지, COLMAP 과 같음)"),
+    DE("Ein sequenzielles Fenster paart jedes Bild auch mit den Bildern, die in "
+       "Dateireihenfolge 16, 32, 64 ... entfernt liegen, bis 2^(overlap-1), wie "
+       "COLMAP"),
+    FR("Une fenêtre séquentielle apparie aussi chaque image avec celles situées "
+       "à 16, 32, 64 ... dans l'ordre des fichiers, jusqu'à 2^(overlap-1), comme "
+       "COLMAP"),
+    ES("Una ventana secuencial también empareja cada imagen con las que están a "
+       "16, 32, 64 ... en el orden de archivos, hasta 2^(overlap-1), como COLMAP"),
+    PT("Uma janela sequencial também emparelha cada imagem com as que estão a "
+       "16, 32, 64 ... na ordem dos arquivos, até 2^(overlap-1), como o COLMAP"),
+    IT("Una finestra sequenziale abbina ogni immagine anche a quelle distanti "
+       "16, 32, 64 ... nell'ordine dei file, fino a 2^(overlap-1), come COLMAP"),
+    NL("Een sequentieel venster paart elk beeld ook met de beelden die in "
+       "bestandsvolgorde 16, 32, 64 ... verder liggen, tot 2^(overlap-1), zoals "
+       "COLMAP"),
+    RU("Последовательное окно также сопоставляет каждое изображение с теми, что "
+       "стоят через 16, 32, 64 ... в порядке файлов, вплоть до 2^(overlap-1), "
+       "как в COLMAP"),
+    TR("Sıralı pencere her görüntüyü dosya sırasında 16, 32, 64 ... uzaktaki "
+       "görüntülerle de eşleştirir; COLMAP gibi 2^(overlap-1)'e kadar"));
+
+SS_MSG(prefilter_sequential_help,
+    EN("When GPU pair selection runs, also match each image with its neighbours "
+       "in file order within its folder (the sequential window, --overlap and "
+       "--quadratic-overlap), so a real link the content score ranked too low is "
+       "not lost"),
+    JA("GPU のペア選択を使うとき、各画像を同じフォルダー内のファイル順で隣り合う"
+       "画像ともマッチングします（逐次ウィンドウ、--overlap と --quadratic-overlap）。"
+       "内容スコアが低く見積もった本物のつながりを失いません"),
+    ZH_HANS("使用 GPU 像对筛选时，也把每张图像与同一文件夹内文件顺序上的相邻图像匹配"
+            "（顺序窗口，--overlap 与 --quadratic-overlap），内容评分排得太低的真实"
+            "连接不会丢失"),
+    ZH_HANT("使用 GPU 影像對篩選時，也把每張影像與同一資料夾內檔案順序上的相鄰影像比對"
+            "（循序視窗，--overlap 與 --quadratic-overlap），內容評分排得太低的真實"
+            "連結不會遺失"),
+    KO("GPU 쌍 선택을 쓸 때 각 이미지를 같은 폴더 안 파일 순서상의 이웃과도 "
+       "매칭합니다(순차 창, --overlap 과 --quadratic-overlap). 내용 점수가 너무 "
+       "낮게 매긴 실제 연결을 잃지 않습니다"),
+    DE("Wenn die GPU-Paarauswahl läuft, jedes Bild auch mit seinen Nachbarn in "
+       "Dateireihenfolge innerhalb seines Ordners zuordnen (das sequenzielle "
+       "Fenster, --overlap und --quadratic-overlap), damit eine echte Verbindung, "
+       "die die Inhaltsbewertung zu niedrig einstufte, nicht verloren geht"),
+    FR("Quand la sélection de paires sur GPU tourne, apparier aussi chaque image "
+       "avec ses voisines dans l'ordre des fichiers de son dossier (la fenêtre "
+       "séquentielle, --overlap et --quadratic-overlap), pour ne pas perdre un "
+       "vrai lien que le score de contenu a classé trop bas"),
+    ES("Cuando se ejecuta la selección de pares en la GPU, emparejar también cada "
+       "imagen con sus vecinas en el orden de archivos de su carpeta (la ventana "
+       "secuencial, --overlap y --quadratic-overlap), para no perder un enlace "
+       "real que la puntuación de contenido dejó demasiado abajo"),
+    PT("Quando a seleção de pares na GPU roda, emparelhar também cada imagem com "
+       "suas vizinhas na ordem dos arquivos da sua pasta (a janela sequencial, "
+       "--overlap e --quadratic-overlap), para não perder uma ligação real que a "
+       "pontuação de conteúdo classificou baixo demais"),
+    IT("Quando gira la selezione delle coppie su GPU, abbinare anche ogni "
+       "immagine alle vicine nell'ordine dei file della sua cartella (la finestra "
+       "sequenziale, --overlap e --quadratic-overlap), per non perdere un legame "
+       "reale che il punteggio di contenuto ha messo troppo in basso"),
+    NL("Als de GPU-paarselectie draait, elk beeld ook matchen met zijn buren in "
+       "bestandsvolgorde binnen zijn map (het sequentiële venster, --overlap en "
+       "--quadratic-overlap), zodat een echte verbinding die de inhoudsscore te "
+       "laag rangschikte niet verloren gaat"),
+    RU("Когда работает отбор пар на GPU, сопоставлять каждое изображение и с его "
+       "соседями по порядку файлов в той же папке (последовательное окно, "
+       "--overlap и --quadratic-overlap), чтобы не терять настоящую связь, "
+       "которую оценка по содержанию поставила слишком низко"),
+    TR("GPU çift seçimi çalıştığında her görüntüyü klasöründeki dosya sırasına "
+       "göre komşularıyla da eşleştir (sıralı pencere, --overlap ve "
+       "--quadratic-overlap); içerik puanının fazla düşük sıraladığı gerçek bir "
+       "bağ kaybolmaz"));
+
+SS_MSG(rig_pairs_help,
+    EN("On a dual-fisheye rig, match each verified pair's rig-mates too: when "
+       "cam0 of two frames matched, cam1 of the same two frames; when cam0 "
+       "matched cam1, the camera had turned round, so cam1 against cam0"),
+    JA("デュアル魚眼のリグで、検証済みの各ペアのリグ仲間もマッチングします。2 フレームの "
+       "cam0 どうしが一致したら同じ 2 フレームの cam1 どうし、cam0 と cam1 が一致したら"
+       "カメラが振り返ったので cam1 と cam0 です"),
+    ZH_HANS("在双鱼眼装置上，也匹配每个已验证像对的装置同伴：两帧的 cam0 互相匹配时，"
+            "匹配同样两帧的 cam1；cam0 与 cam1 匹配时，说明相机转过身，就匹配 cam1 与 cam0"),
+    ZH_HANT("在雙魚眼裝置上，也比對每個已驗證影像對的裝置同伴：兩幀的 cam0 互相比對成功時，"
+            "比對同樣兩幀的 cam1；cam0 與 cam1 比對成功時，表示相機轉過身，就比對 cam1 與 cam0"),
+    KO("듀얼 어안 리그에서 검증된 각 쌍의 리그 짝도 매칭합니다. 두 프레임의 cam0 끼리 "
+       "맞으면 같은 두 프레임의 cam1 끼리, cam0 과 cam1 이 맞으면 카메라가 돌아섰으니 "
+       "cam1 과 cam0 을 매칭합니다"),
+    DE("Bei einem Dual-Fisheye-Rig auch die Rig-Partner jedes geprüften Paares "
+       "zuordnen: passten cam0 zweier Bilder zusammen, dann cam1 derselben zwei "
+       "Bilder; passte cam0 zu cam1, hatte sich die Kamera umgedreht, also cam1 zu "
+       "cam0"),
+    FR("Sur un rig double fisheye, apparier aussi les partenaires de rig de chaque "
+       "paire vérifiée : si cam0 de deux images s'apparient, cam1 des deux mêmes "
+       "images ; si cam0 s'apparie à cam1, la caméra s'était retournée, donc cam1 "
+       "avec cam0"),
+    ES("En un rig de doble ojo de pez, emparejar también los compañeros de rig de "
+       "cada par verificado: si cam0 de dos fotogramas coincidieron, cam1 de esos "
+       "dos; si cam0 coincidió con cam1, la cámara se había dado la vuelta, así "
+       "que cam1 con cam0"),
+    PT("Num rig olho de peixe duplo, emparelhar também os parceiros de rig de cada "
+       "par verificado: se cam0 de dois quadros casaram, cam1 dos mesmos dois; se "
+       "cam0 casou com cam1, a câmera tinha se virado, então cam1 com cam0"),
+    IT("Su un rig doppio fisheye, abbinare anche i compagni di rig di ogni coppia "
+       "verificata: se cam0 di due fotogrammi si sono abbinati, cam1 degli stessi "
+       "due; se cam0 si è abbinato a cam1, la fotocamera si era girata, quindi cam1 "
+       "con cam0"),
+    NL("Bij een dual-fisheyerig ook de rigpartners van elk geverifieerd paar "
+       "matchen: pasten cam0 van twee beelden, dan cam1 van dezelfde twee; paste "
+       "cam0 bij cam1, dan had de camera zich omgedraaid, dus cam1 met cam0"),
+    RU("На риге с двумя «рыбьими глазами» сопоставлять и напарников по ригу для "
+       "каждой проверенной пары: если совпали cam0 двух кадров, то cam1 тех же "
+       "двух; если cam0 совпал с cam1, камера развернулась, значит cam1 с cam0"),
+    TR("Çift balıkgözü bir düzenekte, doğrulanmış her çiftin düzenek eşlerini de "
+       "eşleştir: iki karenin cam0'ları eşleştiyse aynı iki karenin cam1'leri; "
+       "cam0, cam1 ile eşleştiyse kamera dönmüştür, yani cam1 ile cam0"));
+
+SS_MSG(rig_pair_angle_help,
+    EN("How far apart, in degrees, two rig-mates' viewing directions may be "
+       "for --rig-pairs to match them"),
+    JA("--rig-pairs がリグ仲間をマッチングする、視線方向の最大の開き（度）"),
+    ZH_HANS("--rig-pairs 匹配两个装置同伴时，它们视线方向允许相差的最大角度（度）"),
+    ZH_HANT("--rig-pairs 比對兩個裝置同伴時，它們視線方向允許相差的最大角度（度）"),
+    KO("--rig-pairs 가 두 리그 짝을 매칭할 때 허용하는 시선 방향 차이(도)"),
+    DE("Wie weit, in Grad, die Blickrichtungen zweier Rig-Partner auseinander "
+       "liegen dürfen, damit --rig-pairs sie zuordnet"),
+    FR("Écart maximal, en degrés, entre les directions de visée de deux "
+       "partenaires de rig pour que --rig-pairs les apparie"),
+    ES("Cuánto pueden separarse, en grados, las direcciones de visión de dos "
+       "compañeros de rig para que --rig-pairs los empareje"),
+    PT("Quanto podem se afastar, em graus, as direções de visada de dois "
+       "parceiros de rig para que --rig-pairs os emparelhe"),
+    IT("Di quanto possono divergere, in gradi, le direzioni di vista di due "
+       "compagni di rig perché --rig-pairs li abbini"),
+    NL("Hoe ver, in graden, de kijkrichtingen van twee rigpartners uiteen mogen "
+       "liggen om door --rig-pairs gematcht te worden"),
+    RU("Насколько, в градусах, могут расходиться направления взгляда двух "
+       "напарников по ригу, чтобы --rig-pairs их сопоставил"),
+    TR("--rig-pairs'in iki düzenek eşini eşleştirmesi için bakış "
+       "yönlerinin en fazla kaç derece ayrık olabileceği"));
+
+SS_MSG(rig_pair_min_inliers_help,
+    EN("Inliers a verified pair needs before --rig-pairs matches its rig-mates"),
+    JA("--rig-pairs がリグ仲間をマッチングする前に、検証済みペアに必要なインライア数"),
+    ZH_HANS("--rig-pairs 匹配装置同伴之前，已验证像对需要的内点数"),
+    ZH_HANT("--rig-pairs 比對裝置同伴之前，已驗證影像對需要的內點數"),
+    KO("--rig-pairs 가 리그 짝을 매칭하기 전에 검증된 쌍에 필요한 내부점 수"),
+    DE("Inlier, die ein geprüftes Paar braucht, bevor --rig-pairs seine "
+       "Rig-Partner zuordnet"),
+    FR("Inliers qu'une paire vérifiée doit avoir avant que --rig-pairs apparie "
+       "ses partenaires de rig"),
+    ES("Inliers que necesita un par verificado antes de que --rig-pairs empareje "
+       "a sus compañeros de rig"),
+    PT("Inliers de que um par verificado precisa antes que --rig-pairs "
+       "emparelhe seus parceiros de rig"),
+    IT("Inlier di cui una coppia verificata ha bisogno prima che --rig-pairs "
+       "abbini i suoi compagni di rig"),
+    NL("Inliers die een geverifieerd paar nodig heeft voordat --rig-pairs zijn "
+       "rigpartners matcht"),
+    RU("Сколько инлайеров нужно проверенной паре, чтобы --rig-pairs "
+       "сопоставил её напарников по ригу"),
+    TR("--rig-pairs'in düzenek eşlerini eşleştirmesinden önce doğrulanmış bir "
+       "çiftin gereken içleyen sayısı"));
+
 SS_MSG(max_error_help,
     EN("Inlier radius for verification and mapping, in pixels of the image SIFT "
        "ran on rather than of the source file (D47)"),

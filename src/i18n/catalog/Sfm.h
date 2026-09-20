@@ -2043,6 +2043,67 @@ SS_MSG(match_prefilter_kept,
     RU("отбор пар оставил: {0}/{1}; лучших признаков: {2}, соседей: {3} ({4})"),
     TR("çift seçimi tuttu: {0}/{1}; en iyi öznitelik: {2}, komşu: {3} ({4})"));
 
+SS_MSG(match_sequential_added,
+    EN("neighbours in file order added pairs: {0}, on top of selected pairs: {1} "
+       "(window: {2}). --no-prefilter-sequential turns this off."),
+    JA("ファイル順の隣接で追加したペア: {0}、選択済みペア: {1}（ウィンドウ: {2}）。"
+       "--no-prefilter-sequential で無効にできます。"),
+    ZH_HANS("按文件顺序相邻新增的像对：{0}，此外还有筛选出的像对：{1}（窗口：{2}）。"
+            "用 --no-prefilter-sequential 可关闭。"),
+    ZH_HANT("依檔案順序相鄰新增的影像對：{0}，此外還有篩選出的影像對：{1}（視窗：{2}）。"
+            "用 --no-prefilter-sequential 可關閉。"),
+    KO("파일 순서상 이웃으로 더한 쌍: {0}, 선택된 쌍: {1}(창: {2}). "
+       "--no-prefilter-sequential 로 끌 수 있습니다."),
+    DE("Nachbarn in Dateireihenfolge ergänzten Paare: {0}, zu ausgewählten "
+       "Paaren: {1} (Fenster: {2}). --no-prefilter-sequential schaltet das ab."),
+    FR("les voisines dans l'ordre des fichiers ont ajouté des paires : {0}, en "
+       "plus des paires sélectionnées : {1} (fenêtre : {2}). "
+       "--no-prefilter-sequential désactive cela."),
+    ES("las vecinas en el orden de archivos añadieron pares: {0}, además de los "
+       "pares seleccionados: {1} (ventana: {2}). --no-prefilter-sequential lo "
+       "desactiva."),
+    PT("as vizinhas na ordem dos arquivos acrescentaram pares: {0}, além dos "
+       "pares selecionados: {1} (janela: {2}). --no-prefilter-sequential "
+       "desliga isso."),
+    IT("le vicine nell'ordine dei file hanno aggiunto coppie: {0}, oltre alle "
+       "coppie selezionate: {1} (finestra: {2}). --no-prefilter-sequential lo "
+       "disattiva."),
+    NL("buren in bestandsvolgorde voegden paren toe: {0}, boven op "
+       "geselecteerde paren: {1} (venster: {2}). --no-prefilter-sequential zet "
+       "dit uit."),
+    RU("соседи по порядку файлов добавили пар: {0}, к отобранным парам: {1} "
+       "(окно: {2}). --no-prefilter-sequential это отключает."),
+    TR("dosya sırasındaki komşular eklenen çift: {0}, seçilen çiftlere ek "
+       "olarak: {1} (pencere: {2}). --no-prefilter-sequential bunu kapatır."));
+
+SS_MSG(match_rig_pairs_added,
+    EN("rig-mates of verified pairs kept: {0}/{1} (from {2} pairs with enough "
+       "inliers). --no-rig-pairs turns this off."),
+    JA("検証済みペアのリグ仲間で残ったペア: {0}/{1}（十分なインライアを持つ {2} ペア"
+       "から）。--no-rig-pairs で無効にできます。"),
+    ZH_HANS("已验证像对的装置同伴保留：{0}/{1}（来自 {2} 个内点足够的像对）。"
+            "用 --no-rig-pairs 可关闭。"),
+    ZH_HANT("已驗證影像對的裝置同伴保留：{0}/{1}（來自 {2} 個內點足夠的影像對）。"
+            "用 --no-rig-pairs 可關閉。"),
+    KO("검증된 쌍의 리그 짝 유지: {0}/{1}(내부점이 충분한 {2} 쌍에서). "
+       "--no-rig-pairs 로 끌 수 있습니다."),
+    DE("Rig-Partner geprüfter Paare behalten: {0}/{1} (aus {2} Paaren mit "
+       "genug Inliern). --no-rig-pairs schaltet das ab."),
+    FR("partenaires de rig des paires vérifiées gardés : {0}/{1} (issus de {2} "
+       "paires ayant assez d'inliers). --no-rig-pairs désactive cela."),
+    ES("compañeros de rig de pares verificados conservados: {0}/{1} (de {2} "
+       "pares con suficientes inliers). --no-rig-pairs lo desactiva."),
+    PT("parceiros de rig de pares verificados mantidos: {0}/{1} (de {2} pares "
+       "com inliers suficientes). --no-rig-pairs desliga isso."),
+    IT("compagni di rig di coppie verificate tenuti: {0}/{1} (da {2} coppie con "
+       "abbastanza inlier). --no-rig-pairs lo disattiva."),
+    NL("rigpartners van geverifieerde paren behouden: {0}/{1} (uit {2} paren met "
+       "genoeg inliers). --no-rig-pairs zet dit uit."),
+    RU("напарников по ригу у проверенных пар оставлено: {0}/{1} (из {2} пар с "
+       "достаточным числом инлайеров). --no-rig-pairs это отключает."),
+    TR("doğrulanmış çiftlerin düzenek eşlerinden tutulan: {0}/{1} (yeterli "
+       "içleyeni olan {2} çiftten). --no-rig-pairs bunu kapatır."));
+
 SS_MSG(match_loop_closure_added,
     EN("loop closure added pairs: {0}, on top of sequential pairs: {1} "
        "(selected: {2}, {3}). --no-loop-closure turns this off."),

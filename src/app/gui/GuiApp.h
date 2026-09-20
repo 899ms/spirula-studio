@@ -296,6 +296,8 @@ private:
     void draw_sensor_badge(const PrepInput& s);
     void draw_dataset_basics();       // the four or five knobs a beginner needs
     void draw_source_cameras();       // one lens per input, when there are several
+    void draw_rig_kinds(const std::vector<CameraGroup>& groups,
+                        const std::vector<std::string>& names);
     // The line under a lens picker when the input contradicts the model --
     // a panorama model on frames that are not 2:1, an ordinary lens on a
     // dual-fisheye capture. Silent unless it is sure: an input whose size

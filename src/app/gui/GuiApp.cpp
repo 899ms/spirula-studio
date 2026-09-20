@@ -541,6 +541,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("pairs", std::to_string(j.pairs));
     line("overlap", std::to_string(j.overlap));
     line("loop_closure", cfg_str(j.loop_closure));
+    line("prefilter_sequential", cfg_str(j.prefilter_sequential));
     line("features", std::to_string(j.features));
     line("matcher", std::to_string(j.matcher));
     line("mapper", std::to_string(j.mapper));
@@ -3743,12 +3744,49 @@ void GuiApp::draw_source_cameras() {
         draw_lens_warning(dir, in.is_video, models[i], /*builtin=*/true);
         ImGui::PopID();
     }
+    draw_rig_kinds(groups, names);
     ImGui::Unindent();
     // Only now: the edit is the row's own, and collapsing it into the row above
     // rewrites what the loop was holding references into.
     if (edited) {
         normalize_source_lenses(_sources, _sfm_job.camera_model);
         normalize_source_fps(_sources, _sfm_job.prep.video_fps);
+    }
+}
+
+// Two photo folders on one rig may be the two lenses of one dual-fisheye
+// camera, which a video's own file says for itself (SfmRunner::build_rigs).
+// Offered per rig of exactly two folders; any row of it holding the flag counts.
+void GuiApp::draw_rig_kinds(const std::vector<CameraGroup>& groups,
+                            const std::vector<std::string>& names) {
+    for (int id = kRigOwn; id < kRigFirstShared + kRigShared; id++) {
+        // "own" is a rig per input, so it is asked per input; a letter once.
+        const size_t n_inputs = id == kRigOwn ? _sources.size() : 1;
+        for (size_t input = 0; input < n_inputs; input++) {
+            std::vector<size_t> rows;
+            bool video = false;
+            for (size_t i = 0; i < groups.size(); i++) {
+                const CameraGroup& g = groups[i];
+                if (group_rig(_sources, g) != id) continue;
+                if (id == kRigOwn && (g.input != input || g.sub < 0)) continue;
+                video = video || _sources[g.input].is_video;
+                rows.push_back(i);
+            }
+            if (video || rows.size() != 2) continue;
+            bool dual = false;
+            for (size_t i : rows) dual = dual || group_rig_dual_fisheye(_sources, groups[i]);
+            fs::path own(_sources[input].path);
+            if (own.filename().empty()) own = own.parent_path();
+            const std::string rig_name =
+                id == kRigOwn ? own.filename().string()
+                              : std::string(1, (char)('A' + id - kRigFirstShared));
+            const std::string label =
+                i18n::format(dmsg::rig_dual_fisheye, {rig_name, names[rows[0]], names[rows[1]]}) +
+                "###rig_dual_fisheye_" + std::to_string(id) + "_" + std::to_string(input);
+            if (ui::CheckboxRaw(label.c_str(), &dual))
+                for (size_t i : rows) group_rig_dual_fisheye(_sources, groups[i]) = dual;
+            ui::help_on_hover(dmsg::rig_dual_fisheye_help);
+        }
     }
 }
 
@@ -5304,16 +5342,20 @@ void GuiApp::draw_sfm_advanced() {
               {&dmsg::mapper_flat, &dmsg::mapper_bottom_up});
     ui::help_on_hover(dmsg::mapper_schedule_help);
 
-    if (_sfm_job.pairs == 2) {
-        ImGui::SetNextItemWidth(px(260.0f));
-        ui::InputInt(dmsg::sequential_overlap, &_sfm_job.overlap);
-        ui::help_on_hover(dmsg::sequential_overlap_help);
-    }
-    // "Automatic" resolves to sequential for a short video, so offer this
-    // whenever sequential can be what runs, not only when it was named.
+    // "Automatic" resolves to sequential for a short video and to pair
+    // selection at 100 images, so each is offered whenever it can be what runs.
     if (_sfm_job.pairs == 2 || (_sfm_job.pairs == 0 && _sfm_job.data_type == 1)) {
         ui::Checkbox(dmsg::loop_closure, &_sfm_job.loop_closure);
         ui::help_on_hover(dmsg::loop_closure_help_builtin);
+    }
+    if (_sfm_job.pairs == 0 || _sfm_job.pairs == 3) {
+        ui::Checkbox(dmsg::prefilter_sequential, &_sfm_job.prefilter_sequential);
+        ui::help_on_hover(dmsg::prefilter_sequential_help);
+    }
+    if (sequential_window_applies(_sfm_job)) {
+        ImGui::SetNextItemWidth(px(260.0f));
+        ui::InputInt(dmsg::sequential_overlap, &_sfm_job.overlap);
+        ui::help_on_hover(dmsg::sequential_overlap_help);
     }
 
     ImGui::SetNextItemWidth(px(260.0f));

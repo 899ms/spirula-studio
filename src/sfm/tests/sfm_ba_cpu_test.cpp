@@ -296,9 +296,12 @@ Reference referenceSolve(const BAProblem& P, double lambda, double lossParam,
                                            &P.obs_xy[2 * (size_t)o], r, jc, Jp);
                 const double sw = std::sqrt(decltype(L)::weight(r[0] * r[0] + r[1] * r[1],
                                                                 lossParam));
+                const uint32_t mask = ne ? P.members[member].mask : 0;
                 for (int row = 0; row < 2; row++) {
-                    for (uint32_t a = 0; a < 6 + ne; a++)
+                    for (uint32_t a = 0; a < 6; a++)
                         Jc[row * kMaxCamDof + a] = jc[row * DOF + a] * sw;
+                    for (uint32_t i = 0, k = 6; i < 6; i++)
+                        if ((mask >> i) & 1u) Jc[row * kMaxCamDof + k++] = jc[row * DOF + 6 + i] * sw;
                     for (uint32_t i = 0; i < gr.n_intr; i++)
                         Jc[row * kMaxCamDof + 6 + ne + i] = jc[row * DOF + 6 + NE + i] * sw;
                 }
@@ -411,10 +414,10 @@ double relMax(const double* a, const double* b, size_t n) {
 // and the parameters the step leaves behind.
 void testAgainstReference(uint32_t model, uint32_t groups, const char* loss, bool cg,
                           uint32_t nImg = 9, int nfree = -1, uint32_t rig = 0,
-                          bool rig_free = true) {
+                          bool rig_free = true, uint32_t rig_mask = kExtAll) {
     const double lambda = 1e-2;
     BAProblem P = makeProblem(model, nImg, 90, groups, 0.15, 7 * model + groups, nfree, rig,
-                              rig_free);
+                              rig_free, rig_mask);
     if (P.num_obs < 100) {
         printf("model %u: too few observations, skipped\n", model);
         return;
@@ -463,10 +466,15 @@ void testAgainstReference(uint32_t model, uint32_t groups, const char* loss, boo
         smax = std::max(smax, std::fabs(R.dU[i]));
     }
     for (const BAProblem::Member& m : P.members)
-        for (uint32_t j = 0; j < m.n_free; j++) {
-            const double want = P2.exts[m.ext_offset + j] - R.dU[m.ext_col + j];
-            dmax = std::max(dmax, std::fabs(P.exts[m.ext_offset + j] - want));
+        for (uint32_t i = 0, j = 0; m.n_free && i < 6; i++) {
+            if (!((m.mask >> i) & 1u)) {
+                dmax = std::max(dmax, std::fabs(P.exts[m.ext_offset + i] - P2.exts[m.ext_offset + i]));
+                continue;
+            }
+            const double want = P2.exts[m.ext_offset + i] - R.dU[m.ext_col + j];
+            dmax = std::max(dmax, std::fabs(P.exts[m.ext_offset + i] - want));
             smax = std::max(smax, std::fabs(R.dU[m.ext_col + j]));
+            j++;
         }
     for (const BAProblem::Group& gr : P.groups)
         for (uint32_t j = 0; j < gr.n_intr; j++) {
@@ -584,6 +592,9 @@ int run(int argc, char** argv) {
         testAgainstReference(3, 1, "huber", true, 7, 6, rig, true);
         testAgainstReference(7, 1, "huber", false, 7, -1, rig, true);
         testAgainstReference(6, 1, "cauchy", true, 7, -1, rig, true);
+        // A dual-fisheye lens: rotation and t.z, or t.z alone.
+        testAgainstReference(6, 1, "huber", false, 7, -1, rig, true, 0x27);
+        testAgainstReference(3, 1, "huber", true, 7, 6, rig, true, 0x20);
     }
 
     if (!quick)

@@ -63,7 +63,7 @@ void printBaHelp(FILE* out) {
         {"--loss-param X", "1", &H::ba_opt_loss_param},
         {"--model {snavely|snavely_f}", "snavely", &H::ba_opt_model},
         {"--shared-intrinsics", "", &H::ba_opt_shared_intrinsics},
-        {"--rig PREFIX,PREFIX,...", "", &H::opt_rig},
+        {"--rig [KIND=]PREFIX,PREFIX,...", "", &H::opt_rig},
         {"--solver {auto|dense|cg}", "auto", &H::ba_opt_solver},
         {"--max-iters N", "", &H::ba_opt_max_iters},
         {"--damping X", "", &H::ba_opt_damping},

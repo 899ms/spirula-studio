@@ -78,6 +78,7 @@ struct SubCamera {
     std::string camera_model;        // empty = the input's own
     float focal_factor = 0.0f;       // 0 = no focal prior
     int rig = 0;                     // see PrepInput::rig
+    bool rig_dual_fisheye = false;   // see PrepInput::rig_dual_fisheye
 };
 
 // A row's rig choice: nothing, the lenses of its own input, or one of the
@@ -113,6 +114,10 @@ struct PrepInput {
     // Which rig this input's lenses belong to (kRig*). A multi-lens video
     // starts on its own; folders sharing a letter form one rig by file name.
     int rig = kRigNone;
+    // That rig's two folders are the back-to-back lenses of one dual-fisheye
+    // camera, so the reconstruction starts from their known relative rotation.
+    // Any row of the rig saying so is enough. A video's file says it itself.
+    bool rig_dual_fisheye = false;
     // Kept frames per second for THIS video; 0 takes the job's. A capture shot
     // as several clips is rarely shot at one pace, and a clip walked through
     // slowly wants fewer frames than the one that ran past the same wall.
@@ -152,6 +157,10 @@ inline int& group_rig(std::vector<PrepInput>& in, const CameraGroup& g) {
 }
 inline int group_rig(const std::vector<PrepInput>& in, const CameraGroup& g) {
     return g.sub < 0 ? in[g.input].rig : in[g.input].subcameras[(size_t)g.sub].rig;
+}
+inline bool& group_rig_dual_fisheye(std::vector<PrepInput>& in, const CameraGroup& g) {
+    return g.sub < 0 ? in[g.input].rig_dual_fisheye
+                     : in[g.input].subcameras[(size_t)g.sub].rig_dual_fisheye;
 }
 
 // Where a row's settings are stored.
@@ -338,6 +347,8 @@ struct PrepCapture {
     std::string subdir;
     std::string path;
     double fps = 0;
+    // Every track kept the same instants, so the frames of one stem are a rig.
+    bool lockstep = false;
 };
 
 struct PrepResult {

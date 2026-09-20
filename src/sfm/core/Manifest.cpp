@@ -107,6 +107,7 @@ Manifest manifest_read(const std::string& path) {
             if (!r.is_object()) bad(path, "rigs: each entry is a mapping");
             RigDef d;
             if (const JsonValue* v = r.find("name")) d.name = str_of(*v, path, "name");
+            if (const JsonValue* v = r.find("kind")) d.kind = str_of(*v, path, "kind");
             if (const JsonValue* v = r.find("captures")) {
                 if (!v->is_array()) bad(path, "rigs: captures: expected a list of prefixes");
                 for (const JsonValue& c : v->arr) d.captures.push_back(str_of(c, path, "captures"));
@@ -146,6 +147,11 @@ Manifest manifest_read(const std::string& path) {
                         if (v->type != JsonValue::Type::Bool) bad(path, "rigs: fixed: expected true or false");
                         md.ext_fixed = v->b;
                     }
+                    if (const JsonValue* v = m.find("refine")) {
+                        const std::string s = str_of(*v, path, "refine");
+                        if (!parseRigDof(s, md.dof))
+                            bad(path, "rigs: refine: '" + s + "' is not one of " + kRigDofNames);
+                    }
                 } else {
                     bad(path, "rigs: a member is a prefix or a mapping");
                 }
@@ -155,6 +161,7 @@ Manifest manifest_read(const std::string& path) {
                 d.members.push_back(std::move(md));
             }
             if (d.members.size() < 2) bad(path, "rigs: a rig needs at least two members");
+            if (std::string err = applyRigKind(d); !err.empty()) bad(path, "rigs: " + err);
             m.rigs.push_back(std::move(d));
         }
     }
@@ -234,6 +241,7 @@ std::string manifest_write(const Manifest& m, bool json) {
             JsonValue e;
             e.type = JsonValue::Type::Object;
             if (!d.name.empty()) e.obj.emplace_back("name", text(d.name));
+            if (!d.kind.empty()) e.obj.emplace_back("kind", text(d.kind));
             if (!d.captures.empty()) {
                 JsonValue caps;
                 caps.type = JsonValue::Type::Array;
@@ -258,6 +266,7 @@ std::string manifest_write(const Manifest& m, bool json) {
                 o.obj.emplace_back("rotation", std::move(rot));
                 o.obj.emplace_back("translation", std::move(tr));
                 if (!md.ext_fixed) o.obj.emplace_back("fixed", boolean(false));
+                if (md.dof != kRigDofAll) o.obj.emplace_back("refine", text(rigDofName(md.dof)));
                 mem.arr.push_back(std::move(o));
             }
             e.obj.emplace_back("members", std::move(mem));

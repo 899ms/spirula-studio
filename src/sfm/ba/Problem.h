@@ -47,6 +47,12 @@ static const int kNumModels = sizeof(kModels) / sizeof(kModels[0]);
 static const uint32_t kMaxCamDof = 24;
 static const uint32_t kMaxPlainDof = 18;
 static const uint32_t kNoMember = 0xFFFFFFFFu;
+static const uint32_t kExtAll = 0x3Fu;
+inline uint32_t extFreeCount(uint32_t mask) {
+    uint32_t n = 0;
+    for (int i = 0; i < 6; i++) n += (mask >> i) & 1u;
+    return n;
+}
 
 struct BAProblem {
     uint32_t num_images = 0, num_points = 0, num_obs = 0;
@@ -59,7 +65,10 @@ struct BAProblem {
     struct Member {
         uint32_t ext_offset;  // into `exts` (6 entries)
         uint32_t ext_col;     // column base; unused when n_free == 0
-        uint32_t n_free;      // 0 (held) or 6 (refined)
+        uint32_t n_free;      // columns owned: popcount(mask), 0 = held
+        // Which of the 6 stored parameters (angle-axis, t) own those columns,
+        // in order; a dual-fisheye lens refines its rotation and t.z alone.
+        uint32_t mask = kExtAll;
     };
     std::vector<Member> members;
 

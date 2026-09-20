@@ -972,51 +972,73 @@ SS_MSG(opt_rig,
     EN("Images under these path prefixes with the same name are one rig frame "
        "and keep a fixed relative pose (cam0,cam1 pairs cam0/x.jpg with "
        "cam1/x.jpg). Repeat for several rigs; the manifest's `rigs:` can also "
-       "carry known extrinsics."),
+       "carry known extrinsics."
+       " A `dual-fisheye=` prefix says the first two are the back-to-back lenses of "
+       "one 360 camera."),
     JA("これらのパス接頭辞の下で同名の画像を 1 つのリグフレームとして、相対姿勢を固定します"
        "（cam0,cam1 なら cam0/x.jpg と cam1/x.jpg が組になります）。複数のリグには繰り返し"
-       "指定します。マニフェストの `rigs:` では既知の外部パラメータも渡せます。"),
+       "指定します。マニフェストの `rigs:` では既知の外部パラメータも渡せます。"
+       "`dual-fisheye=` を前に付けると、最初の 2 つが 1 台の 360 カメラの背中合わせのレンズであることを示します。"),
     ZH_HANS("这些路径前缀下同名的图像构成一个装置帧，保持固定的相对位姿（cam0,cam1 把 "
             "cam0/x.jpg 和 cam1/x.jpg 配对）。多个装置可重复指定；清单的 `rigs:` 还能"
-            "给出已知外参。"),
+            "给出已知外参。"
+       "加上 `dual-fisheye=` 前缀表示前两个是同一台 360 相机背靠背的镜头。"),
     ZH_HANT("這些路徑前綴下同名的影像構成一個裝置幀，保持固定的相對姿態（cam0,cam1 把 "
             "cam0/x.jpg 和 cam1/x.jpg 配對）。多個裝置可重複指定；清單的 `rigs:` 還能"
-            "給出已知外參。"),
+            "給出已知外參。"
+       "加上 `dual-fisheye=` 前綴表示前兩個是同一台 360 相機背靠背的鏡頭。"),
     KO("이 경로 접두사 아래 이름이 같은 이미지는 하나의 리그 프레임이 되어 상대 자세가 고정됩니다"
        "(cam0,cam1 은 cam0/x.jpg 와 cam1/x.jpg 를 짝지음). 리그가 여럿이면 반복하세요. "
-       "매니페스트의 `rigs:` 로 알려진 외부 파라미터도 줄 수 있습니다."),
+       "매니페스트의 `rigs:` 로 알려진 외부 파라미터도 줄 수 있습니다."
+       " `dual-fisheye=` 를 앞에 붙이면 처음 둘이 한 360 카메라의 등을 맞댄 렌즈임을 뜻합니다."),
     DE("Bilder mit gleichem Namen unter diesen Pfadpräfixen bilden einen Rig-Frame "
        "mit fester relativer Pose (cam0,cam1 paart cam0/x.jpg mit cam1/x.jpg). "
        "Für mehrere Rigs wiederholen; `rigs:` im Manifest kann auch bekannte "
-       "Extrinsik tragen."),
+       "Extrinsik tragen."
+       " Das Präfix `dual-fisheye=` sagt, dass die ersten beiden die Rücken an "
+       "Rücken liegenden Objektive einer 360-Kamera sind."),
     FR("Les images de même nom sous ces préfixes de chemin forment une image de "
        "rig à pose relative fixe (cam0,cam1 apparie cam0/x.jpg à cam1/x.jpg). "
        "Répéter pour plusieurs rigs ; `rigs:` dans le manifeste peut aussi porter "
-       "des extrinsèques connus."),
+       "des extrinsèques connus."
+       " Le préfixe `dual-fisheye=` indique que les deux premiers sont les "
+       "objectifs dos à dos d'une caméra 360."),
     ES("Las imágenes con el mismo nombre bajo estos prefijos de ruta forman un "
        "cuadro de rig con pose relativa fija (cam0,cam1 empareja cam0/x.jpg con "
        "cam1/x.jpg). Repetir para varios rigs; `rigs:` en el manifiesto puede "
-       "llevar también extrínsecos conocidos."),
+       "llevar también extrínsecos conocidos."
+       " El prefijo `dual-fisheye=` indica que los dos primeros son las lentes "
+       "espalda con espalda de una cámara 360."),
     PT("Imagens com o mesmo nome sob estes prefixos de caminho formam um quadro "
        "de rig com pose relativa fixa (cam0,cam1 emparelha cam0/x.jpg com "
        "cam1/x.jpg). Repita para vários rigs; `rigs:` no manifesto também pode "
-       "trazer extrínsecos conhecidos."),
+       "trazer extrínsecos conhecidos."
+       " O prefixo `dual-fisheye=` diz que os dois primeiros são as lentes costas "
+       "com costas de uma câmera 360."),
     IT("Le immagini con lo stesso nome sotto questi prefissi di percorso formano "
        "un fotogramma di rig a posa relativa fissa (cam0,cam1 accoppia cam0/x.jpg "
        "con cam1/x.jpg). Ripetere per più rig; `rigs:` nel manifesto può anche "
-       "portare estrinseci noti."),
+       "portare estrinseci noti."
+       " Il prefisso `dual-fisheye=` dice che i primi due sono gli obiettivi "
+       "schiena contro schiena di una fotocamera 360."),
     NL("Beelden met dezelfde naam onder deze padvoorvoegsels vormen één rigframe "
        "met vaste relatieve pose (cam0,cam1 koppelt cam0/x.jpg aan cam1/x.jpg). "
        "Herhaal voor meerdere rigs; `rigs:` in het manifest kan ook bekende "
-       "extrinsieken bevatten."),
+       "extrinsieken bevatten."
+       " Het voorvoegsel `dual-fisheye=` zegt dat de eerste twee de "
+       "rug-aan-rug-lenzen van één 360-camera zijn."),
     RU("Изображения с одинаковым именем под этими префиксами пути образуют один "
        "кадр рига с фиксированной относительной позой (cam0,cam1 объединяет "
        "cam0/x.jpg и cam1/x.jpg). Повторите для нескольких ригов; `rigs:` в "
-       "манифесте может также нести известные экстринсики."),
+       "манифесте может также нести известные экстринсики."
+       " Префикс `dual-fisheye=` означает, что первые два -- расположенные спиной к "
+       "спине объективы одной 360-камеры."),
     TR("Bu yol öneklerinin altındaki aynı adlı görüntüler sabit göreli duruşlu tek "
        "bir rig karesi olur (cam0,cam1, cam0/x.jpg ile cam1/x.jpg'yi eşler). Birden "
        "çok rig için yineleyin; bildirimdeki `rigs:` bilinen dış parametreleri de "
-       "taşıyabilir."));
+       "taşıyabilir."
+       " `dual-fisheye=` öneki, ilk ikisinin tek bir 360 kameranın sırt sırta "
+       "mercekleri olduğunu söyler."));
 
 SS_MSG(opt_manifest,
     EN("Read the capture's description from FILE (YAML or JSON): where the "

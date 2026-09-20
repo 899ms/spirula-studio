@@ -3272,9 +3272,9 @@ private:
 
     // ---- rigs -------------------------------------------------------------
 
-    // The calibration a model starts from: nothing established, or the user's
-    // extrinsics where the definition carries them (rotation always; a
-    // translation as given when it is zero, otherwise once its scale is known).
+    // The calibration a model starts from: the user's extrinsics where given
+    // (a translation as given when zero, from zero when only part of it is
+    // free, else once the frames measure it); the rest estimated from frames.
     void initRigCalib(Reconstruction& rec) const {
         rec.rigs.resize(rigs_->rigs.size());
         for (size_t r = 0; r < rigs_->rigs.size(); r++) {
@@ -3285,16 +3285,22 @@ private:
             c.resize(spec.members.size());
             if (!spec.anyKnownExt()) continue;
             bool zero_t = true;
-            for (const RigMemberDef& m : spec.members) zero_t = zero_t && m.ext.t.norm() == 0.0;
-            c.ref = 0;
-            const Pose base = invertPose(spec.members[0].ext);
             for (size_t m = 0; m < spec.members.size(); m++) {
-                c.cam_from_rig[m] = composePose(spec.members[m].ext, base);
-                if (zero_t) {
+                const RigMemberDef& md = spec.members[m];
+                if (!md.has_ext) continue;
+                if (c.ref < 0) c.ref = (int)m;
+                zero_t = zero_t && md.ext.t.norm() == 0.0;
+            }
+            const Pose base = invertPose(spec.members[(size_t)c.ref].ext);
+            for (size_t m = 0; m < spec.members.size(); m++) {
+                const RigMemberDef& md = spec.members[m];
+                if (!md.has_ext) continue;
+                c.cam_from_rig[m] = composePose(md.ext, base);
+                const bool partial = md.dof != kRigDofAll && (md.dof & kRigDofTranslation);
+                if (!zero_t) c.cam_from_rig[m].t = {0, 0, 0};
+                if (zero_t || partial || (int)m == c.ref) {
                     c.established[m] = 1;
-                    c.fixed[m] = spec.members[m].ext_fixed ? 1 : 0;
-                } else {
-                    c.cam_from_rig[m].t = {0, 0, 0};
+                    c.fixed[m] = md.ext_fixed || md.dof == kRigDofNone ? 1 : 0;
                 }
             }
         }
