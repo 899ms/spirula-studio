@@ -1,7 +1,8 @@
-// frame_motion -- the adaptive frame plan (app/FrameMotion.h). Three things
+// frame_motion -- the adaptive frame plan (app/FrameMotion.h). Four things
 // have gone wrong here and each is silent, so each is asserted: the count has
-// to land on the budget, the gaps have to stay inside the rate bounds, and a
-// burst of motion must not swallow the budget it cannot spend.
+// to land on the budget, the gaps have to stay inside the rate bounds, a burst
+// of motion must not swallow the budget it cannot spend, and a view change
+// that comes back must not be paid for twice.
 
 #include "app/FrameMotion.h"
 
@@ -129,6 +130,56 @@ int main() {
         // And a rate that is still each clip's own, whatever it spends.
         expect(a >= 600 / 60, "shared: the still clip keeps its slowest rate");
         expect(b <= 600 / 3 + 1, "shared: the moving clip keeps its fastest rate");
+    }
+
+    // One wrist that wobbles and one that pans, step for step the same amount
+    // of frame turning over. Composed, the wobbler changes nothing and takes
+    // the slowest rate; summed, it used to buy the average one.
+    {
+        std::vector<app::MotionPlanInput> in(2);
+        for (int k = 0; k < 2; k++) {
+            in[k].cost.assign(600, 0.06f);
+            in[k].ends = indices(600);
+            in[k].frames = 600;
+            in[k].skip = 15;
+            in[k].window = 3;
+            in[k].step.resize(600);
+            for (size_t i = 0; i < 600; i++) {
+                const float d = (k == 0 && (i % 2)) ? -0.06f : 0.06f;
+                in[k].step[i].turn[2] = d;
+            }
+        }
+        const std::vector<std::vector<int64_t>> got = app::plan_by_motion(in, 4.0f);
+        const int wobble = (int)got[0].size(), pan = (int)got[1].size();
+        expect(wobble <= 600 / 60 + 1,
+               "wobble: " + std::to_string(wobble) +
+                   " frames, at most the slowest rate");
+        expect(pan > 4 * wobble, "wobble: the pan takes what the wobble does not, " +
+                                     std::to_string(pan) + " frames");
+        expect(wobble + pan <= 80, "wobble: " + std::to_string(wobble + pan) +
+                                       " frames within a budget of 80");
+    }
+
+    // A sphere's cost and a flat capture's are different numbers, so they do
+    // not compete: each keeps the frames the fixed schedule would have given
+    // it, however much more the flat one appears to move.
+    {
+        std::vector<app::MotionPlanInput> in(2);
+        for (int k = 0; k < 2; k++) {
+            in[k].cost.assign(600, k == 0 ? 0.004f : 0.06f);
+            in[k].ends = indices(600);
+            in[k].frames = 600;
+            in[k].skip = 15;
+            in[k].window = 3;
+        }
+        in[0].view = app::MotionView::Fisheye;
+        in[0].out_fov = 3.4034f;
+        const std::vector<std::vector<int64_t>> got = app::plan_by_motion(in, 4.0f);
+        const int a = (int)got[0].size(), b = (int)got[1].size();
+        expect(a >= 36 && a <= 40, "scales: the sphere keeps its own 40 frames, got " +
+                                       std::to_string(a));
+        expect(b >= 36 && b <= 40, "scales: the flat one keeps its own 40 frames, got " +
+                                       std::to_string(b));
     }
 
     // Nothing to plan from.

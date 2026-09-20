@@ -217,9 +217,17 @@ int select_sharpest_frames(const std::string& cand_dir,
     if (tracker) {
         tracker->finish();
         const int window = std::max(options.window, 1);
-        const std::vector<int64_t> plan = app::plan_by_motion(
-            tracker->costs(), tracker->ends(), (int64_t)files.size(), group,
-            window, options.range, options.max_frames);
+        app::MotionPlanInput mi;
+        mi.cost = tracker->costs();
+        mi.step = tracker->steps();
+        mi.ends = tracker->ends();
+        mi.frames = (int64_t)files.size();
+        mi.skip = group;
+        mi.window = window;
+        mi.max_frames = options.max_frames;
+        const std::vector<std::vector<int64_t>> planned =
+            app::plan_by_motion({mi}, options.range);
+        const std::vector<int64_t>& plan = planned[0];
         for (int64_t at : plan) {
             const size_t g1 = (size_t)at + 1;
             const size_t g0 = g1 > (size_t)window ? g1 - (size_t)window : 0;

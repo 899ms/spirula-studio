@@ -696,9 +696,9 @@ private:
     // is going to keep.
     int64_t estimate_frames(const PrepJob& job, const PrepInput& in,
                             const std::string& images);
-    // Measures every video on `at`'s rate and spaces them against one budget,
-    // once per group. A no-op unless the rate is adaptive and the built-in
-    // decoder is the one reading the file.
+    // Measures every video on `at`'s rate and spaces them together, once per
+    // group. A no-op unless the rate is adaptive and the built-in decoder is
+    // the one reading the file.
     bool plan_group(const PrepJob& job, size_t at, std::string& error);
 
     // Whether the settings the frames on disk were extracted with still read

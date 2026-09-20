@@ -225,6 +225,24 @@ Poly clip_to_frame(const Poly& in, float w, float h) {
     return a;
 }
 
+// What the frame carried over by `A` leaves behind: the share of it that left
+// the frame, or of the frame it no longer covers, whichever is larger. A camera
+// backing away loses nothing and still sees a scene it has not seen.
+float model_coverage(const float A[6], float w, float h) {
+    Poly moved;
+    for (int k = 0; k < 4; k++) {
+        const float x = (k == 1 || k == 2) ? w : 0.0f;
+        const float y = (k >= 2) ? h : 0.0f;
+        apply_affine(A, x, y, moved.x[k], moved.y[k]);
+    }
+    moved.n = 4;
+    const float a_moved = poly_area(moved);
+    const float a_shared = poly_area(clip_to_frame(moved, w, h));
+    const float lost = a_moved > 0 ? 1.0f - a_shared / a_moved : 1.0f;
+    const float fresh = 1.0f - a_shared / (w * h);
+    return std::min(1.0f, std::max(lost, fresh));
+}
+
 struct Vec3 {
     float x = 0, y = 0, z = 0;
 };
@@ -354,6 +372,7 @@ struct MotionTracker::Impl {
     Pyramid prev, cur;
     bool primed = false;
     std::vector<float> cost;
+    std::vector<MotionStep> step;
     std::vector<int64_t> end;
     int weak = 0;
     bool done = false;
@@ -365,9 +384,9 @@ struct MotionTracker::Impl {
     bool sphere() const { return o.view != MotionView::Planar; }
     float rad_per_pixel() const;
     bool to_direction(float x, float y, Vec3& d) const;
-    float step_cost(const Pair& p) const;
+    float step_cost(const Pair& p, MotionStep& out) const;
     float sphere_cost(const Pair& p) const;
-    float planar_cost(const Pair& p) const;
+    float planar_cost(const Pair& p, MotionStep& out) const;
 };
 
 // How far apart two neighbouring grey pixels point, which is the floor every
@@ -453,7 +472,7 @@ float MotionTracker::Impl::sphere_cost(const Pair& p) const {
            std::max(o.out_fov, 0.25f);
 }
 
-float MotionTracker::Impl::planar_cost(const Pair& p) const {
+float MotionTracker::Impl::planar_cost(const Pair& p, MotionStep& out) const {
     const int n = (int)p.ax.size();
     if (n < 16) return -1.0f;
     const float thr = 0.004f * diag + 0.5f;
@@ -497,29 +516,25 @@ float MotionTracker::Impl::planar_cost(const Pair& p) const {
     }
     const float parallax = percentile(res, 0.75f) / diag;
 
-    // What the model says left the frame, and what came in: a camera backing
-    // away loses nothing and still sees a scene it has not seen.
     const float w = (float)o.width, h = (float)o.height;
-    Poly moved;
-    for (int k = 0; k < 4; k++) {
-        const float x = (k == 1 || k == 2) ? w : 0.0f;
-        const float y = (k >= 2) ? h : 0.0f;
-        float u, v;
-        apply_affine(best, x, y, u, v);
-        moved.x[k] = u;
-        moved.y[k] = v;
-    }
-    moved.n = 4;
-    const float a_moved = poly_area(moved);
-    const float a_shared = poly_area(clip_to_frame(moved, w, h));
-    const float lost = a_moved > 0 ? 1.0f - a_shared / a_moved : 1.0f;
-    const float fresh = 1.0f - a_shared / (w * h);
-    const float coverage = std::min(1.0f, std::max(lost, fresh));
-    return coverage + kParallaxWeight * parallax;
+    // The same affine over a unit-square frame, which is what a plan composes.
+    out.turn[0] = best[0];
+    out.turn[1] = best[1] * h / w;
+    out.turn[2] = best[2] / w;
+    out.turn[3] = best[3] * w / h;
+    out.turn[4] = best[4];
+    out.turn[5] = best[5] / h;
+    out.drift = kParallaxWeight * parallax;
+    return model_coverage(best, w, h) + out.drift;
 }
 
-float MotionTracker::Impl::step_cost(const Pair& p) const {
-    return sphere() ? sphere_cost(p) : planar_cost(p);
+float MotionTracker::Impl::step_cost(const Pair& p, MotionStep& out) const {
+    if (!sphere()) return planar_cost(p, out);
+    // A rotation of the sphere carries no coverage, so the whole of the cost
+    // is a residual and the step composes to nothing.
+    const float c = sphere_cost(p);
+    out.drift = c > 0 ? c : 0.0f;
+    return c;
 }
 
 MotionTracker::MotionTracker(const MotionOptions& options) : impl_(new Impl{}) {
@@ -579,9 +594,11 @@ void MotionTracker::track(const uint8_t* gray, int64_t index) {
             p.bx.insert(p.bx.end(), q.bx.begin(), q.bx.end());
             p.by.insert(p.by.end(), q.by.begin(), q.by.end());
         }
-        const float c = s.step_cost(p);
+        MotionStep ms;
+        const float c = s.step_cost(p, ms);
         if (c < 0) s.weak++;
         s.cost.push_back(c);
+        s.step.push_back(ms);
         s.end.push_back(index);
     }
     s.prev.level.swap(s.cur.level);
@@ -600,11 +617,16 @@ void MotionTracker::finish() {
     for (float c : s.cost)
         if (c >= 0) good.push_back(c);
     const float fill = good.empty() ? 0.0f : percentile(good, 0.5f);
-    for (float& c : s.cost)
-        if (c < 0) c = fill;
+    for (size_t i = 0; i < s.cost.size(); i++)
+        if (s.cost[i] < 0) {
+            s.cost[i] = fill;
+            s.step[i] = MotionStep{};   // nothing to compose through
+            s.step[i].drift = fill;
+        }
 }
 
 const std::vector<float>& MotionTracker::costs() const { return impl_->cost; }
+const std::vector<MotionStep>& MotionTracker::steps() const { return impl_->step; }
 const std::vector<int64_t>& MotionTracker::ends() const { return impl_->end; }
 int MotionTracker::weak_steps() const { return impl_->weak; }
 
@@ -637,33 +659,76 @@ namespace {
 // bounds on. Built once so that bisecting the step re-walks arithmetic only.
 struct PlanTrack {
     const MotionPlanInput* in = nullptr;
+    size_t at = 0;                  // which of the caller's inputs this is
     std::vector<double> sum;
+    double total = 0;
     int64_t min_gap = 1, max_gap = 1, want = 1;
 };
 
+// One number means the same thing in two videos only when the same model
+// measured it against the same angle -- and a sphere's, with no coverage term
+// in it at all, never means what a flat capture's does.
+bool same_scale(const MotionPlanInput& a, const MotionPlanInput& b) {
+    return a.view == b.view && std::fabs(a.out_fov - b.out_fov) < 1e-4f;
+}
+
+// The steps since the last kept frame, carried forward one at a time. The
+// coverage of what they compose to, not the sum of each one's, is what a
+// wobble that comes back has to cost nothing.
+struct Since {
+    double turn[6] = {1, 0, 0, 0, 1, 0};
+    double drift = 0;
+};
+
+void advance(Since& s, const MotionStep& m) {
+    const double b[6] = {s.turn[0], s.turn[1], s.turn[2],
+                         s.turn[3], s.turn[4], s.turn[5]};
+    s.turn[0] = m.turn[0] * b[0] + m.turn[1] * b[3];
+    s.turn[1] = m.turn[0] * b[1] + m.turn[1] * b[4];
+    s.turn[2] = m.turn[0] * b[2] + m.turn[1] * b[5] + m.turn[2];
+    s.turn[3] = m.turn[3] * b[0] + m.turn[4] * b[3];
+    s.turn[4] = m.turn[3] * b[1] + m.turn[4] * b[4];
+    s.turn[5] = m.turn[3] * b[2] + m.turn[4] * b[5] + m.turn[5];
+    s.drift += m.drift;
+}
+
+double since_cost(const Since& s) {
+    const float A[6] = {(float)s.turn[0], (float)s.turn[1], (float)s.turn[2],
+                        (float)s.turn[3], (float)s.turn[4], (float)s.turn[5]};
+    return model_coverage(A, 1.0f, 1.0f) + s.drift;
+}
+
 std::vector<int64_t> walk_track(const PlanTrack& t, double step) {
     const MotionPlanInput& in = *t.in;
+    const bool compose = in.step.size() == in.cost.size();
     std::vector<int64_t> got;
     int64_t last = -1;
     double last_sum = 0;
+    Since cur, prev;            // composed up to sample i, and up to i - 1
     for (size_t i = 0; i < in.cost.size(); i++) {
+        prev = cur;
+        if (compose) advance(cur, in.step[i]);
         const int64_t at = in.ends[i];
         if (at < in.window - 1) continue;
         size_t pick = i;
         if (last >= 0) {
             if (at - last < t.min_gap) continue;
-            if (t.sum[i] - last_sum < step && at - last < t.max_gap) continue;
+            const double now = compose ? since_cost(cur) : t.sum[i] - last_sum;
+            if (now < step && at - last < t.max_gap) continue;
             // The step falls BETWEEN two samples, and always taking the one
             // past it lands the whole plan late.
-            if (i > 0 && t.sum[i] - last_sum > step && in.ends[i - 1] > last &&
+            const double before =
+                i == 0 ? 0.0
+                       : (compose ? since_cost(prev) : t.sum[i - 1] - last_sum);
+            if (i > 0 && now > step && in.ends[i - 1] > last &&
                 in.ends[i - 1] - last >= t.min_gap &&
-                in.ends[i - 1] >= in.window - 1 &&
-                (t.sum[i] - last_sum) - step > step - (t.sum[i - 1] - last_sum))
+                in.ends[i - 1] >= in.window - 1 && now - step > step - before)
                 pick = i - 1;
         }
         got.push_back(in.ends[pick]);
         last = in.ends[pick];
         last_sum = t.sum[pick];
+        cur = Since{};
         i = pick;   // the sample stepped over is still the next candidate
         if (in.max_frames > 0 && (int)got.size() >= in.max_frames) break;
     }
@@ -678,19 +743,19 @@ std::vector<std::vector<int64_t>> plan_by_motion(
     if (range < 1.0f) range = 1.0f;
 
     std::vector<PlanTrack> tracks;
-    double total = 0;
-    int64_t want = 0;
-    for (const MotionPlanInput& m : in) {
+    for (size_t i = 0; i < in.size(); i++) {
+        const MotionPlanInput& m = in[i];
         if (m.cost.empty() || m.cost.size() != m.ends.size() || m.skip < 1) continue;
         PlanTrack t;
         t.in = &m;
+        t.at = i;
         t.sum.resize(m.cost.size());
         double run = 0;
-        for (size_t i = 0; i < m.cost.size(); i++) {
-            run += std::max(0.0f, m.cost[i]);
-            t.sum[i] = run;
+        for (size_t j = 0; j < m.cost.size(); j++) {
+            run += std::max(0.0f, m.cost[j]);
+            t.sum[j] = run;
         }
-        total += run;
+        t.total = run;
         // Never closer than one sharpness window: two windows that overlap can
         // choose the same frame, and one of the two kept frames then vanishes.
         t.min_gap = std::max<int64_t>(std::max(1, m.window),
@@ -698,44 +763,56 @@ std::vector<std::vector<int64_t>> plan_by_motion(
         t.max_gap = std::max<int64_t>(t.min_gap, (int64_t)((double)m.skip * range));
         t.want = std::max<int64_t>(1, m.frames / m.skip);
         if (m.max_frames > 0) t.want = std::min<int64_t>(t.want, m.max_frames);
-        want += t.want;
         tracks.push_back(std::move(t));
     }
-    if (tracks.empty()) return out;
 
-    auto walk_all = [&](double step) {
-        std::vector<std::vector<int64_t>> got(tracks.size());
-        int64_t n = 0;
-        for (size_t k = 0; k < tracks.size(); k++) {
-            got[k] = walk_track(tracks[k], step);
-            n += (int64_t)got[k].size();
-        }
-        return std::make_pair(n, std::move(got));
-    };
+    // Each scale is planned against the frames its own inputs would have had,
+    // so a budget moves between videos only where the numbers moving it are
+    // the same measurement.
+    std::vector<bool> done(tracks.size(), false);
+    for (size_t first = 0; first < tracks.size(); first++) {
+        if (done[first]) continue;
+        std::vector<PlanTrack*> pool;
+        double total = 0;
+        int64_t want = 0;
+        for (size_t k = first; k < tracks.size(); k++)
+            if (!done[k] && same_scale(*tracks[k].in, *tracks[first].in)) {
+                done[k] = true;
+                pool.push_back(&tracks[k]);
+                total += tracks[k].total;
+                want += tracks[k].want;
+            }
 
-    // Bisected rather than total/want, because a burst of motion swallows
-    // several steps' budget in one sample and spends one frame of it. The floor
-    // is what stops a still capture being answered with every frame of itself.
-    const double floor_step = 0.01;
-    double lo = floor_step, hi = std::max(floor_step * 2.0, total);
-    auto best = walk_all(lo);
-    if (best.first > want) {
-        for (int it = 0; it < 32; it++) {
-            const double mid = 0.5 * (lo + hi);
-            auto got = walk_all(mid);
-            if (got.first > want) {
-                lo = mid;
-            } else {
-                hi = mid;
-                best = std::move(got);
+        auto walk_all = [&](double step) {
+            std::vector<std::vector<int64_t>> got(pool.size());
+            int64_t n = 0;
+            for (size_t k = 0; k < pool.size(); k++) {
+                got[k] = walk_track(*pool[k], step);
+                n += (int64_t)got[k].size();
+            }
+            return std::make_pair(n, std::move(got));
+        };
+
+        // Bisected rather than total/want, because a burst of motion swallows
+        // several steps' budget in one sample and spends one frame of it. The
+        // floor stops a still capture being answered with every frame of itself.
+        const double floor_step = 0.01;
+        double lo = floor_step, hi = std::max(floor_step * 2.0, total);
+        auto best = walk_all(lo);
+        if (best.first > want) {
+            for (int it = 0; it < 32; it++) {
+                const double mid = 0.5 * (lo + hi);
+                auto got = walk_all(mid);
+                if (got.first > want) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                    best = std::move(got);
+                }
             }
         }
-    }
-    size_t k = 0;
-    for (size_t i = 0; i < in.size(); i++) {
-        const MotionPlanInput& m = in[i];
-        if (m.cost.empty() || m.cost.size() != m.ends.size() || m.skip < 1) continue;
-        out[i] = std::move(best.second[k++]);
+        for (size_t k = 0; k < pool.size(); k++)
+            out[pool[k]->at] = std::move(best.second[k]);
     }
     return out;
 }

@@ -181,12 +181,15 @@ bool measure_motion(const FrameExtractJob& o, const FrameExtractSinks& sinks,
     stop();
     tracker.finish();
     out.cost = tracker.costs();
+    out.step = tracker.steps();
     out.ends = tracker.ends();
     out.frames = info.frame_count > 0 ? info.frame_count : last + 1;
     out.skip = o.skip;
     out.window = std::max(o.keep, 1);
     out.max_frames = o.max_frames;
     out.fps = fps;
+    out.view = mo.view;
+    out.out_fov = mo.out_fov;
     t.plan = nn::now_ms() - t_start;
     return true;
 }

@@ -711,7 +711,8 @@ row returns it to following (`normalize_source_fps`).
 The rows on one rate are also one **budget** when the rate is adaptive: they
 are measured together and spaced against one view-change-per-frame, so of two
 clips at "2 fps" the one that walks briskly gets the denser frames and the one
-shot from a bench gets fewer. Each still keeps its own rate bounds.
+shot from a bench gets fewer. Each still keeps its own rate bounds. Rows
+measured by different models are NOT one budget -- see below.
 
 A workspace records what its frames were extracted with (`.spirula-frames`,
 `gui/ReconStamp.h`). A re-run whose answer differs -- a different rate, a
@@ -737,10 +738,23 @@ flow by RANSAC, and two numbers come out:
   percentile of the residual. This is what a translation past something close
   produces and what a translation towards something far does not.
 
-`cost = coverage + 2 * parallax`, and the plan spaces frames at equal
-cumulative cost. The weight is the only hand-set number: a tenth of the frame
-of unexplained disparity is a harder match than a tenth of the frame of pan,
-and carries the triangulation the pan does not.
+`cost = coverage + 2 * parallax`. The weight is the only hand-set number: a
+tenth of the frame of unexplained disparity is a harder match than a tenth of
+the frame of pan, and carries the triangulation the pan does not.
+
+That per-step number is what the Motion view draws, but it is **not** what the
+plan adds up. Coverage summed over a gap counts a wobble every time it passes:
+a wrist that turns the frame a degree left and a degree back has moved nothing
+and scores twice. So each step also carries the affine it fitted, in
+unit-square frame coordinates (`MotionStep`), and the plan **composes** them
+from the last kept frame to the candidate and takes the coverage of the
+result -- the wobble composes back to the identity and costs nothing. Parallax
+is a residual and composes through nothing, so it is still summed. Measured
+over one-second gaps on two handheld DJI clips, composing drops the typical
+window to 0.65-0.70 of its summed coverage and the shakiest tenth to 0.0-0.4:
+that tenth used to buy frames and now does not. A sphere's steps compose to the
+identity by construction (nothing leaves a sphere), so its plan is unchanged,
+bit for bit.
 
 The global model depends on what the frames are pictures of:
 
@@ -755,6 +769,28 @@ A camera that sees every direction keeps every direction when it turns, so a
 slowest rate the bounds allow. That is the whole point of fitting the rotation
 in 3D rather than fitting a homography per track: on a sphere, turning is free
 and only moving is not.
+
+That also means a sphere's cost and a flat capture's are **not the same
+number**. A sphere's is a residual and nothing else; a flat one's is 70%
+coverage on a handheld walk, because every wobble of the wrist turns the frame
+over. Measured across five clips of one walk, a `.osv` scored 0.07-0.17 per
+second against 0.70-0.83 for the DJI flat clips beside it -- so pooled into one
+budget the flat clips took 2.4x the rate asked for and the 360s were left at
+0.28x, far enough apart to stop matching. A budget is therefore shared only
+among the inputs one model measured against one angle (`same_scale`), and the
+budgets themselves split by the frames the fixed schedule would have given
+each. The same five clips then land between 0.66x and 1.48x.
+
+The price is that a flat clip shot from a bench can no longer hand its frames
+to a 360 that is walking. Nothing makes those two numbers comparable: turning
+is free on a sphere and is most of the cost on a flat frame, so there is no
+scale factor between them to find.
+
+What does NOT change the cost is the source resolution. Every source is reduced
+to the same grey frame before anything is tracked (`motion_frame_size`), which
+holds to 2% end to end: one fisheye clip at 3840 and 1920 px scored 0.0904 and
+0.0909 per second, one flat clip at 2688, 1344 and 672 px scored 0.720, 0.707
+and 0.716.
 
 Two details that were measured rather than chosen:
 

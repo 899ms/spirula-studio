@@ -1523,9 +1523,9 @@ static bool builtin_job(const PrepJob& job, const PrepInput& in,
 }
 #endif
 
-// Every video extracted at one rate, planned against one budget: a clip that
-// walks briskly then takes more of it than the one shot from a bench. Scanned
-// here so the whole group is measured before the first of it is written.
+// Every video extracted at one rate, planned together: a brisk clip takes
+// frames off one shot from a bench, as far as the two were measured the same
+// way. Scanned here so the group is measured before any of it is written.
 bool DatasetPrep::plan_group(const PrepJob& job, size_t at, std::string& error) {
 #ifndef SS_HAVE_VIDEO
     (void)job; (void)at; (void)error;

@@ -39,6 +39,17 @@ struct MotionOptions {
     float out_fov = 1.5708f;
 };
 
+// One step's global model, and the cost that does not live in it. A plan
+// composes `turn` between kept frames -- so a wrist that wobbles and comes
+// back costs nothing -- and adds `drift`, which no model composes.
+struct MotionStep {
+    // The 2D affine the frame was carried over by, in UNIT-SQUARE frame
+    // coordinates so composing it needs no frame size. Identity on a sphere:
+    // nothing leaves one, and a rotation carries no coverage to compose.
+    float turn[6] = {1, 0, 0, 0, 1, 0};
+    float drift = 0;                    // the parallax, weighted
+};
+
 // Tracks one stream of grey frames. Costs are readable only after the last
 // track(): a fisheye's field of view is fitted from the first few steps and
 // their costs are revised once it is.
@@ -57,9 +68,11 @@ public:
     // the last track().
     void finish();
 
-    // One entry per step, in order: the view change across it, and the source
-    // frame it ends at. Both are final only after finish().
+    // One entry per step, in order: the view change across it, what a plan
+    // composes it from, and the source frame it ends at. All are final only
+    // after finish().
     const std::vector<float>& costs() const;
+    const std::vector<MotionStep>& steps() const;
     const std::vector<int64_t>& ends() const;
     // Steps whose flow was too weak to fit a model to, for the log.
     int weak_steps() const;
@@ -88,11 +101,19 @@ struct MotionPlanInput {
     int window = 1;      // the sharpness window, the closest two frames may be
     int max_frames = 0;  // 0 = no cap
     double fps = 0;      // the source's own rate; only for reporting
+    // One per entry of `cost`, or empty to space frames on `cost` alone --
+    // which counts a wobble every time it passes rather than once.
+    std::vector<MotionStep> step;
+    // What measured `cost`. A sphere's cost is a residual and nothing else,
+    // a flat one is mostly the frame turning over, so the two are not the same
+    // number and only inputs that agree on both share a budget.
+    MotionView view = MotionView::Planar;
+    float out_fov = 1.5708f;
 };
 
-// Which source frames each run should end its sharpness windows at, so that
-// kept frames differ by view rather than by time, within `range` of the rate
-// `skip` asks for. Several share ONE budget: what moves more gets more of it.
+// Which source frames each run should end its sharpness windows at, so kept
+// frames differ by view rather than by time, within `range` of what `skip`
+// asks for. Inputs on one scale share ONE budget; unlike ones keep their own.
 std::vector<std::vector<int64_t>> plan_by_motion(
     const std::vector<MotionPlanInput>& in, float range);
 
