@@ -80,25 +80,27 @@ from one checkout and neither reconfigures the other.
 | `SS_SLANGC` | *(empty)* | path to a `slangc` to use; empty means find on PATH and fetch the pinned release on miss/mismatch |
 | `SS_BUILD_SFM` | `ON` for `vulkan`, `OFF` for `cuda` | `ss_sfm` + `spirula sfm` + `sfm_*_test`. Vulkan-only; a CUDA build can opt in if the Vulkan SDK is present. |
 | `SS_BUILD_SAM` | `ON` for `vulkan`, `OFF` for `cuda` | `ss_nn` + `ss_sam` + `spirula sam` + `nn_ops_test` / `sam_pipeline_test`, and the GUI's in-process masking. Same rule as SfM. |
-| `SS_ENABLE_PATENTED` | `OFF` | `ss_video` — container demux + `VK_KHR_video_decode_*`. **Read the note below before turning it on.** |
+| `SS_ENABLE_PATENTED` | `OFF` | `ss_video` — container demux + `VK_KHR_video_decode_*`, and the `VK_KHR_video_encode_*` encoder behind `spirula encode`. **Read the note below before turning it on.** |
 | `SS_SFM_REALS` / `SS_SFM_LOSSES` | all | trim the bundle-adjustment shader variant matrix while iterating (`src/sfm/README.md`) |
 | `SS_CHECK_COMMENTS` | `ON` | run the comment-length lint on every build ([Lints](#lints)) |
 
 ### `SS_ENABLE_PATENTED`
 
 Off by default, and deliberately. This repository is GPLv3, and `src/video/` —
-the H.264 / H.265 / AV1 bitstream parsers and the Vulkan Video driver — is the
-one part of it carrying third-party patent exposure (H.264/H.265 via MPEG LA
-and Access Advance, AV1 via the claims asserted against AOMedia). With it off,
-that directory is neither compiled nor linked, and everything that wanted it
-falls back to an external **ffmpeg**: `spirula sam extract` and `spirula sam
-video` say so and exit, and the GUI extracts frames with ffmpeg and tells the
-user why.
+the H.264 / H.265 / AV1 bitstream parsers, the Vulkan Video decode driver and
+the H.264 / H.265 encoder — is the one part of it carrying third-party patent
+exposure (H.264/H.265 via MPEG LA and Access Advance, AV1 via the claims
+asserted against AOMedia). With it off, that directory is neither compiled nor
+linked, and everything that wanted it falls back to an external **ffmpeg**:
+`spirula sam extract` and `spirula sam video` say so and exit, the GUI
+extracts frames with ffmpeg and tells the user why, and the render mode
+encodes its videos with ffmpeg (or writes frames when there is none).
 
-Turning it on buys in-process GPU decoding: roughly 15× faster frame
-extraction (a 127-second 1080p30 clip in ten seconds rather than minutes),
-`spirula sam extract`'s masking riding along on the same device pass, and no
-ffmpeg to install. Nothing else in the build changes.
+Turning it on buys in-process GPU decoding and encoding: roughly 15× faster
+frame extraction (a 127-second 1080p30 clip in ten seconds rather than
+minutes), `spirula sam extract`'s masking riding along on the same device
+pass, `spirula encode` for the render mode's videos, and no ffmpeg to install.
+Nothing else in the build changes.
 
 If you distribute binaries, decide for your jurisdiction and your users before
 shipping one built with it on.

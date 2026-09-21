@@ -32,6 +32,27 @@ enum class PreviewProjection {
     Pinhole = 0, Fisheye, Equisolid, Equirectangular
 };
 
+// How a frame for a FILE is drawn, as opposed to one for the viewport
+// (app/gui/render/). Every default is what the viewport already does.
+struct PreviewStyle {
+    // Cleared to nothing rather than to the viewport's grey, so the frame
+    // composites: alpha is 1 where something was drawn.
+    bool transparent = false;
+    // The cloud: 0 square, 1 circle, 2 gaussian, 3 sphere of `point_radius`
+    // (normalized frame); the screen shapes are `point_px` across.
+    int point_shape = 0;
+    float point_px = 2.0f;
+    float point_radius = 0.0f;
+    // Lens distortion: CameraDistortionType and its coefficients.
+    int tier = 0;
+    float dist[8] = {};
+    // Nothing past the plane n.p = d (normalized frame) is drawn, and the
+    // `glow` before it lights up: the sweep reveal.
+    bool clip = false;
+    float plane[4] = {0, 0, 1, 0};
+    float glow = 0.0f;
+};
+
 class PreviewRenderer {
 public:
     // Build GL buffers from the parsed dataset. Requires a current GL
@@ -79,7 +100,8 @@ public:
                     float frustum_scale, bool show_grid,
                     // How far an orthographic view's camera was pulled back
                     // along its axis (ViewportPanel::ortho_pullback), 0 if not.
-                    float ortho_back = 0.0f);
+                    float ortho_back = 0.0f,
+                    const PreviewStyle* style = nullptr);
 
     // Base frustum size (camhost::frustum_display_size, normalized frame).
     float base_camera_size() const { return _base_cam_size; }
@@ -104,6 +126,12 @@ private:
     unsigned _prog = 0;
     int _u_view = -1, _u_scale = -1, _u_dscale = -1, _u_color = -1;
     int _u_model = -1, _u_s = -1, _u_zrange = -1, _u_vp = -1;
+    // Style uniforms, one set per program: [0] lines and points, [1] mesh.
+    struct StyleLoc {
+        int tier = -1, dist = -1, clip_on = -1, clip = -1, glow = -1;
+    } _sloc[2];
+    int _u_points = -1, _u_psize = -1, _u_pradius = -1;
+    void set_style_uniforms(int program, const PreviewStyle& st);
 
     // Mesh program: same projection GLSL, shaded triangles.
     unsigned _mprog = 0;

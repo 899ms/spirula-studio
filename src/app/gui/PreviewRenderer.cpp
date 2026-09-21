@@ -45,12 +45,33 @@ namespace {
 const char* kProj = R"(
 uniform int u_model;
 uniform vec2 u_s;
+uniform int u_tier;
+uniform float u_dist[8];
+// The engine's lens tiers (shaders/projection_utils.slang), in its CV
+// convention: y down, so the image's y is flipped around it.
+vec2 lens(vec2 gl) {
+    if (u_tier == 0) return gl;
+    float u = gl.x, v = -gl.y, r2 = u*u + v*v;
+    vec2 cv;
+    if (u_tier == 1) {
+        float k1 = u_dist[0], k2 = u_dist[1], p1 = u_dist[2], p2 = u_dist[3];
+        cv = vec2(u, v) * (1.0 + r2*(k1 + r2*k2)) +
+             vec2(2.0*p1*u*v + p2*(r2 + 2.0*u*u), 2.0*p2*u*v + p1*(r2 + 2.0*v*v));
+    } else {
+        float k1 = u_dist[0], k2 = u_dist[1], k3 = u_dist[2], k4 = u_dist[3];
+        float p1 = u_dist[4], p2 = u_dist[5], s1 = u_dist[6], s2 = u_dist[7];
+        cv = vec2(u, v) * (1.0 + r2*(k1 + r2*(k2 + r2*(k3 + r2*k4)))) +
+             vec2(2.0*p1*u*v + p2*(r2 + 2.0*u*u) + s1*r2,
+                  2.0*p2*u*v + p1*(r2 + 2.0*v*v) + s2*r2);
+    }
+    return vec2(cv.x, -cv.y);
+}
 vec2 project_ndc(vec3 v, out bool clipped) {
     float dist = max(length(v), 1e-9);
     clipped = false;
     if (u_model == 0) {                     // pinhole
         if (v.z > -1e-6) clipped = true;
-        return u_s * (v.xy / -v.z);
+        return u_s * lens(v.xy / -v.z);
     } else if (u_model == 3) {              // equirectangular
         float lon = atan(v.x, -v.z);
         float lat = asin(clamp(v.y / dist, -1.0, 1.0));
@@ -60,7 +81,24 @@ vec2 project_ndc(vec3 v, out bool clipped) {
     float rlen = length(v.xy);
     vec2 dir2 = rlen > 1e-9 ? v.xy / rlen : vec2(0.0);
     float r = (u_model == 1) ? theta : 2.0 * sin(0.5 * theta);
-    return u_s * dir2 * r;
+    return u_s * lens(dir2 * r);
+}
+)";
+
+// Fragment stages only: a vertex shader may not hold a discard. A world-space
+// cut for the reveal effects -- past the plane is not drawn, and a band
+// before it glows.
+const char* kClip = R"(
+uniform int u_clip_on;
+uniform vec4 u_clip;
+uniform float u_glow;
+vec3 clip_colour(vec3 col, vec3 world) {
+    if (u_clip_on == 0) return col;
+    float s = dot(u_clip.xyz, world) - u_clip.w;
+    if (s > 0.0) discard;
+    if (u_glow > 0.0 && s > -u_glow)
+        col = mix(col, vec3(1.0, 0.86, 0.6), 0.85 * (1.0 + s / u_glow));
+    return col;
 }
 )";
 
@@ -73,8 +111,12 @@ uniform float u_scale;
 uniform float u_dscale;
 uniform vec4 u_color;
 uniform vec2 u_zrange;
+uniform vec2 u_vp;
+uniform float u_psize;      // screen size of a point, pixels
+uniform float u_pradius;    // > 0: a sphere of this radius instead
 out vec4 v_col;
 out vec3 v_view;
+out vec3 v_world;
 out float v_kill;
 void main() {
     vec3 p = a_pos + u_scale * a_aux;
@@ -86,6 +128,9 @@ void main() {
     if (clipped) z = 3.0;
     v_col = (u_color.a > 0.0) ? u_color : vec4(a_aux, 1.0);
     v_view = v;
+    v_world = p;
+    gl_PointSize = u_pradius > 0.0
+        ? clamp(u_pradius * u_s.x * u_vp.x / dist, 1.0, 256.0) : u_psize;
     // Whole-segment equirect seam kill (see the comment above kProj). Both
     // vertices of a segment compute the same flag, so it interpolates flat.
     v_kill = 0.0;
@@ -103,17 +148,44 @@ void main() {
 const char* kFragMain = R"(
 in vec4 v_col;
 in vec3 v_view;
+in vec3 v_world;
 in float v_kill;
 uniform vec2 u_vp;
+uniform vec2 u_zrange;
+uniform int u_points;       // drawing the cloud: 0 square, 1 circle, 2 gaussian, 3 sphere
+uniform float u_pradius;
 out vec4 frag;
 void main() {
+    // Written on every path, or the paths that do not write it get an
+    // undefined depth once the sphere below writes it.
+    gl_FragDepth = gl_FragCoord.z;
     if (v_kill > 0.5) discard;
+    if (u_points > 0) {
+        vec2 c = gl_PointCoord * 2.0 - 1.0;
+        float r2 = dot(c, c);
+        int shape = u_points - 1;
+        if (shape != 0 && r2 > 1.0) discard;
+        vec3 col = clip_colour(v_col.rgb, v_world);
+        if (shape == 2) {
+            // Premultiplied, for the blend the cloud is drawn with.
+            float a = exp(-4.0 * r2);
+            frag = vec4(col * a, a);
+        } else if (shape == 3) {
+            float nz = sqrt(max(1.0 - r2, 0.0));
+            frag = vec4(col * (0.3 + 0.7 * nz), 1.0);
+            gl_FragDepth = gl_FragCoord.z -
+                0.5 * u_pradius * nz / (u_zrange.y - u_zrange.x);
+        } else {
+            frag = vec4(col, 1.0);
+        }
+        return;
+    }
     bool clipped;
     vec2 ndc = project_ndc(v_view, clipped);
     vec2 px = (0.5 * ndc + 0.5) * u_vp;
     if (clipped ||
         length(px - gl_FragCoord.xy) > 0.05 * min(u_vp.x, u_vp.y)) discard;
-    frag = vec4(v_col.rgb, 1.0);
+    frag = vec4(clip_colour(v_col.rgb, v_world), 1.0);
 }
 )";
 
@@ -139,6 +211,7 @@ out vec3 v_nrm;
 out vec3 v_col;
 out vec2 v_uv;
 out vec3 v_view;
+out vec3 v_world;
 void main() {
     vec3 v = (u_view * vec4(a_pos, 1.0)).xyz;
     float dist = max(length(v), 1e-9);
@@ -147,7 +220,8 @@ void main() {
     v_col = a_col;
     v_uv = a_uv;
     v_view = v;
-    if (u_model == 0) {
+    v_world = a_pos;
+    if (u_model == 0 && u_tier == 0) {
         // PINHOLE: emit a REAL clip-space position (w = -z_view) so the
         // hardware clips triangles at the near plane. Writing NDC with w = 1
         // (which is what the point/line program does, and what this used to
@@ -172,6 +246,7 @@ in vec3 v_nrm;
 in vec3 v_col;
 in vec2 v_uv;
 in vec3 v_view;
+in vec3 v_world;
 uniform vec2 u_vp;
 uniform int u_mode;          // 0 flat, 1 vertex color, 2 texture
 uniform int u_color_on;      // show vertex/texture color
@@ -180,6 +255,13 @@ uniform int u_flat;          // face normals instead of interpolated ones
 uniform sampler2D u_tex;
 out vec4 frag;
 void main() {
+    if (u_model == 0 && u_tier != 0) {
+        // A distorted pinhole has no clip space: what is behind the camera
+        // has to be thrown out here.
+        bool behind;
+        project_ndc(v_view, behind);
+        if (behind) discard;
+    }
     if (u_model != 0) {
         // Reject fragments of a triangle that crosses a projection
         // discontinuity (the equirect +-180-degree seam, the fisheye backward
@@ -216,7 +298,7 @@ void main() {
         vec3 l = normalize(-v_view);
         shade = 0.25 + 0.75 * abs(dot(n, l));
     }
-    frag = vec4(base * shade, 1.0);
+    frag = vec4(clip_colour(base * shade, v_world), 1.0);
 }
 )";
 
@@ -391,7 +473,7 @@ bool PreviewRenderer::ensure_program() {
     if (_prog) return true;
     if (!glx::init()) return false;
     std::string vs_src = std::string("#version 150\n") + kProj + kVertMain;
-    std::string fs_src = std::string("#version 150\n") + kProj + kFragMain;
+    std::string fs_src = std::string("#version 150\n") + kProj + kClip + kFragMain;
     GLuint vs = compile(GL_VERTEX_SHADER, vs_src.c_str());
     GLuint fs = compile(GL_FRAGMENT_SHADER, fs_src.c_str());
     if (!vs || !fs) return false;
@@ -422,14 +504,31 @@ bool PreviewRenderer::ensure_program() {
     _u_s = glx::GetUniformLocation(_prog, "u_s");
     _u_zrange = glx::GetUniformLocation(_prog, "u_zrange");
     _u_vp = glx::GetUniformLocation(_prog, "u_vp");
+    _u_points = glx::GetUniformLocation(_prog, "u_points");
+    _u_psize = glx::GetUniformLocation(_prog, "u_psize");
+    _u_pradius = glx::GetUniformLocation(_prog, "u_pradius");
+    _sloc[0] = {glx::GetUniformLocation(_prog, "u_tier"),
+                glx::GetUniformLocation(_prog, "u_dist"),
+                glx::GetUniformLocation(_prog, "u_clip_on"),
+                glx::GetUniformLocation(_prog, "u_clip"),
+                glx::GetUniformLocation(_prog, "u_glow")};
     return true;
+}
+
+void PreviewRenderer::set_style_uniforms(int program, const PreviewStyle& st) {
+    const StyleLoc& l = _sloc[program];
+    glx::Uniform1i(l.tier, st.tier);
+    glx::Uniform1fv(l.dist, 8, st.dist);
+    glx::Uniform1i(l.clip_on, st.clip ? 1 : 0);
+    glx::Uniform4f(l.clip, st.plane[0], st.plane[1], st.plane[2], st.plane[3]);
+    glx::Uniform1f(l.glow, st.glow);
 }
 
 bool PreviewRenderer::ensure_mesh_program() {
     if (_mprog) return true;
     if (!glx::init()) return false;
     std::string vs_src = std::string("#version 150\n") + kProj + kMeshVert;
-    std::string fs_src = std::string("#version 150\n") + kProj + kMeshFrag;
+    std::string fs_src = std::string("#version 150\n") + kProj + kClip + kMeshFrag;
     GLuint vs = compile(GL_VERTEX_SHADER, vs_src.c_str());
     GLuint fs = compile(GL_FRAGMENT_SHADER, fs_src.c_str());
     if (!vs || !fs) return false;
@@ -463,6 +562,11 @@ bool PreviewRenderer::ensure_mesh_program() {
     _mu_color_on = glx::GetUniformLocation(_mprog, "u_color_on");
     _mu_shade = glx::GetUniformLocation(_mprog, "u_shade");
     _mu_flat = glx::GetUniformLocation(_mprog, "u_flat");
+    _sloc[1] = {glx::GetUniformLocation(_mprog, "u_tier"),
+                glx::GetUniformLocation(_mprog, "u_dist"),
+                glx::GetUniformLocation(_mprog, "u_clip_on"),
+                glx::GetUniformLocation(_mprog, "u_clip"),
+                glx::GetUniformLocation(_mprog, "u_glow")};
     return true;
 }
 
@@ -941,9 +1045,11 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
                                  float scene_radius, float view_dist,
                                  const float view_target[3], bool show_cams,
                                  float frustum_scale, bool show_grid,
-                                 float ortho_back) {
+                                 float ortho_back, const PreviewStyle* style) {
     if (!_built || !_gl_ok || W < 1 || H < 1) return 0;
     if (!ensure_fbo(W, H)) return 0;
+    static const PreviewStyle kViewport;
+    const PreviewStyle& st = style ? *style : kViewport;
     if (show_grid) ensure_grid(scene_radius, view_dist, view_target);
 
     // Depth is LINEAR over this range, so a near plane costs no precision;
@@ -957,7 +1063,8 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
 
     glx::BindFramebuffer(GL_FRAMEBUFFER, (GLuint)_fbo);
     glViewport(0, 0, W, H);
-    glClearColor(0.05f, 0.055f, 0.065f, 1.0f);
+    if (st.transparent) glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    else glClearColor(0.05f, 0.055f, 0.065f, 1.0f);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -975,6 +1082,7 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
         glx::Uniform1i(_mu_color_on, _mesh_color_on ? 1 : 0);
         glx::Uniform1i(_mu_shade, _mesh_shade ? 1 : 0);
         glx::Uniform1i(_mu_flat, _mesh_flat ? 1 : 0);
+        set_style_uniforms(1, st);
         if (_mesh_mode == 2 && _mesh_color_on && _tex_mesh) {
             glx::ActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, (GLuint)_tex_mesh);
@@ -994,6 +1102,10 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
     glx::Uniform2f(_u_s, sx, sy);
     glx::Uniform2f(_u_zrange, zn, zf);
     glx::Uniform2f(_u_vp, (float)W, (float)H);
+    set_style_uniforms(0, st);
+    glx::Uniform1i(_u_points, 0);
+    glx::Uniform1f(_u_psize, 1.0f);
+    glx::Uniform1f(_u_pradius, 0.0f);
 
     // Grid + axes (aux = vertex color; depth-tested like everything else;
     // a_delta in position units -> u_dscale = 1).
@@ -1006,12 +1118,30 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
     }
 
     // Point cloud (aux = vertex color; a_delta disabled -> seam kill no-op).
-    glPointSize(2.0f);
+    // A soft point is blended rather than depth-written: splats of it
+    // overlap, and a hard edge from the depth test is what it is avoiding.
+    const bool soft = st.point_shape == 2;
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glx::Uniform1i(_u_points, st.point_shape + 1);
+    glx::Uniform1f(_u_psize, std::max(st.point_px, 1.0f));
+    glx::Uniform1f(_u_pradius, st.point_shape == 3 ? st.point_radius : 0.0f);
+    if (soft) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+    }
     glx::Uniform1f(_u_scale, 0.0f);
     glx::Uniform1f(_u_dscale, 0.0f);
     glx::Uniform4f(_u_color, 0, 0, 0, 0);
     glx::BindVertexArray(_vao_pts);
     glDrawArrays(GL_POINTS, 0, (GLsizei)_num_points);
+    if (soft) {
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+    }
+    glDisable(GL_PROGRAM_POINT_SIZE);
+    glx::Uniform1i(_u_points, 0);
+    glx::Uniform1f(_u_pradius, 0.0f);
 
     // Camera frusta (aux = offset): bright border/anchor range, then the
     // dimmed interior gridlines of wide (dome/globe) cameras. a_delta is in

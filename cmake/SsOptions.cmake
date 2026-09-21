@@ -249,23 +249,12 @@ if(NOT SS_FONT_CJK MATCHES "^(fetch|none|sc|tc|jp|kr|all)$")
 endif()
 
 # ---------------------------------------------------------------------------
-# Patent-encumbered modules
-#
-# OFF by default, and deliberately so: this repository is GPLv3, and the video
-# codecs are the one piece of it that carries third-party patent exposure
-# (H.264 / H.265 via MPEG LA / Access Advance, AV1 via the claims asserted
-# against AOMedia). With it OFF, src/video/ -- the container demuxers, the
-# H.264 / H.265 / AV1 bitstream parsers and the VK_KHR_video_decode_* driver --
-# is neither compiled nor linked, and everything that wanted it shells out to
-# an external ffmpeg instead. That costs a subprocess and a temporary folder of
-# JPEGs; no feature disappears from the GUI.
-#
-# Turn it ON to decode video in-process on the GPU (roughly 15x faster frame
-# extraction, and no ffmpeg to install). Distributors should check what their
-# jurisdiction and their users require before shipping a binary built with it.
+# Patent-encumbered modules: src/video/ (H.264 / H.265 / AV1 decode and encode),
+# the one part of this GPLv3 tree with third-party patent exposure. OFF by
+# default, deliberately; off, ffmpeg does the work. docs/build.md explains.
 # ---------------------------------------------------------------------------
 option(SS_ENABLE_PATENTED
-    "Compile patent-encumbered modules (in-process H.264/H.265/AV1 video decode)"
+    "Compile patent-encumbered modules (in-process H.264/H.265/AV1 video decode and encode)"
     OFF)
 if(SS_ENABLE_PATENTED AND NOT SS_BUILD_SAM)
     message(FATAL_ERROR

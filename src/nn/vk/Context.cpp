@@ -305,6 +305,7 @@ struct Configured {
     bool        validation = false;
     bool        profile = false;
     bool        want_video = false;
+    bool        want_encode = false;
 };
 Configured            g_configured;
 Context*              g_ctx = nullptr;
@@ -363,6 +364,7 @@ void Context::configure(const ContextOptions& opts) {
         g_configured.validation = g_configured.validation || opts.validation;
         g_configured.profile = g_configured.profile || opts.profile;
         g_configured.want_video = g_configured.want_video || opts.want_video;
+        g_configured.want_encode = g_configured.want_encode || opts.want_encode;
         return;
     }
     if (g_configured.set)
@@ -374,6 +376,7 @@ void Context::configure(const ContextOptions& opts) {
     g_configured.validation = g_configured.validation || opts.validation;
     g_configured.profile = g_configured.profile || opts.profile;
     g_configured.want_video = g_configured.want_video || opts.want_video;
+    g_configured.want_encode = g_configured.want_encode || opts.want_encode;
 }
 
 std::string Context::configured_selector() {
@@ -422,6 +425,7 @@ Context& Context::get(const ContextOptions& opts) {
         applied.validation = applied.validation || g_configured.validation;
         applied.profile = applied.profile || g_configured.profile;
         applied.want_video = applied.want_video || g_configured.want_video;
+        applied.want_encode = applied.want_encode || g_configured.want_encode;
 
         // Constructed locally and published only on success: an initialization
         // failure must not leave a half-built singleton behind, and the next
@@ -434,6 +438,7 @@ Context& Context::get(const ContextOptions& opts) {
             g_configured.validation = opts.validation;
             g_configured.profile = opts.profile;
             g_configured.want_video = opts.want_video;
+            g_configured.want_encode = opts.want_encode;
         }
         g_ctx = ctx.release();
     }
@@ -679,6 +684,50 @@ void Context::createDevice(const ContextOptions& opts) {
         }
     }
 
+    // ---- video encode -----------------------------------------------------
+    // Only `spirula encode` asks: a device every other tool creates has no
+    // use for an encode queue.
+#if defined(SS_HAVE_VIDEO) && defined(VK_KHR_video_encode_queue)
+    if (opts.want_encode) {
+        if (!has(VK_KHR_VIDEO_QUEUE_EXTENSION_NAME) ||
+            !has(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)) {
+            encode_reason_ = "driver does not expose VK_KHR_video_encode_queue";
+        } else {
+            for (uint32_t i = 0; i < nq; ++i) {
+                if (!(qf2[i].queueFamilyProperties.queueFlags &
+                      VK_QUEUE_VIDEO_ENCODE_BIT_KHR))
+                    continue;
+                encode_queue_family_ = i;
+                encode_codec_ops_ = qvid[i].videoCodecOperations;
+                break;
+            }
+            if (!has(VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME))
+                encode_codec_ops_ &= ~(uint32_t)VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
+            if (!has(VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME))
+                encode_codec_ops_ &= ~(uint32_t)VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR;
+            encode_codec_ops_ &= (uint32_t)(VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR |
+                                            VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR);
+            if (encode_queue_family_ == UINT32_MAX) {
+                encode_reason_ = "no queue family advertises VIDEO_ENCODE";
+            } else if (encode_codec_ops_ == 0) {
+                encode_reason_ = "video-encode queue exists but neither H.264 nor H.265 encode";
+                encode_queue_family_ = UINT32_MAX;
+            } else {
+                encode_reason_.clear();
+                if (std::find_if(exts.begin(), exts.end(), [](const char* e) {
+                        return std::strcmp(e, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME) == 0;
+                    }) == exts.end())
+                    exts.push_back(VK_KHR_VIDEO_QUEUE_EXTENSION_NAME);
+                exts.push_back(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME);
+                if (encode_codec_ops_ & VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR)
+                    exts.push_back(VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME);
+                if (encode_codec_ops_ & VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR)
+                    exts.push_back(VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME);
+            }
+        }
+    }
+#endif
+
     // ---- queues ---------------------------------------------------------
     const float prio = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> qcis;
@@ -690,6 +739,11 @@ void Context::createDevice(const ContextOptions& opts) {
         qcis.push_back(q);
         if (video_queue_family_ != UINT32_MAX && video_queue_family_ != queue_family_) {
             q.queueFamilyIndex = video_queue_family_;
+            qcis.push_back(q);
+        }
+        if (encode_queue_family_ != UINT32_MAX && encode_queue_family_ != queue_family_ &&
+            encode_queue_family_ != video_queue_family_) {
+            q.queueFamilyIndex = encode_queue_family_;
             qcis.push_back(q);
         }
     }
@@ -729,7 +783,8 @@ void Context::createDevice(const ContextOptions& opts) {
     // Decoded pictures are multi-planar YCbCr images. We never sample them --
     // the planes are copied to buffers and unpacked in a shader -- but creating
     // an image in one of those formats is gated on this feature.
-    if (video_queue_family_ != UINT32_MAX) f11.samplerYcbcrConversion = VK_TRUE;
+    if (video_queue_family_ != UINT32_MAX || encode_queue_family_ != UINT32_MAX)
+        f11.samplerYcbcrConversion = VK_TRUE;
 
     VkPhysicalDeviceSubgroupSizeControlFeaturesEXT fsg{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};
@@ -756,6 +811,8 @@ void Context::createDevice(const ContextOptions& opts) {
     if (video_queue_family_ != UINT32_MAX)
         vkGetDeviceQueue(device_, video_queue_family_,
                          video_queue_family_ == queue_family_ ? 0 : 0, &video_queue_);
+    if (encode_queue_family_ != UINT32_MAX)
+        vkGetDeviceQueue(device_, encode_queue_family_, 0, &encode_queue_);
 
 }
 

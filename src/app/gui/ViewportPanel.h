@@ -121,6 +121,27 @@ public:
     // A render is due: what a tool calls after changing what is drawn.
     void invalidate() { _dirty = true; }
 
+    // ---- what render mode drives (app/gui/render/) ----
+
+    // The navigation pose, shared frame: camera-to-world 3x4 in OpenGL axes
+    // and the orbit pivot. Setting it jumps; nothing animates.
+    void nav_pose(float c2w[12], float target[3]) const;
+    void set_nav_pose(const float c2w[12], const float target[3]);
+    // The display lens: camera model index (kViewerCameraModels) and its
+    // field of view, degrees across the width.
+    int view_model() const { return _cam_model; }
+    float view_fov() const { return _fov_deg[_cam_model]; }
+    void set_view_lens(int model, float fov_deg);
+    // The point under a fraction of the image (0..1 each way), found on the
+    // next render the way a double-click finds one. take_pick() hands it
+    // over once: true with `hit` false means the ray found nothing.
+    void request_pick(float u, float v);
+    bool take_pick(float out[3], bool& hit);
+    // The placement under edit alone (see set_edit_transform), and the whole
+    // model -> shared similarity.
+    void edit_transform(float out[12]) const;
+    void model_to_shared(float out[12]) const;
+
     // A placement under edit, model frame -> model frame, composed INSIDE the
     // owner's: what the editor moves while the owner's alignment stays put.
     void set_edit_transform(const float a[12]);
@@ -252,6 +273,11 @@ private:
     // (set in handle_input; consumed by draw_preview / draw_engine).
     bool _dbl_pending = false;
     float _dbl_u = 0.0f, _dbl_v = 0.0f;
+    // The same for a tool that asked (request_pick): delivered, not recentred.
+    bool _tool_pick = false, _tool_pick_done = false, _tool_pick_hit = false;
+    bool _tool_pick_inflight = false;
+    float _tool_pick_uv[2] = {0, 0};
+    float _tool_pick_at[3] = {0, 0, 0};
 
     // Camera model + per-model FOV memory (browser _fovMemory equivalent).
     int _cam_model = 0;              // index into kViewerCameraModels

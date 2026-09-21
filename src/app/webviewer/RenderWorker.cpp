@@ -135,7 +135,8 @@ struct RenderWorker::Impl {
                     throw std::runtime_error(
                         "viewer: the selected GPU is not usable on this thread");
 #endif
-                res.rgb8 = render_once(p.q, res);
+                if (p.q.raw) res.rgba8 = render_raw(p.q);
+                else res.rgb8 = render_once(p.q, res);
             } catch (const std::exception& e) {
                 std::fprintf(stderr, "[viewer] render error: %s\n", e.what());
                 res.error = e.what();
@@ -153,6 +154,87 @@ struct RenderWorker::Impl {
                     hooks.set_render_pending(false);
             }
         }
+    }
+
+    // c2w (client frame, OpenGL axes) -> the engine's world-to-camera, with
+    // the train-frame remap and the relative scale applied.
+    void engine_viewmat(const float in_c2w[12], float vm[16]) const {
+        static const float D[3] = {1.f, -1.f, -1.f};
+        float c2w[12];
+        std::memcpy(c2w, in_c2w, sizeof c2w);
+        if (cfg.train_frame_scale != 1.0f) {
+            const auto& T = cfg.train_to_normalized;
+            double s = std::sqrt((double)T[0]*T[0] + (double)T[4]*T[4] + (double)T[8]*T[8]);
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 3; c++) {
+                    double v = 0.0;
+                    for (int m = 0; m < 3; m++) v += (double)T[r*4 + m] / s * in_c2w[m*4 + c];
+                    c2w[r*4 + c] = (float)v;
+                }
+                double t = T[r*4 + 3];
+                for (int m = 0; m < 3; m++) t += (double)T[r*4 + m] * in_c2w[m*4 + 3];
+                c2w[r*4 + 3] = (float)t;
+            }
+        }
+        double t[3] = {c2w[3], c2w[7], c2w[11]};
+        if (cfg.relative_scale.has_value())
+            for (auto& v : t) v *= *cfg.relative_scale;
+        std::memset(vm, 0, 16 * sizeof(float));
+        for (int r = 0; r < 3; r++) {
+            double ti = 0.0;
+            for (int c = 0; c < 3; c++) {
+                const double rf = c2w[c*4 + r] * D[r];
+                vm[r*4 + c] = (float)rf;
+                ti -= rf * t[c];
+            }
+            vm[r*4 + 3] = (float)ti;
+        }
+        vm[15] = 1.f;
+    }
+
+    std::vector<uint8_t> render_raw(const ViewRequest& q) {
+        const int W = q.W, H = q.H;
+        const int64_t npx = (int64_t)W * H;
+        float vm[16];
+        engine_viewmat(q.c2w, vm);
+        float intr[4] = {q.fx, q.fy, q.cx, q.cy};
+        float dist[8];
+        std::memcpy(dist, q.dist, sizeof dist);
+        const int sh_deg = q.sh_degree >= 0 ? q.sh_degree : 100;
+        const std::string& primitive = q.primitive.empty() ? cfg.primitive : q.primitive;
+        std::vector<float> rgb((size_t)npx * 3), depth((size_t)npx), Ts((size_t)npx);
+        {
+            std::lock_guard<std::mutex> lk(*hooks.engine_mutex);
+            if (cfg.scene_slot >= 0) engine_scene_activate(cfg.scene_slot);
+            // The restore has to run whatever the render does.
+            struct After {
+                const std::function<void()>& f;
+                ~After() { if (f) f(); }
+            } after{q.after_render};
+            if (q.before_render) q.before_render();
+            set_camera_params(W, H, q.model, q.distortion,
+                              tvp(vm, 4, {1, 4, 4}),
+                              tvp(intr, 4, {1, 4}),
+                              tvp(dist, 4, {1, 8}));
+            forward_3dgs(primitive, sh_deg, cfg.packed, false, 0);
+            engine_copy_render_to_host(tvp(rgb.data(), 4, {1, H, W, 3}),
+                                       tvp(depth.data(), 4, {1, H, W, 1}),
+                                       tvp(Ts.data(), 4, {1, H, W, 1}),
+                                       tv_null(), tv_null());
+        }
+        std::vector<uint8_t> out((size_t)npx * 4);
+        auto to8 = [](float v) {
+            return (uint8_t)std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f);
+        };
+        for (int64_t i = 0; i < npx; i++) {
+            const float a = std::clamp(1.0f - Ts[(size_t)i], 0.0f, 1.0f);
+            // Premultiplied: a colour brighter than its coverage is clamped
+            // to it, or the edge of a faint splat would glow once composited.
+            for (int c = 0; c < 3; c++)
+                out[(size_t)i * 4 + c] = to8(std::min(rgb[(size_t)i * 3 + c], a));
+            out[(size_t)i * 4 + 3] = to8(a);
+        }
+        return out;
     }
 
     // ---- the actual render (trainer._render + get_outputs viewer subset) ---

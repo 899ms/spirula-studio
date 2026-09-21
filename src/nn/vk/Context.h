@@ -60,6 +60,7 @@ struct ContextOptions {
     bool        validation = false;   // or $SS_VK_VALIDATION=1
     bool        profile = false;      // or $SS_PROFILE=1
     bool        want_video = false;   // request the video-decode queue family
+    bool        want_encode = false;  // and the video-encode one (spirula encode)
 };
 
 class Context {
@@ -134,6 +135,12 @@ public:
     VkQueue     videoQueue()              const { return video_queue_; }
     bool        hasVideoCodec(VkVideoCodecOperationFlagBitsKHR op) const;
     const std::string& videoUnavailableReason() const { return video_reason_; }
+    // The same for encode, asked for with ContextOptions::want_encode.
+    bool        hasVideoEncode()          const { return encode_queue_family_ != UINT32_MAX; }
+    uint32_t    encodeQueueFamily()       const { return encode_queue_family_; }
+    VkQueue     encodeQueue()             const { return encode_queue_; }
+    uint32_t    encodeCodecs()            const { return encode_codec_ops_; }
+    const std::string& encodeUnavailableReason() const { return encode_reason_; }
 
     // Loaded per-device entry points for the extensions we use dynamically.
     // (Vulkan-Headers ships the prototypes but not all loaders export them.)
@@ -169,6 +176,10 @@ private:
     uint32_t  video_queue_family_ = UINT32_MAX;
     uint32_t  video_codec_ops_ = 0;
     std::string video_reason_ = "not requested";
+    VkQueue   encode_queue_ = VK_NULL_HANDLE;
+    uint32_t  encode_queue_family_ = UINT32_MAX;
+    uint32_t  encode_codec_ops_ = 0;
+    std::string encode_reason_ = "not requested";
 
     VkPhysicalDeviceMemoryProperties mem_props_{};
     VkPhysicalDeviceLimits           limits_{};

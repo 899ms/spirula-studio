@@ -571,6 +571,55 @@ void ViewportPanel::nav_camera(int W, int H, float w2c[12], float& fx,
     camera_model = _cam_model;
 }
 
+void ViewportPanel::nav_pose(float c2w[12], float target[3]) const {
+    _cam.c2w(c2w);
+    for (int i = 0; i < 3; i++) target[i] = _cam.target[i];
+}
+
+void ViewportPanel::set_nav_pose(const float c2w[12], const float target[3]) {
+    const float eye[3] = {c2w[3], c2w[7], c2w[11]};
+    // Column 1 is up and column 2 points back, OpenGL axes.
+    const float up[3] = {c2w[1], c2w[5], c2w[9]};
+    const float ahead[3] = {eye[0] - c2w[2], eye[1] - c2w[6], eye[2] - c2w[10]};
+    _cam.look_at(eye, ahead, up);
+    for (int i = 0; i < 3; i++) _cam.target[i] = target[i];
+    _anim = false;
+    if (_ortho) _ortho = _ortho_auto = false;
+    _dirty = true;
+}
+
+void ViewportPanel::set_view_lens(int model, float fov_deg) {
+    model = std::clamp(model, 0, 3);
+    if (model != 0) _ortho = _ortho_auto = false;
+    _cam_model = model;
+    if (fov_max() > 0) _fov_deg[model] = std::clamp(fov_deg, fov_min(), fov_max());
+    _dirty = true;
+}
+
+void ViewportPanel::request_pick(float u, float v) {
+    _tool_pick = true;
+    _tool_pick_done = false;
+    _tool_pick_uv[0] = u;
+    _tool_pick_uv[1] = v;
+    _dirty = true;
+}
+
+bool ViewportPanel::take_pick(float out[3], bool& hit) {
+    if (!_tool_pick_done) return false;
+    _tool_pick_done = false;
+    hit = _tool_pick_hit;
+    for (int i = 0; i < 3; i++) out[i] = _tool_pick_at[i];
+    return true;
+}
+
+void ViewportPanel::edit_transform(float out[12]) const {
+    std::memcpy(out, _m2s_edit, sizeof _m2s_edit);
+}
+
+void ViewportPanel::model_to_shared(float out[12]) const {
+    std::memcpy(out, _m2s, sizeof _m2s);
+}
+
 void ViewportPanel::image_rect(float& x, float& y, float& w, float& h) const {
     x = _img_x;
     y = _img_y;
@@ -1557,6 +1606,26 @@ void ViewportPanel::draw_preview(const ImVec2& avail) {
                  ImVec2(0, 1), ImVec2(1, 0));
     handle_input((float)H);
 
+    // A tool's pick is the same search, handed over instead of recentred on.
+    if (_tool_pick) {
+        _tool_pick = false;
+        _tool_pick_done = true;
+        _tool_pick_hit = false;
+        const float u = (_tool_pick_uv[0] - 0.5f) * (float)W / fx;
+        const float v = (_tool_pick_uv[1] - 0.5f) * (float)H / fy;
+        float dcv[3], m[12];
+        model_c2w(m);
+        if (viewer_pixel_ray(_cam_model, u, v, dcv)) {
+            float ro[3] = {m[3], m[7], m[11]}, rd[3], p[3];
+            for (int r = 0; r < 3; r++)
+                rd[r] = m[r*4+0]*dcv[0] - m[r*4+1]*dcv[1] - m[r*4+2]*dcv[2];
+            if (_preview.pick_point(ro, rd, p)) {
+                shared_point(p, _tool_pick_at);
+                _tool_pick_hit = true;
+            }
+        }
+    }
+
     // Double-click centering: CPU pick against the displayed point cloud
     // (nearest point along the cursor ray, 3% angular cone).
     if (_dbl_pending) {
@@ -1721,8 +1790,14 @@ void ViewportPanel::draw_engine(bool training, const ImVec2& avail, int step) {
             if (res.error.empty()) {
                 upload(res);
                 _last_error.clear();
-                // Double-click centering result (background clicks miss).
-                if (res.pick_hit) {
+                // Double-click centering result (background clicks miss), or
+                // a tool's pick, which is delivered whatever it found.
+                if (_tool_pick_inflight) {
+                    _tool_pick_inflight = false;
+                    _tool_pick_done = true;
+                    _tool_pick_hit = res.pick_hit;
+                    if (res.pick_hit) shared_point(res.pick_point, _tool_pick_at);
+                } else if (res.pick_hit) {
                     float hit[3];
                     shared_point(res.pick_point, hit);
                     recenter_at(hit);
@@ -1763,7 +1838,12 @@ void ViewportPanel::draw_engine(bool training, const ImVec2& avail, int step) {
         build_request(q, W, H);
         // Attach a pending double-click pick to this render; the picked
         // point comes back with the result (depth readback, no extra pass).
-        if (_dbl_pending) {
+        if (_tool_pick) {
+            q.pick_px = std::clamp((int)(_tool_pick_uv[0] * (float)W), 0, W - 1);
+            q.pick_py = std::clamp((int)(_tool_pick_uv[1] * (float)H), 0, H - 1);
+            _tool_pick = false;
+            _tool_pick_inflight = true;
+        } else if (_dbl_pending) {
             q.pick_px = (int)(_dbl_u * (float)W);
             q.pick_py = (int)(_dbl_v * (float)H);
             _dbl_pending = false;

@@ -58,6 +58,9 @@ const VideoApi& video_api() {
         a.cmdControlCoding =
             (PFN_vkCmdControlVideoCodingKHR)get("vkCmdControlVideoCodingKHR");
         a.cmdDecode = (PFN_vkCmdDecodeVideoKHR)get("vkCmdDecodeVideoKHR");
+        a.cmdEncode = (PFN_vkCmdEncodeVideoKHR)get("vkCmdEncodeVideoKHR");
+        a.getEncodedParameters = (PFN_vkGetEncodedVideoSessionParametersKHR)get(
+            "vkGetEncodedVideoSessionParametersKHR");
         // Physical-device queries are instance-level.
         a.getCapabilities = (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR)vkGetInstanceProcAddr(
             ctx.instance(), "vkGetPhysicalDeviceVideoCapabilitiesKHR");

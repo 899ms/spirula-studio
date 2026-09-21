@@ -216,6 +216,30 @@ inline bool Button(const Msg& m, std::initializer_list<Arg> a,
                    const ImVec2& size = ImVec2(0, 0)) {
     return ImGui::Button(detail::label(format(m, a), m), size);
 }
+// The key in the corner of the button it belongs to: a modal grammar nobody
+// can see is a modal grammar nobody uses. Drawn over the last item.
+inline void corner_key(const char* key) {
+    if (!key || !*key) return;
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float tw = ImGui::CalcTextSize(key).x;
+    if (tw + 2.0f * st.FramePadding.x > b.x - a.x) return;   // no room
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(b.x - st.FramePadding.x - tw, a.y + st.FramePadding.y),
+        IM_COL32(255, 255, 255, 90), key);
+}
+// A button with its key in the corner, drawn pressed while `on`.
+inline bool KeyButton(const Msg& m, float w, const char* key, bool on = false) {
+    if (on) {
+        const ImVec4 c = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+        ImGui::PushStyleColor(ImGuiCol_Button, c);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, c);
+    }
+    const bool hit = ImGui::Button(detail::label(m), ImVec2(w, 0));
+    if (on) ImGui::PopStyleColor(2);
+    corner_key(key);
+    return hit;
+}
 inline bool SmallButton(const Msg& m) {
     return ImGui::SmallButton(detail::label(m));
 }
@@ -412,6 +436,24 @@ inline bool InputTextWithHintRaw(const char* id, const Msg& hint,
 }
 inline bool InputFloatRaw(const char* id, float* v, const char* fmt) {
     return ImGui::InputFloat(id, v, 0.0f, 0.0f, fmt);
+}
+inline bool InputFloatRaw(const char* id, float* v, float step, float step_fast,
+                          const char* fmt) {
+    return ImGui::InputFloat(id, v, step, step_fast, fmt);
+}
+inline bool InputDoubleRaw(const char* id, double* v, double step,
+                           double step_fast, const char* fmt) {
+    return ImGui::InputDouble(id, v, step, step_fast, fmt);
+}
+inline bool InputInt2Raw(const char* id, int v[2], ImGuiInputTextFlags flags = 0) {
+    return ImGui::InputInt2(id, v, flags);
+}
+inline bool DragFloatRaw(const char* id, float* v, float speed, float lo,
+                         float hi, const char* fmt) {
+    return ImGui::DragFloat(id, v, speed, lo, hi, fmt);
+}
+inline bool DragFloat3Raw(const char* id, float v[3], float speed, const char* fmt) {
+    return ImGui::DragFloat3(id, v, speed, 0.0f, 0.0f, fmt);
 }
 inline bool InputTextHintBufRaw(const char* id, const Msg& hint, char* buf,
                                 size_t buf_size) {

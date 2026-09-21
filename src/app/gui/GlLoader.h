@@ -99,6 +99,8 @@ extern void (*Uniform1f)(GLint location, GLfloat v0);
 extern void (*Uniform1i)(GLint location, GLint v0);
 extern void (*Uniform2f)(GLint location, GLfloat v0, GLfloat v1);
 extern void (*Uniform4f)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+extern void (*Uniform3f)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
+extern void (*Uniform1fv)(GLint location, GLsizei count, const GLfloat* value);
 extern void (*GenBuffers)(GLsizei n, GLuint* buffers);
 extern void (*BindBuffer)(GLenum target, GLuint buffer);
 extern void (*BufferData)(GLenum target, glSizeiptr size, const void* data, GLenum usage);

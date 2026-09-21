@@ -7,6 +7,7 @@
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/EditAttributes.h"
 #include "i18n/catalog/EditTransform.h"
+#include "i18n/catalog/Render.h"
 
 #include "imgui.h"
 
@@ -17,6 +18,7 @@
 namespace msg = spirula::i18n::msg::edit;
 namespace xmsg = spirula::i18n::msg::xform;
 namespace amsg = spirula::i18n::msg::attr;
+namespace rmsg = spirula::i18n::msg::render;
 using spirula::i18n::Msg;
 
 namespace gui {
@@ -83,29 +85,8 @@ bool act_pressed(const ActRow& r, bool fly_keys_taken) {
     return ImGui::IsKeyPressed(r.imgui_key, false);
 }
 
-// The key in the corner of the button it belongs to: a modal grammar nobody
-// can see is a modal grammar nobody uses.
-void draw_corner_key(const char* key) {
-    if (!key || !*key) return;
-    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-    const ImGuiStyle& st = ImGui::GetStyle();
-    const float tw = ImGui::CalcTextSize(key).x;
-    if (tw + 2.0f * st.FramePadding.x > b.x - a.x) return;   // no room
-    ImGui::GetWindowDrawList()->AddText(
-        ImVec2(b.x - st.FramePadding.x - tw, a.y + st.FramePadding.y),
-        IM_COL32(255, 255, 255, 90), key);
-}
-
 bool key_button(const Msg& m, float w, const char* key, bool on = false) {
-    if (on) {
-        const ImVec4 c = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
-        ImGui::PushStyleColor(ImGuiCol_Button, c);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, c);
-    }
-    const bool hit = ui::Button(m, ImVec2(w, 0));
-    if (on) ImGui::PopStyleColor(2);
-    draw_corner_key(key);
-    return hit;
+    return ui::KeyButton(m, w, key, on);
 }
 
 bool act_button(Act a, const Msg& m, float w) {
@@ -617,6 +598,12 @@ void EditSession::draw_panel() {
         ui::TextColoredWrappedRaw(_status_err ? ImVec4(1, 0.5f, 0.5f, 1)
                                               : ImVec4(0.6f, 0.9f, 0.6f, 1),
                                   _status);
+    // The edit stays open behind a render, so what it did is what is filmed.
+    if (_to_render) {
+        ImGui::Spacing();
+        if (ui::Button(rmsg::edit_to_render, ImVec2(full, 0))) _to_render();
+        ui::help_on_hover(rmsg::edit_to_render_help);
+    }
 
     // Overwriting is the one action here that cannot be undone, so it is the
     // one that asks.

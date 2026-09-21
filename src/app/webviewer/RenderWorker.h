@@ -107,12 +107,25 @@ struct ViewRequest {
     // render in flight is never half-switched.
     std::string primitive;    // "" = ViewerRenderConfig::primitive
     int sh_degree = -1;       // < 0 = the warmup schedule
+
+    // ---- a frame for a file rather than for the screen ----
+    // No overlays and no display transform: ViewResult::rgba8 comes back as
+    // the render premultiplied over nothing, alpha = 1 - transmittance.
+    bool raw = false;
+    // The lens distortion tier by name ("NONE" / "OPENCV" / "THIN_PRISM")
+    // and its coefficients in that tier's order.
+    std::string distortion = "NONE";
+    float dist[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    // Run under the engine lock around this render, with its scene bound:
+    // an effect that rewrites the splats for one frame puts them back after.
+    std::function<void()> before_render, after_render;
 };
 
 struct ViewResult {
     uint64_t id = 0;
     int W = 0, H = 0;
     std::vector<uint8_t> rgb8;   // [H, W, 3]
+    std::vector<uint8_t> rgba8;  // [H, W, 4], ViewRequest::raw only
     std::string error;           // non-empty on failure
     // Pick result (ViewRequest::pick_px/py): point under the pixel in the
     // client's normalized frame; pick_hit false = background / invalid ray.

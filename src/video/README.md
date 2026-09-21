@@ -156,3 +156,37 @@ interpolated; against ffmpeg's `swscale` that is worth a maximum error of about
 Film grain synthesis is parsed but not requested (`apply_grain = 0`). It is a
 cosmetic post-process, the frames feed a segmentation model, and asking for it
 would force the distinct-output path on drivers that would rather not.
+
+## Encode
+
+`VideoEncoder` is the other direction: RGB frames in, H.264 High or H.265
+Main out, through `VK_KHR_video_encode_*`. It is what `spirula encode` runs
+(`src/app/cli/encode_main.cpp`), and that is what the GUI's render mode pipes
+its frames into -- a separate process, because it needs this layer's Vulkan
+device beside the engine's. `Mp4Writer` puts the stream in an MP4.
+
+```
+rgb24 ──► upload ──► rgb_to_nv12 (compute) ──► buffer→image copy ──► encode queue
+          (Stream)   BT.709, studio range        (compute queue)       I then P frames
+```
+
+The shape of the stream is fixed and simple on purpose: an IDR every two
+seconds, P frames each referencing the one before, two DPB slots, constant QP
+where the driver offers it (`RATE_CONTROL_MODE_DISABLED`), a VBR target where
+it does not. The parameter sets written into the file are the ones
+`vkGetEncodedVideoSessionParametersKHR` returns, overrides included, never the
+ones asked for.
+
+Two things the drivers taught, both on NVIDIA 595:
+
+1. **H.265's smallest coding block is 16x16.** An SPS allowing 8x8 is
+   accepted, and the hardware then leaves out split flags a conforming
+   decoder reads: NVDEC played the stream, ffmpeg's software decoder lost
+   sync three CTB rows into every P frame and filled the rest green.
+2. **The encode-feedback query comes back in 32-bit words** whatever
+   `VK_QUERY_RESULT_64_BIT` asks for, so it is read as 32-bit.
+
+`spirula encode --probe` encodes two small frames with each codec and prints
+the ones that worked: a device can list a codec and still refuse a session.
+H.264 is capped at the device's H.264 limit (4096 x 4096 on NVIDIA), so an 8K
+360 video wants H.265.

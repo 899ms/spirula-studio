@@ -22,6 +22,7 @@
 #include "data/SparseEdit.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
+#include "i18n/catalog/Render.h"
 #include "i18n/catalog/Train.h"
 #include "i18n/catalog/TrainFields.h"
 
@@ -63,6 +64,7 @@ namespace fld = spirula::i18n::msg::field;
 namespace dmsg = spirula::i18n::msg::dataset;
 namespace gmsg = spirula::i18n::msg::geometry;
 namespace tmsg = spirula::i18n::msg::train;
+namespace rmsg = spirula::i18n::msg::render;
 using spirula::i18n::Msg;
 using spirula::format_duration;
 
@@ -214,6 +216,46 @@ GuiApp::GuiApp() {
                                   : std::vector<std::string>{ext},
                       "", false, suggested);
         });
+    using RPick = gui::render::RenderSession::Pick;
+    _compare.render().set_pick(
+        [this](RPick kind, const std::string& start, const std::string& suggested) {
+            switch (kind) {
+                case RPick::SaveProject:
+                    open_pick(PickAction::RenderProjectSave, rmsg::pick_save_project.get(),
+                              FileDialog::Mode::Save, {".json"}, start, false, suggested);
+                    break;
+                case RPick::OpenProject:
+                    open_pick(PickAction::RenderProjectOpen, rmsg::pick_open_project.get(),
+                              FileDialog::Mode::File, {".json"}, start);
+                    break;
+                case RPick::Output:
+                    open_render_output_pick(start);
+                    break;
+                case RPick::AddModel:
+                    open_pick(PickAction::RenderAddModel, msg::viewer_pick_file.get(),
+                              FileDialog::Mode::FileOrFolder, kOpenableExtensions);
+                    break;
+            }
+        });
+}
+
+// Where a render goes: a file for a photo or a video, a folder for frames.
+void GuiApp::open_render_output_pick(const std::string& start) {
+    using gui::render::OutputKind;
+    const gui::render::Output& o = _compare.render().output();
+    std::string dir = start;
+    if (!o.path.empty()) dir = fs::path(o.path).parent_path().string();
+    if (o.kind == OutputKind::Frames) {
+        open_pick(PickAction::RenderOutput, rmsg::pick_output_folder.get(),
+                  FileDialog::Mode::Folder, {}, dir);
+        return;
+    }
+    const bool video = o.kind == OutputKind::Video;
+    const std::string ext = video ? ".mp4"
+                            : o.format == gui::render::ImageFormat::Jpeg ? ".jpg" : ".png";
+    open_pick(PickAction::RenderOutput, rmsg::pick_output_file.get(),
+              FileDialog::Mode::Save, {ext}, dir, false,
+              (video ? "render" : "photo") + ext);
 }
 
 GuiApp::~GuiApp() = default;
@@ -1077,6 +1119,10 @@ void GuiApp::open_splat(std::string path) {
         _compare.edit_first_when_ready();
         _edit_after_open = false;
     }
+    if (_render_after_open) {
+        _compare.render_first_when_ready();
+        _render_after_open = false;
+    }
     add_model_recent(path);
     remember_dir("model", path);
     save_settings();
@@ -1108,6 +1154,7 @@ void GuiApp::request_open_splat(std::string path) {
         // The request is dropped, so the intent behind it goes with it: a
         // model opened later must not arrive in edit mode by surprise.
         _edit_after_open = false;
+        _render_after_open = false;
         return;
     }
     open_splat(std::move(path));
@@ -2194,7 +2241,11 @@ const char* GuiApp::dir_key(PickAction a, FileDialog::Mode m) {
         case PickAction::BatchModel:
         case PickAction::EditSaveFile:
         case PickAction::EditSaveFolder:
+        case PickAction::RenderAddModel:
         case PickAction::MeshSource:        return "model";
+        case PickAction::RenderProjectSave:
+        case PickAction::RenderProjectOpen: return "render_project";
+        case PickAction::RenderOutput:      return "render_output";
         case PickAction::Workspace:
         case PickAction::OutputPrefix:
         case PickAction::BatchOutput:
@@ -2277,6 +2328,18 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
         case PickAction::EditSaveFile:
         case PickAction::EditSaveFolder:
             _compare.edit().save_to(_edit_save_target, path);
+            break;
+        case PickAction::RenderProjectSave:
+            _compare.render().picked(gui::render::RenderSession::Pick::SaveProject, path);
+            break;
+        case PickAction::RenderProjectOpen:
+            _compare.render().picked(gui::render::RenderSession::Pick::OpenProject, path);
+            break;
+        case PickAction::RenderOutput:
+            _compare.render().picked(gui::render::RenderSession::Pick::Output, path);
+            break;
+        case PickAction::RenderAddModel:
+            add_splat(path);
             break;
         case PickAction::MeshSource:
             set_mesh_source(path);
@@ -6155,6 +6218,12 @@ void GuiApp::draw_viewer() {
         });
     }
     ui::help_on_hover(msg::home_open_splat_help);
+    // The way into render mode for someone who has not found it on the pane.
+    if (_compare.rendering() < 0 && _compare.count() > 0) {
+        ImGui::SameLine();
+        if (ui::Button(rmsg::train_render)) _compare.begin_render(std::max(0, _compare.editing()));
+        ui::help_on_hover(rmsg::enter_render_help);
+    }
     ImGui::SameLine();
     _compare.set_recents(_model_recents);
     _compare.draw_toolbar();
@@ -6167,13 +6236,18 @@ void GuiApp::draw_viewer() {
 }
 
 void GuiApp::draw_compare_panes() {
-    if (_compare.editing() >= 0 && _compare.edit().active()) {
+    // Rendering is the viewer screen's; the meshing preview shows a result.
+    _compare.set_render_allowed(_screen == Screen::Viewer);
+    _compare.render().set_ffmpeg(_ffmpeg_exe);
+    const CompareView::Sidebar side = _compare.sidebar();
+    if (side != CompareView::Sidebar::None) {
         const float avail = ImGui::GetContentRegionAvail().x;
         const float h = ImGui::GetContentRegionAvail().y;
         const float w = std::clamp(_edit_panel_w * ui_scale(), px(220.0f),
                                    std::max(px(220.0f), avail * 0.6f));
         ImGui::BeginChild("##editpanel", ImVec2(w, 0), ImGuiChildFlags_Borders);
-        _compare.edit().draw_panel();
+        if (side == CompareView::Sidebar::Render) _compare.render().draw_panel();
+        else _compare.edit().draw_panel();
         ImGui::EndChild();
         float dragged = w;
         if (splitter_v("##editpanelsplit", &dragged, px(220.0f), avail * 0.7f, h)) {
@@ -6181,7 +6255,14 @@ void GuiApp::draw_compare_panes() {
             _layout_dirty = true;
         }
         ImGui::BeginChild("##editpanes", ImVec2(0, 0));
-        _compare.draw(0.0f);
+        if (side == CompareView::Sidebar::Render) {
+            // The timeline runs under the panes, the width of all of them.
+            const float tl = _compare.render().timeline_height();
+            _compare.draw(std::max(px(120.0f), ImGui::GetContentRegionAvail().y - tl));
+            _compare.render().draw_timeline();
+        } else {
+            _compare.draw(0.0f);
+        }
         ImGui::EndChild();
         return;
     }
@@ -8194,6 +8275,24 @@ void GuiApp::draw_train_controls() {
                            ImVec2(-8, 36)))
                 start_training();
             ImGui::EndDisabled();
+            // What a finished run is for: a picture of it, or a cleaned copy.
+            if (ph == TrainRunner::Phase::Done && _runner.saved_on_stop() &&
+                _runner.session() && !_batch_active) {
+                const std::string out = _runner.session()->out_dir.string();
+                const float half = (ImGui::GetContentRegionAvail().x - 8.0f -
+                                    ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+                if (ui::Button(rmsg::train_render, ImVec2(half, 30))) {
+                    _render_after_open = true;
+                    request_open_splat(out);
+                }
+                ui::help_on_hover(rmsg::train_render_help);
+                ImGui::SameLine();
+                if (ui::Button(rmsg::train_edit, ImVec2(half, 30))) {
+                    _edit_after_open = true;
+                    request_open_splat(out);
+                }
+                ui::help_on_hover(rmsg::train_edit_help);
+            }
             break;
         }
         case TrainRunner::Phase::Loading:

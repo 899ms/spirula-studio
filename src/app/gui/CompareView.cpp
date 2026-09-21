@@ -9,9 +9,11 @@
 #include "app/gui/edit/SplatDoc.h"
 #include "checkpoint/SplatPly.h"
 #include "core/Camera.h"
+#include "data/Json.h"
 #include "engine/Engine.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
+#include "i18n/catalog/Render.h"
 
 #include "imgui.h"
 
@@ -23,6 +25,7 @@
 namespace fs = std::filesystem;
 namespace msg = spirula::i18n::msg::gui;
 namespace emsg = spirula::i18n::msg::edit;
+namespace rmsg = spirula::i18n::msg::render;
 
 namespace gui {
 
@@ -116,6 +119,8 @@ void CompareView::set_shown(const std::string& path, bool on,
 
 void CompareView::remove(int index) {
     if (index < 0 || index >= count()) return;
+    if (_render_index == index) end_render();
+    else if (_render_index > index) _render_index--;
     if (_edit_index == index) end_edit(false);
     else if (_edit_index > index) _edit_index--;
     Model& m = *_models[index];
@@ -133,11 +138,16 @@ void CompareView::move(int index, int dir) {
     if (index < 0 || index >= count() || to < 0 || to >= count()) return;
     if (_edit_index == index) _edit_index = to;
     else if (_edit_index == to) _edit_index = index;
+    if (_render_index == index) _render_index = to;
+    else if (_render_index == to) _render_index = index;
     std::swap(_models[index], _models[to]);
     if (index == 0 || to == 0) _overlay_key.clear();
 }
 
 void CompareView::close() {
+    _render_when_ready = false;
+    end_render();
+    _run_datasets.clear();
     end_edit(/*reload_panes=*/false);
     // No destroy_gl here: close() also runs from the destructor, by which
     // point the GL context may be gone. GuiApp::shutdown calls destroy_gl()
@@ -170,6 +180,9 @@ std::vector<std::string> CompareView::drain_log() {
     for (auto& m : _models)
         for (auto& s : m->src.drain_log()) out.push_back(std::move(s));
     for (auto& s : _edit.drain_log()) out.push_back(std::move(s));
+    for (auto& s : _render.drain_log()) out.push_back(std::move(s));
+    for (auto& s : _log) out.push_back(std::move(s));
+    _log.clear();
     // Written by the loader thread, which clears `_edit_loading` after it.
     if (!_edit_loading.load() && !_edit_error.empty()) {
         out.push_back(spirula::i18n::format(emsg::edit_failed, {_edit_error}));
@@ -304,8 +317,17 @@ void CompareView::poll() {
         _edit_when_ready = false;
         begin_edit(0);
     }
+    if (_render_when_ready && _render_index < 0 && !_models.empty() &&
+        _models[0]->attached) {
+        _render_when_ready = false;
+        begin_render(0);
+    }
     finish_edit_load();
     if (_edit.active()) _edit.poll();
+    if (_render_index >= 0) {
+        feed_render();
+        _render.poll();
+    }
 }
 
 
@@ -351,6 +373,9 @@ void CompareView::end_edit(bool reload_panes) {
     const bool linked = stale && _edit.doc()->linked_count() > 0;
     _edit.close();
     _edit_index = -1;
+    // Closing the editor let go of the pane; a render on it takes it back.
+    if (_render_index >= 0 && _render_index < count())
+        _models[(size_t)_render_index]->panel.set_interactor(&_render);
     if (!stale || !reload_panes) return;
     for (int i = 0; i < count(); i++)
         if (i == index || (linked && _models[(size_t)i]->attached &&
@@ -360,11 +385,30 @@ void CompareView::end_edit(bool reload_panes) {
 
 void CompareView::begin_edit(int index) {
     if (index < 0 || index >= count()) return;
+    // One panel beside the panes at a time; the render's project is kept.
+    end_render(true);
+    if (_edit_index == index && _edit.active()) {
+        _models[(size_t)index]->panel.set_interactor(&_edit);
+        return;
+    }
     end_edit();
     Model& m = *_models[index];
     if (!m.src.ready()) return;
     _edit_index = index;
     _edit_error.clear();
+    if (_render_allowed)
+        _edit.set_to_render([this] {
+            if (_edit_index >= 0) begin_render(_edit_index);
+        });
+    else
+        _edit.set_to_render(nullptr);
+    // A model saved moved takes its camera projects with it.
+    _edit.set_on_saved([this](const std::string& source, const std::string& saved,
+                              const spirula::Sim3& placement) {
+        std::string dir;
+        const int n = render::copy_moved_projects(source, saved, placement, dir);
+        if (n > 0) _log.push_back(spirula::i18n::format(rmsg::projects_moved, {(long long)n, dir}));
+    });
 
     switch (m.src.kind()) {
         case SplatViewer::Kind::Points: {
@@ -432,6 +476,197 @@ void CompareView::begin_edit(int index) {
             break;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+CompareView::Sidebar CompareView::sidebar() const {
+    if (_render_index >= 0) return Sidebar::Render;
+    if (_edit_index >= 0 && _edit.active()) return Sidebar::Edit;
+    return Sidebar::None;
+}
+
+void CompareView::begin_render(int index) {
+    _render.set_switch_to_edit([this] {
+        if (_render_index >= 0) begin_edit(_render_index);
+    });
+    _render.set_leave([this] { end_render(); });
+    if (index < 0 || index >= count() || !_models[(size_t)index]->attached) return;
+    // An edit on another pane would be left drawing nowhere.
+    if (_edit_index >= 0 && _edit_index != index) {
+        confirm_discard_edits([this, index] {
+            end_edit();
+            begin_render(index);
+        });
+        return;
+    }
+    if (_render_index >= 0 && _render_index != index) end_render();
+    _render_index = index;
+    feed_render();
+    _render.open(&_models[(size_t)index]->panel);
+}
+
+void CompareView::end_render(bool switching) {
+    if (_render_index < 0) return;
+    const int index = _render_index;
+    _render.close(switching);
+    _render_index = -1;
+    if (index < count() && _edit_index == index && _edit.active())
+        _models[(size_t)index]->panel.set_interactor(&_edit);
+}
+
+const ParsedDataset* CompareView::run_dataset(const std::string& model_file) {
+    if (model_file.empty()) return nullptr;
+    auto it = _run_datasets.find(model_file);
+    if (it == _run_datasets.end()) {
+        auto rd = std::make_unique<RunDataset>();
+        RunDataset* r = rd.get();
+        r->worker = std::thread([r, model_file] {
+            try {
+                // config.json sits in the run folder: beside a mesh, one up
+                // from a checkpoint's splat.ply.
+                const fs::path f = fs::u8path(model_file);
+                fs::path run;
+                std::error_code ec;
+                for (fs::path d : {f.parent_path(), f.parent_path().parent_path()})
+                    if (fs::is_regular_file(d / "config.json", ec)) { run = d; break; }
+                if (run.empty()) { r->done = true; return; }
+                const JsonValue cfg = json_parse_file((run / "config.json").string());
+                const JsonValue* data = cfg.find("data");
+                if (!data || data->as_string().empty()) { r->done = true; return; }
+                fs::path dir = fs::u8path(data->as_string());
+                if (dir.is_relative()) dir = run / dir;
+                DatasetParserConfig pc;
+                pc.require_image_files = false;
+                auto ds = std::make_unique<ParsedDataset>(parse_dataset(dir.string(), pc, ""));
+                // The run may have trained in a frame of its own; its
+                // scene_transform.json says how to get there.
+                spirula::Sim3 t;
+                if (fs::is_regular_file(run / "scene_transform.json", ec)) {
+                    const JsonValue st = json_parse_file((run / "scene_transform.json").string());
+                    const JsonValue* tw = st.find("train_from_world");
+                    const JsonValue* m = tw ? tw->find("matrix_3x4_flat_row_major") : nullptr;
+                    if (m && m->is_array() && m->arr.size() == 12) {
+                        double a[12];
+                        for (int k = 0; k < 12; k++) a[k] = m->arr[(size_t)k].as_double();
+                        t = spirula::Sim3::from_3x4(a);
+                    }
+                }
+                for (int64_t i = 0; i < ds->num_cameras; i++) {
+                    float* M = &ds->c2w[(size_t)i * 12];
+                    double R[9], p[3] = {M[3], M[7], M[11]}, q[3];
+                    for (int r2 = 0; r2 < 3; r2++)
+                        for (int c = 0; c < 3; c++) {
+                            double v = 0.0;
+                            for (int k = 0; k < 3; k++) v += t.R[r2*3+k] * M[k*4+c];
+                            R[r2*3+c] = v;
+                        }
+                    t.apply(p, q);
+                    for (int r2 = 0; r2 < 3; r2++) {
+                        for (int c = 0; c < 3; c++) M[r2*4+c] = (float)R[r2*3+c];
+                        M[r2*4+3] = (float)q[r2];
+                    }
+                }
+                // The parsers' guess at up (DatasetParser.h normalized_rotation),
+                // in the model's frame.
+                const double up_w[3] = {ds->normalized_rotation[6], ds->normalized_rotation[7],
+                                        ds->normalized_rotation[8]};
+                t.rotate(up_w, r->up);
+                r->ds = std::move(ds);
+            } catch (const std::exception&) {
+            }
+            r->done = true;
+        });
+        _run_datasets[model_file] = std::move(rd);
+        return nullptr;
+    }
+    RunDataset& r = *it->second;
+    if (!r.done.load()) return nullptr;
+    if (r.worker.joinable()) r.worker.join();
+    return r.ds.get();
+}
+
+void CompareView::feed_render() {
+    if (_render_index < 0 || _render_index >= count()) return;
+    std::vector<int> order{_render_index};
+    for (int i = 0; i < count(); i++)
+        if (i != _render_index) order.push_back(i);
+    std::vector<render::SourceInfo> out;
+    for (int i : order) {
+        Model& m = *_models[(size_t)i];
+        if (!m.attached || !m.src.ready()) continue;
+        render::SourceInfo si;
+        si.path = m.path;
+        si.name = display_name(m.src.file().empty() ? m.path : m.src.file());
+        render::SourceView& v = si.view;
+        v.key = m.src.scene_key();
+        spirula::Sim3 file_to_norm;
+        switch (m.src.kind()) {
+            case SplatViewer::Kind::Points: {
+                v.kind = render::SourceView::Points;
+                v.ds = &m.src.points();
+                v.post = &m.src.post();
+                double T[16], A[16];
+                for (int k = 0; k < 16; k++) T[k] = v.ds->train_to_normalized[k];
+                dsparse::invert_affine4x4(T, A);
+                double a[12];
+                for (int k = 0; k < 12; k++) a[k] = A[k];
+                file_to_norm = spirula::Sim3::from_3x4(a);
+                si.has_up = true;
+                for (int k = 0; k < 3; k++) si.up[k] = v.ds->normalized_rotation[6 + k];
+                break;
+            }
+            case SplatViewer::Kind::Mesh:
+                v.kind = render::SourceView::Mesh;
+                v.mesh = &m.src.mesh();
+                si.dataset = run_dataset(m.src.file());
+                for (int k = 0; k < 12; k++) v.mesh_t2n[k] = m.src.mesh_to_normalized()[k];
+                file_to_norm = spirula::Sim3::from_3x4(m.src.mesh_to_normalized());
+                break;
+            default: {
+                v.kind = render::SourceView::Splats;
+                float t[12];
+                m.src.to_view_frame(t);
+                file_to_norm = spirula::Sim3::from_3x4(t);
+                v.cfg = m.src.render_config();
+                v.hooks = m.src.make_hooks();
+                v.file = m.src.file();
+                v.sh_max = m.src.sh_degree();
+                si.dataset = run_dataset(v.file);
+                // Splats deleted in the editor stay deleted in the render,
+                // even while an effect rewrites the others.
+                if (_edit_index == i && _edit.active() &&
+                    _edit.doc()->kind() == EditDoc::Kind::Splats) {
+                    if (!_alive || _alive_rev != _edit.doc()->revision()) {
+                        _alive = std::make_shared<const std::vector<uint8_t>>(
+                            _edit.doc()->alive_of(0));
+                        _alive_rev = _edit.doc()->revision();
+                    }
+                    v.alive = _alive;
+                }
+                break;
+            }
+        }
+        v.file_to_norm = file_to_norm;
+        float e[12];
+        m.panel.edit_transform(e);
+        v.norm_to_world = file_to_norm.inverse() * spirula::Sim3::from_3x4(e);
+        out.push_back(std::move(si));
+    }
+    for (render::SourceInfo& si : out) {
+        if (si.has_up || !si.dataset) continue;
+        const auto it = _run_datasets.find(si.view.file.empty() ? si.path : si.view.file);
+        if (it == _run_datasets.end()) continue;
+        si.has_up = true;
+        for (int k = 0; k < 3; k++) si.up[k] = it->second->up[k];
+    }
+    if (out.empty()) return;
+    float base[12];
+    _models[(size_t)_render_index]->panel.base_transform(base);
+    _render.set_world_to_shared(spirula::Sim3::from_3x4(base) * out[0].view.file_to_norm);
+    _render.set_sources(std::move(out));
 }
 
 // Every other mesh pane, filtered by the same face set. They keep their own
@@ -635,6 +870,23 @@ void CompareView::draw_pane(int index, const ImVec2& size) {
         }
         if (on) ImGui::PopStyleColor(2);
         ui::help_on_hover(emsg::enter_edit_help);
+        if (_render_allowed) {
+            ImGui::SameLine();
+            const bool rendering = _render_index == index;
+            if (rendering) {
+                const ImVec4 c = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+                ImGui::PushStyleColor(ImGuiCol_Button, c);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, c);
+            }
+            ImGui::BeginDisabled(rendering && _render.exporting());
+            if (ui::Button(rendering ? rmsg::leave_render : rmsg::enter_render)) {
+                if (rendering) end_render();
+                else begin_render(index);
+            }
+            ImGui::EndDisabled();
+            if (rendering) ImGui::PopStyleColor(2);
+            ui::help_on_hover(rmsg::enter_render_help);
+        }
     }
     if (m.src.ready()) {
         ImGui::SameLine();
@@ -663,7 +915,8 @@ void CompareView::draw_pane(int index, const ImVec2& size) {
             ui::TextDisabledRaw(m.src.error());
             break;
         case SplatViewer::State::Ready:
-            if (_edit_index == index && _edit.active()) _edit.draw_status();
+            if (_render_index == index) _render.draw_status();
+            else if (_edit_index == index && _edit.active()) _edit.draw_status();
             else if (_edit_index == index && _edit_loading.load())
                 ui::TextDisabled(emsg::edit_preparing);
             // Nothing is training, so nothing changes between frames unless
@@ -701,6 +954,28 @@ void CompareView::draw(float height) {
     }
 
     const ImGuiStyle& st = ImGui::GetStyle();
+    // Rendering: the primary pane, and the camera's own view where the
+    // render panel asks for it. The other models are sources, not panes.
+    if (_render_index >= 0 && _render_index < n) {
+        using PM = render::RenderSession::PreviewMode;
+        const PM mode = _render.preview_mode();
+        if (mode == PM::Through) {
+            ImGui::BeginChild("##camera", avail, ImGuiChildFlags_Borders);
+            _render.draw_preview_pane();
+            ImGui::EndChild();
+        } else if (mode == PM::Beside) {
+            const float w = (avail.x - st.ItemSpacing.x) * 0.5f;
+            draw_pane(_render_index, ImVec2(w, avail.y));
+            ImGui::SameLine();
+            ImGui::BeginChild("##camera", ImVec2(0, avail.y), ImGuiChildFlags_Borders);
+            _render.draw_preview_pane();
+            ImGui::EndChild();
+        } else {
+            draw_pane(_render_index, avail);
+        }
+        _controls_h = 0.0f;
+        return;
+    }
     if (n <= 3) {
         const float w = (avail.x - st.ItemSpacing.x * (n - 1)) / n;
         for (int i = 0; i < n; i++) {

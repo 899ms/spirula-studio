@@ -288,7 +288,7 @@ int spirula_gui_main(int argc, char** argv) {
             const bool scripted = gui::automation::begin_frame();
             ImGui::NewFrame();
             app.frame();
-            const bool busy = ui_busy() || scripted;
+            const bool busy = ui_busy() || scripted || app.animating();
             ImGui::Render();
 
             const double now = glfwGetTime();

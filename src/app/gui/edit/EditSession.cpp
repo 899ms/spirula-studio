@@ -592,6 +592,7 @@ void EditSession::poll() {
     if (!_save_busy.load() && _save_worker.joinable()) {
         _save_worker.join();
         if (_save_error.empty()) {
+            if (_on_saved) _on_saved(_doc->source_path(), _save_path, _save_placement);
             _doc->mark_saved();
             if (_save_path == _doc->source_path() ||
                 _save_path == _doc->default_save_path(_save_target))
@@ -668,6 +669,7 @@ void EditSession::save_to(int target, const std::string& path) {
     if (_save_worker.joinable()) _save_worker.join();
     _save_error.clear();
     _save_path = path;
+    _save_placement = _doc->file_placement();
     _save_done = 0;
     _save_total = std::max(1, _doc->save_steps(target));
     _save_busy = true;

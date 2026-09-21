@@ -59,6 +59,14 @@ public:
                                           const std::string& suggested)> f) {
         _pick_save = std::move(f);
     }
+    // Offered as a button when set: over to the render mode on this pane.
+    void set_to_render(std::function<void()> f) { _to_render = std::move(f); }
+    // Told after every successful save: what the document came from, where it
+    // went, and the placement the file now carries in its own coordinates.
+    void set_on_saved(std::function<void(const std::string& source, const std::string& saved,
+                                         const spirula::Sim3& placement)> f) {
+        _on_saved = std::move(f);
+    }
     // The owner's answer, once the user has chosen.
     void save_to(int target, const std::string& path);
     // Save over what the document came from, which is what the panel's Save
@@ -317,6 +325,9 @@ private:
 
     std::function<void(int, const std::string&, bool, const std::string&)>
         _pick_save;
+    std::function<void()> _to_render;
+    std::function<void(const std::string&, const std::string&, const spirula::Sim3&)> _on_saved;
+    spirula::Sim3 _save_placement;
     std::vector<std::string> _log;
     std::string _status;              // formatted, already translated
     bool _status_err = false;

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <thread>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -15,6 +16,7 @@
 #endif
 #include <windows.h>
 #else
+#include <cerrno>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -151,6 +153,105 @@ int run_process(const std::vector<std::string>& argv,
 }
 
 
+struct ProcessPipe::Impl {
+    HANDLE process = nullptr;
+    HANDLE in_wr = nullptr;
+    HANDLE out_rd = nullptr;
+    std::thread reader;
+    std::function<void(const std::string&)> on_line;
+};
+
+bool ProcessPipe::start(const std::vector<std::string>& argv,
+                        std::function<void(const std::string&)> on_line) {
+    if (argv.empty() || _impl->process) return false;
+    std::string cmdline;
+    for (size_t i = 0; i < argv.size(); i++)
+        cmdline += (i ? " " : "") + quote_arg(argv[i]);
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof sa;
+    sa.bInheritHandle = TRUE;
+    HANDLE in_rd = nullptr, out_wr = nullptr;
+    if (!CreatePipe(&in_rd, &_impl->in_wr, &sa, 1 << 20)) return false;
+    if (!CreatePipe(&_impl->out_rd, &out_wr, &sa, 0)) {
+        CloseHandle(in_rd);
+        CloseHandle(_impl->in_wr);
+        _impl->in_wr = nullptr;
+        return false;
+    }
+    SetHandleInformation(_impl->in_wr, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(_impl->out_rd, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOA si{};
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in_rd;
+    si.hStdOutput = out_wr;
+    si.hStdError = out_wr;
+    PROCESS_INFORMATION pi{};
+    std::vector<char> cmd(cmdline.begin(), cmdline.end());
+    cmd.push_back('\0');
+    const BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(in_rd);
+    CloseHandle(out_wr);
+    if (!ok) {
+        CloseHandle(_impl->in_wr);
+        CloseHandle(_impl->out_rd);
+        _impl->in_wr = _impl->out_rd = nullptr;
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    _impl->process = pi.hProcess;
+    _impl->on_line = std::move(on_line);
+    Impl* im = _impl.get();
+    _impl->reader = std::thread([im] {
+        std::string acc;
+        char buf[4096];
+        DWORD got = 0;
+        while (ReadFile(im->out_rd, buf, sizeof buf, &got, nullptr) && got)
+            emit_lines(acc, buf, got, im->on_line);
+        emit_tail(acc, im->on_line);
+    });
+    return true;
+}
+
+bool ProcessPipe::write(const void* data, size_t bytes) {
+    if (!_impl->in_wr) return false;
+    const char* p = (const char*)data;
+    while (bytes > 0) {
+        DWORD put = 0;
+        const DWORD chunk = (DWORD)std::min<size_t>(bytes, 1 << 24);
+        if (!WriteFile(_impl->in_wr, p, chunk, &put, nullptr) || !put) return false;
+        p += put;
+        bytes -= put;
+    }
+    return true;
+}
+
+int ProcessPipe::finish() {
+    if (!_impl->process) return kSpawnFailed;
+    if (_impl->in_wr) { CloseHandle(_impl->in_wr); _impl->in_wr = nullptr; }
+    WaitForSingleObject(_impl->process, INFINITE);
+    if (_impl->reader.joinable()) _impl->reader.join();
+    DWORD code = 1;
+    GetExitCodeProcess(_impl->process, &code);
+    CloseHandle(_impl->process);
+    CloseHandle(_impl->out_rd);
+    _impl->process = _impl->out_rd = nullptr;
+    return (int)code;
+}
+
+void ProcessPipe::kill() {
+    if (_impl->process) TerminateProcess(_impl->process, 1);
+}
+
+ProcessPipe::~ProcessPipe() {
+    if (_impl->process) {
+        kill();
+        finish();
+    }
+}
+
+
 bool command_exists(const std::string& exe) {
     if (exe.find('\\') != std::string::npos || exe.find('/') != std::string::npos) {
         std::error_code ec;
@@ -241,6 +342,102 @@ int run_process(const std::vector<std::string>& argv,
     return 1;
 }
 
+struct ProcessPipe::Impl {
+    pid_t pid = -1;
+    int in_fd = -1, out_fd = -1;
+    std::thread reader;
+    std::function<void(const std::string&)> on_line;
+};
+
+bool ProcessPipe::start(const std::vector<std::string>& argv,
+                        std::function<void(const std::string&)> on_line) {
+    if (argv.empty() || _impl->pid > 0) return false;
+    // A child that dies mid-frame must fail the write, not kill this process.
+    signal(SIGPIPE, SIG_IGN);
+    int in[2], out[2];
+    if (pipe(in) != 0) return false;
+    if (pipe(out) != 0) { close(in[0]); close(in[1]); return false; }
+    const pid_t pid = fork();
+    if (pid < 0) {
+        close(in[0]); close(in[1]); close(out[0]); close(out[1]);
+        return false;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(in[0], STDIN_FILENO);
+        dup2(out[1], STDOUT_FILENO);
+        dup2(out[1], STDERR_FILENO);
+        close(in[0]); close(in[1]); close(out[0]); close(out[1]);
+        std::vector<char*> args;
+        for (const auto& a : argv) args.push_back(const_cast<char*>(a.c_str()));
+        args.push_back(nullptr);
+        execvp(args[0], args.data());
+        _exit(127);
+    }
+    close(in[0]);
+    close(out[1]);
+    fcntl(in[1], F_SETFD, FD_CLOEXEC);
+    fcntl(out[0], F_SETFD, FD_CLOEXEC);
+    _impl->pid = pid;
+    _impl->in_fd = in[1];
+    _impl->out_fd = out[0];
+    _impl->on_line = std::move(on_line);
+    Impl* im = _impl.get();
+    _impl->reader = std::thread([im] {
+        std::string acc;
+        char buf[4096];
+        for (;;) {
+            const ssize_t got = read(im->out_fd, buf, sizeof buf);
+            if (got < 0 && errno == EINTR) continue;
+            if (got <= 0) break;
+            emit_lines(acc, buf, (size_t)got, im->on_line);
+        }
+        emit_tail(acc, im->on_line);
+    });
+    return true;
+}
+
+bool ProcessPipe::write(const void* data, size_t bytes) {
+    if (_impl->in_fd < 0) return false;
+    const char* p = (const char*)data;
+    while (bytes > 0) {
+        const ssize_t put = ::write(_impl->in_fd, p, bytes);
+        if (put < 0 && errno == EINTR) continue;
+        if (put <= 0) return false;
+        p += put;
+        bytes -= (size_t)put;
+    }
+    return true;
+}
+
+int ProcessPipe::finish() {
+    if (_impl->pid <= 0) return kSpawnFailed;
+    if (_impl->in_fd >= 0) { close(_impl->in_fd); _impl->in_fd = -1; }
+    int status = 0;
+    while (waitpid(_impl->pid, &status, 0) < 0 && errno == EINTR) {}
+    if (_impl->reader.joinable()) _impl->reader.join();
+    close(_impl->out_fd);
+    _impl->out_fd = -1;
+    _impl->pid = -1;
+    if (WIFEXITED(status)) {
+        const int code = WEXITSTATUS(status);
+        return code == 127 ? kSpawnFailed : code;
+    }
+    return 1;
+}
+
+void ProcessPipe::kill() {
+    if (_impl->pid > 0) ::kill(-_impl->pid, SIGKILL);
+}
+
+ProcessPipe::~ProcessPipe() {
+    if (_impl->pid > 0) {
+        kill();
+        finish();
+    }
+}
+
+
 bool command_exists(const std::string& exe) {
     if (exe.find('/') != std::string::npos)
         return access(exe.c_str(), X_OK) == 0;
@@ -301,6 +498,8 @@ bool open_url(const std::string& url) {
 }
 
 #endif
+
+ProcessPipe::ProcessPipe() : _impl(new Impl) {}
 
 // Platform-independent: argv assembly is the same everywhere.
 std::vector<std::string> split_args(const std::string& s) {

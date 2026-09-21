@@ -16,8 +16,8 @@ exactly as before, and nothing here may cost it a kernel. That turned out to
 cost nothing to honour — see "Where the work happens" below, which is why
 none of this needed a device kernel on either backend.
 
-Phases 1 to 4 of the order of work below are **built** (named groups, part of
-phase 3, are not); what shipped is recorded at the end of each section. Phase 4
+Phases 1 to 4 and 6 of the order of work below are **built** (named groups,
+part of phase 3, are not); what shipped is recorded at the end of each section. Phase 4
 has its own note: [scene-transform.md](scene-transform.md), with the SH math in
 [sh-rotation.md](sh-rotation.md).
 
@@ -357,19 +357,21 @@ and hand corrections belong to a *frame*. Both have to exist, keyed the way
 
 ## Camera trajectories and video export
 
-A trajectory is keyframes (pose, field of view, time, and the render options —
-a fly-through that changes buffer halfway is a legitimate thing to want), an
-interpolation (Catmull-Rom on position, slerp/squad on rotation, with an
-optional constant-speed reparameterization so a dense cluster of keyframes does
-not crawl), and a render job.
+*Built* -- [render-video.md](render-video.md). A camera move is keyframes
+drawn as cameras on the pane and moved with the same G / R / S operator as a
+model (S is the field of view), a look-at point, a lens per key or carried
+from the key before, one time-based spline under every channel, and a
+timeline under the panes. What it renders is every model open on the viewer
+screen, each by the renderer that already draws it, composited on the GPU
+with the shot's transition; what it writes is image files through stb, or a
+video through `spirula encode` (the GPU encoder, patent-gated) or ffmpeg. The
+project is a JSON file in the dataset's `renders/`.
 
-Almost everything is already here: `NavCamera` for the pose, `RenderWorker` for
-the frames, `app/WriterPool.h` for encoding them off the render thread, and an
-ffmpeg dependency the app already shells out to. What is missing is UI — a
-timeline strip, "key the current view", a curve drawn in the viewport, a scrub
-— plus a JSON file stored next to the model so the same move can be re-rendered
-after the model is retrained. The turntable and orbit presets are the same
-object with the keyframes generated.
+What the plan had not thought of: the move has to live in the model's SAVED
+coordinates, and a model moved in the editor has to take its projects with
+it; *up* is a property of the dataset, not of the model file; and an uneven
+spacing of keys makes a Catmull-Rom camera run past a key and back unless the
+tangents are limited.
 
 ## Saving an edited sparse reconstruction
 
@@ -451,11 +453,18 @@ src/app/gui/ViewportPanel      the navigation gizmo, the orthographic view, the
                                  edit transform (all viewports, not only the editor)
 ```
 
-Still to come, as the later phases arrive:
+What phase 6 added:
 
 ```
-src/app/gui/edit/
-  Trajectory.{h,cpp}
+src/app/gui/render/
+  RenderProject.{h,cpp}  the move, the lens, the output, the shots; the JSON
+  Trajectory.{h,cpp}     keys -> a camera at any time
+  LensPresets.{h,cpp}    common lenses, 360 cameras, the dataset's own lenses
+  FrameRenderer.{h,cpp}  one frame from every model, composited on the GPU
+  FrameSink.{h,cpp}      image files, or frames piped into an encoder
+  RenderSession.{h,cpp}  the mode; RenderPanel.cpp and RenderTimeline.cpp
+src/video/VideoEncoder.{h,cpp}, Mp4Writer.{h,cpp}   the GPU encoder
+src/app/cli/encode_main.cpp                          `spirula encode`
 ```
 
 ## Where the work happens
@@ -521,6 +530,9 @@ widening it.
 5. **The mask editor.** Path shape, livewire, paint layer, per-frame
    corrections.
 6. **Trajectories and video export.**
+   *Built*, with photos and frame sequences beside the video, 360 output, the
+   shots and transitions of an editor, and a GPU encoder:
+   [render-video.md](render-video.md).
 7. **Sparse split/merge, and region-of-interest weighting for training.**
 
 ## What will bite

@@ -113,6 +113,9 @@ if(SS_BUILD_SAM)
              ${SS_SRC}/app/cli/sam_extract.cpp
              ${SS_SRC}/app/FrameExtract.cpp)
         list(APPEND SS_TOOL_LIBS ss_video)
+        # ---- video encoding: what the GUI's render mode pipes frames into ----
+        list(APPEND SS_TOOL_SOURCES ${SS_SRC}/app/cli/encode_main.cpp)
+        list(APPEND SS_TOOL_DEFS SS_TOOL_ENCODE=1)
     endif()
 
     # ---- monocular depth and normals ----
@@ -218,7 +221,8 @@ if(SS_BUILD_GUI)
         AppBanner)
 
     file(GLOB SS_GUI_SOURCES CONFIGURE_DEPENDS
-        ${SS_SRC}/app/gui/*.cpp ${SS_SRC}/app/gui/edit/*.cpp)
+        ${SS_SRC}/app/gui/*.cpp ${SS_SRC}/app/gui/edit/*.cpp
+        ${SS_SRC}/app/gui/render/*.cpp)
     list(APPEND SS_TOOL_SOURCES ${SS_GUI_SOURCES})
     list(APPEND SS_TOOL_DEFS SS_TOOL_GUI=1)
     list(APPEND SS_TOOL_LIBS imgui_glfw OpenGL::GL)
@@ -379,6 +383,13 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/edit/ElementGrid.cpp
         ${SS_SRC}/app/gui/edit/Selection.cpp)
     ss_configure_app(attributes_test)
+
+    add_executable(render_project_test
+        ${SS_SRC}/app/gui/tests/render_project_test.cpp
+        ${SS_SRC}/app/gui/render/LensPresets.cpp
+        ${SS_SRC}/app/gui/render/RenderProject.cpp
+        ${SS_SRC}/app/gui/render/Trajectory.cpp)
+    ss_configure_app(render_project_test)
 
     add_executable(preset_roundtrip_test
         ${SS_SRC}/app/gui/tests/preset_roundtrip_test.cpp

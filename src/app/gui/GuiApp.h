@@ -72,6 +72,9 @@ public:
 
     // Draw one frame (between ImGui::NewFrame and ImGui::Render).
     void frame();
+    // Something is moving without the user touching anything -- a render
+    // playing back or being written -- so frames must keep coming.
+    bool animating() const { return _compare.animating(); }
 
     // What a script needs to know that is not on screen as a widget: the
     // screen, what is running, what is open. A JSON object body without the
@@ -106,7 +109,8 @@ private:
         BatchDataset, BatchOutput, BatchPresetFile, BatchDatasetPresetFile,
         BatchMeshPresetFile, BatchSourceImages, BatchSourceVideo, BatchModel,
         MeshSource, MeshPhotos, MeshOutput, AddSplatFile, SplatFolder,
-        EditSaveFile, EditSaveFolder
+        EditSaveFile, EditSaveFolder, RenderProjectSave, RenderProjectOpen,
+        RenderOutput, RenderAddModel
     };
     // Which reconstruction back end the New Dataset screen runs.
     enum class Engine { BuiltIn, Colmap };
@@ -156,6 +160,7 @@ private:
     // The comparison panes, with the editing panel beside them when a pane is
     // being edited. The viewer screen and the meshing preview share it.
     void draw_compare_panes();
+    void open_render_output_pick(const std::string& start);
 
     // The viewer screen: a splat file (or a checkpoint / run directory) opened
     // for looking at. Takes the engine over, so it goes through the same
@@ -521,6 +526,8 @@ private:
     // the next model opened is being opened in order to edit it.
     int _edit_save_target = 0;
     bool _edit_after_open = false;
+    // The same, for a model opened in order to render it.
+    bool _render_after_open = false;
     // Quitting with unsaved edits: the question is asked before the training
     // one, because the answer decides whether anything is written at all.
     bool _edit_exit_confirm = false;

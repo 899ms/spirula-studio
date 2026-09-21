@@ -232,3 +232,67 @@ void laplacian_variance(uint3 tid : SV_GroupThreadID, uniform VarianceParams p) 
         p.out[p.slot] = g_sqr[0] / count - mean * mean;
     }
 }
+
+// ---------------------------------------------------------------------------
+// RGB -> NV12, for the encoder
+// ---------------------------------------------------------------------------
+
+struct Nv12Params {
+    uint* rgb;         // width*height*3 bytes, rows top-down
+    uint* luma;        // coded_w*coded_h bytes
+    uint* chroma;      // coded_w*coded_h/2 bytes, Cb Cr interleaved
+    uint  width;
+    uint  height;
+    uint  coded_w;     // multiples of 4 and 2; the padding repeats the edge
+    uint  coded_h;
+    uint  groups_per_row;
+};
+
+float3 load_rgb(uint* rgb, uint x, uint y, uint width) {
+    uint i = (y * width + x) * 3u;
+    float3 c;
+    c.x = float((rgb[i >> 2u] >> ((i & 3u) * 8u)) & 0xFFu);
+    ++i;
+    c.y = float((rgb[i >> 2u] >> ((i & 3u) * 8u)) & 0xFFu);
+    ++i;
+    c.z = float((rgb[i >> 2u] >> ((i & 3u) * 8u)) & 0xFFu);
+    return c * (1.0f / 255.0f);
+}
+
+// One 4x2 block per thread: a luma word from each row and one chroma word, so
+// every store is whole. BT.709 in studio range, what the stream's VUI says.
+[shader("compute")]
+[numthreads(WG, 1, 1)]
+void rgb_to_nv12(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID,
+                 uniform Nv12Params p) {
+    uint block = fold_index(gid, tid, p.groups_per_row, uint(WG));
+    uint per_row = p.coded_w / 4u;
+    if (block >= per_row * (p.coded_h / 2u)) return;
+    uint bx = (block % per_row) * 4u;
+    uint by = (block / per_row) * 2u;
+
+    uint luma_words[2] = {0u, 0u};
+    float2 chroma[2] = {float2(0.0f, 0.0f), float2(0.0f, 0.0f)};
+    for (uint dy = 0u; dy < 2u; ++dy) {
+        for (uint dx = 0u; dx < 4u; ++dx) {
+            uint x = min(bx + dx, p.width - 1u);
+            uint y = min(by + dy, p.height - 1u);
+            float3 c = load_rgb(p.rgb, x, y, p.width);
+            float Y = 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
+            float Cb = (c.z - Y) / 1.8556f;
+            float Cr = (c.x - Y) / 1.5748f;
+            uint yb = uint(clamp(16.0f + 219.0f * Y, 0.0f, 255.0f) + 0.5f);
+            luma_words[dy] |= yb << (dx * 8u);
+            chroma[dx >> 1u] += float2(Cb, Cr) * 0.25f;
+        }
+    }
+    p.luma[(by * p.coded_w + bx) >> 2u] = luma_words[0];
+    p.luma[((by + 1u) * p.coded_w + bx) >> 2u] = luma_words[1];
+    uint w = 0u;
+    for (uint k = 0u; k < 2u; ++k) {
+        uint cb = uint(clamp(128.0f + 224.0f * chroma[k].x, 0.0f, 255.0f) + 0.5f);
+        uint cr = uint(clamp(128.0f + 224.0f * chroma[k].y, 0.0f, 255.0f) + 0.5f);
+        w |= (cb | (cr << 8u)) << (k * 16u);
+    }
+    p.chroma[((by / 2u) * p.coded_w + bx) >> 2u] = w;
+}

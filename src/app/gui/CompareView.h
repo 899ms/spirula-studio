@@ -12,12 +12,14 @@
 #include "app/gui/ViewportPanel.h"
 #include "app/gui/edit/EditSession.h"
 #include "app/gui/edit/MeshDoc.h"
+#include "app/gui/render/RenderSession.h"
 #include "i18n/Message.h"
 
 #include <atomic>
 #include <thread>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -83,6 +85,23 @@ public:
     // Ask before those changes are thrown away; `then` runs on a yes. With
     // nothing unsaved it runs straight away.
     void confirm_discard_edits(std::function<void()> then);
+
+    // ---- rendering a photo or a video (docs/notes/render-video.md) ----
+    // Offered on the viewer screen, not on the meshing preview.
+    void set_render_allowed(bool on) { _render_allowed = on; }
+    // Render with this pane's model as the primary one; every other open
+    // model is on offer as a source. The editor, when it is open on the same
+    // pane, stays open behind it -- what it did shows in the render.
+    void begin_render(int index);
+    void render_first_when_ready() { _render_when_ready = true; }
+    void end_render(bool switching = false);
+    int rendering() const { return _render_index; }
+    render::RenderSession& render() { return _render; }
+    // Which panel is beside the panes: the editor's, the render's, or none.
+    enum class Sidebar { None, Edit, Render };
+    Sidebar sidebar() const;
+    // Playing back or exporting: the window keeps drawing.
+    bool animating() const { return _render.animating(); }
 
     // Attach panels whose loaders have finished and refresh the placements.
     // Once a frame, before draw().
@@ -157,8 +176,32 @@ private:
     // Apply one mesh edit's deletions to every OTHER mesh pane.
     void show_sibling_meshes(int except, const FaceCut& cut);
 
+    // The models as the render sees them, rebuilt once a frame.
+    void feed_render();
+    // The dataset a run's model was made from, read in the background and
+    // moved into the model's own frame: its cameras and lenses are what the
+    // render offers to start from. nullptr until it is ready, or when none.
+    const ParsedDataset* run_dataset(const std::string& model_file);
+    struct RunDataset {
+        std::thread worker;
+        std::atomic<bool> done{false};
+        std::unique_ptr<ParsedDataset> ds;
+        double up[3] = {0, 0, 1};
+        ~RunDataset() { if (worker.joinable()) worker.join(); }
+    };
+    std::map<std::string, std::unique_ptr<RunDataset>> _run_datasets;
+
     EditSession _edit;
     int _edit_index = -1;
+    render::RenderSession _render;
+    int _render_index = -1;
+    bool _render_allowed = false;
+    bool _render_when_ready = false;
+    // The render panel is the one showing, when both are open on a pane.
+    bool _render_on_top = false;
+    // Which edit revision the splats' survivors were copied at.
+    uint64_t _alive_rev = 0;
+    std::shared_ptr<const std::vector<uint8_t>> _alive;
     bool _edit_when_ready = false;
     std::function<void()> _discard_then;
     bool _ask_discard = false;
@@ -168,6 +211,7 @@ private:
     std::string _edit_error;
 
     std::vector<std::string> _recents;
+    std::vector<std::string> _log;
     std::function<void()> _pick_file;
     std::function<std::vector<std::string>(const std::string&)> _siblings_of;
 };

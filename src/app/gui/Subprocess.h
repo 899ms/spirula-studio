@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,27 @@ int run_process(const std::vector<std::string>& argv,
                 const std::string& cwd,
                 const std::function<void(const std::string&)>& on_line,
                 const std::atomic<bool>& cancel);
+
+// A child whose STDIN this process writes -- raw frames into an encoder.
+// Its merged stdout and stderr still arrive line by line, on a thread of the
+// pipe's own. write() and finish() belong to one thread.
+class ProcessPipe {
+public:
+    ProcessPipe();
+    ~ProcessPipe();
+    bool start(const std::vector<std::string>& argv,
+               std::function<void(const std::string&)> on_line);
+    // False once the child has stopped reading, which is how a crashed
+    // encoder is noticed.
+    bool write(const void* data, size_t bytes);
+    // Close its stdin and wait: the exit code, or kSpawnFailed.
+    int finish();
+    void kill();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
+};
 
 // True when `exe` resolves to an executable (PATH search like the shell).
 bool command_exists(const std::string& exe);
