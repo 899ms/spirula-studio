@@ -368,8 +368,12 @@ void FrameRenderer::submit_layer(int which, const LayerSpec& l) {
     q.distortion = kTierNames[tier];
     for (int k = 0; k < 8; k++) q.dist[k] = tier ? c.lens.dist[k] : 0.0f;
     q.raw = true;
-    if (l.source < (int)_spec.styles.size())
-        q.sh_degree = _spec.styles[(size_t)l.source].sh_degree;
+    q.primitive = s.view.primitive;
+    if (l.source < (int)_spec.styles.size()) {
+        const SourceStyle& st = _spec.styles[(size_t)l.source];
+        q.sh_degree = st.sh_degree;
+        if (!st.primitive.empty()) q.primitive = st.primitive;
+    }
 
     const bool effect = l.grow != 1.0f || l.fade_in < 1.0f || l.clip != 0;
     if (effect && effects_ready(l.source) && s.host) {

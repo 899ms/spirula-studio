@@ -159,8 +159,8 @@ would force the distinct-output path on drivers that would rather not.
 
 ## Encode
 
-`VideoEncoder` is the other direction: RGB frames in, H.264 High or H.265
-Main out, through `VK_KHR_video_encode_*`. It is what `spirula encode` runs
+`VideoEncoder` is the other direction: RGB frames in, H.264 High, H.265 Main
+or AV1 Main out, through `VK_KHR_video_encode_*`. It is what `spirula encode` runs
 (`src/app/cli/encode_main.cpp`), and that is what the GUI's render mode pipes
 its frames into -- a separate process, because it needs this layer's Vulkan
 device beside the engine's. `Mp4Writer` puts the stream in an MP4.
@@ -170,10 +170,11 @@ rgb24 ──► upload ──► rgb_to_nv12 (compute) ──► buffer→image 
           (Stream)   BT.709, studio range        (compute queue)       I then P frames
 ```
 
-The shape of the stream is fixed and simple on purpose: an IDR every two
-seconds, P frames each referencing the one before, two DPB slots, constant QP
-where the driver offers it (`RATE_CONTROL_MODE_DISABLED`), a VBR target where
-it does not. The parameter sets written into the file are the ones
+The shape of the stream is fixed and simple on purpose: a key frame every two
+seconds, P frames each referencing the one before, two DPB slots (an image
+each where the device allows), constant QP where the driver offers it
+(`RATE_CONTROL_MODE_DISABLED`), a VBR target where it does not. AV1 is the
+exception to "the one before" -- see 3 below. The parameter sets written into the file are the ones
 `vkGetEncodedVideoSessionParametersKHR` returns, overrides included, never the
 ones asked for.
 
@@ -185,8 +186,20 @@ Two things the drivers taught, both on NVIDIA 595:
    sync three CTB rows into every P frame and filled the rest green.
 2. **The encode-feedback query comes back in 32-bit words** whatever
    `VK_QUERY_RESULT_64_BIT` asks for, so it is read as 32-bit.
+3. **An AV1 P frame's reconstruction does not work as a reference.** A P
+   frame predicted from the key frame decodes cleanly (any DPB slot); one
+   predicted from a P frame drifts from the first such frame on, static
+   content included, and no reference signalling, DPB layout, frame id,
+   rate-control mode or picture structure tried changed a byte of the
+   picture data. So every AV1 P frame predicts from its key frame: correct,
+   about two and a half times the size of H.265 on a moving camera. The GUI
+   gives AV1 to ffmpeg (SVT-AV1) when it has it.
+4. **AV1 with a render size apart from the frame size is rejected** by
+   decoders, so an odd width or height comes out one pixel larger, as it
+   does for H.264 and H.265, whose 4:2:0 crop is in pairs of pixels.
 
 `spirula encode --probe` encodes two small frames with each codec and prints
-the ones that worked: a device can list a codec and still refuse a session.
+the ones that worked with the largest frame each takes: a device can list a
+codec and still refuse a session.
 H.264 is capped at the device's H.264 limit (4096 x 4096 on NVIDIA), so an 8K
 360 video wants H.265.

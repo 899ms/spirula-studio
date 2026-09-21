@@ -42,6 +42,9 @@ struct SourceInfo {
     // Which way is up in the model's file frame, when a dataset says.
     bool has_up = false;
     double up[3] = {0, 0, 1};
+    // Changes each time the file is read again, and which pane shows it.
+    uint64_t load_id = 0;
+    int pane = -1;
 };
 
 class RenderSession : public ViewportInteractor {
@@ -74,6 +77,12 @@ public:
     // Asked of the owner: go to the editor with this pane.
     void set_switch_to_edit(std::function<void()> f) { _to_edit = std::move(f); }
     void set_leave(std::function<void()> f) { _leave = std::move(f); }
+    // Asked of the owner: close this pane, a model no longer wanted.
+    void set_remove_model(std::function<void(int pane)> f) { _remove_model = std::move(f); }
+    // The editor wrote `placement` (file coordinates) into `saved`: when the
+    // primary model is read back from there, the keys are already where the
+    // model went and must not be moved again.
+    void note_saved(const std::string& saved, const spirula::Sim3& placement);
     void set_ffmpeg(const std::string& exe) { _ffmpeg = exe; }
 
     const Output& output() const { return _project.output; }
@@ -88,6 +97,8 @@ public:
     // The camera's own view, in the pane's space or on its own.
     enum class PreviewMode { Corner = 0, Beside, Through };
     PreviewMode preview_mode() const { return _preview_mode; }
+    // Side by side: the camera's share of the width, which a splitter drags.
+    float& beside_share() { return _beside_share; }
     void draw_preview_pane();
     void draw_status();
 
@@ -117,7 +128,25 @@ private:
     void open_from(const std::string& path);
 
     // ---- keyframes ----
+    // Between two keys the new one is where the camera already passes, so
+    // the move does not change; past the last it is the view.
+    int add_key(double time, bool select);
     int add_key_from_view(double time, bool select);
+    // The lens the viewport shows through, for a first key.
+    Lens view_lens() const;
+    // Where to put the next key when none is asked for: after the one
+    // selected, or at the playhead.
+    double next_key_time() const;
+    void click_select(int index, bool ctrl, bool shift);
+    // Every key keeps the lens it was seen through, whatever happened to
+    // the one before it.
+    void keep_lenses(const std::vector<Lens>& before, const std::vector<int>& from);
+    // One pass of smoothing over the selected keys, or all of them.
+    void smooth_keys(double strength);
+    void smooth_pass(double strength);
+    // The primary model moved in the editor: the keys go with it.
+    void follow_placement();
+    void remove_source(int index);
     void update_key_from_view(int index);
     void look_through(double time);
     void delete_selected();
@@ -135,16 +164,20 @@ private:
     void to_shared(const double w[3], double s[3]) const;
     bool key_screen(int index, const ViewProjection& vp, float& x, float& y) const;
     int hit_key(float x, float y) const;
-    // The operator's frame: pivot, axes, units. `kind` decides the pivot --
-    // one aimed camera turns about what it looks at.
+    // The operator's frame: pivot (the selection's middle), axes, units.
     bool xform_frame(XformFrame& f, XformKind kind);
     void begin_xform(XformKind kind, float mx, float my, bool drag, int axis = -1,
                      bool plane = false);
     void apply_xform(const spirula::Sim3& step_shared, bool scale_fov, double factor);
-    void handle_keys(bool over_view);
+    // `over_list`: the pointer is on the panel or the timeline, where the
+    // letters that select and delete still mean keys.
+    void handle_keys(bool over_view, bool over_list);
+    // A camera as the viewport draws it, `scale` times the common size.
     void draw_camera(ImDrawList* dl, const ViewProjection& vp, float ox,
-                     float oy, const CameraState& c, unsigned col, float size,
+                     float oy, const CameraState& c, unsigned col, float scale,
                      bool axes) const;
+    // World units every camera is drawn at; the panel's size slider scales it.
+    double camera_size() const;
 
     // ---- frames ----
     FrameSpec frame_spec(double t, int W, int H, bool photo);
@@ -155,6 +188,7 @@ private:
     struct Job {
         enum State { Idle, Preparing, Rendering, Finishing } state = Idle;
         bool photo = false;
+        bool builtin = false;            // the GPU encoder, which may hand over to ffmpeg
         int frame = 0, frames = 0;
         std::unique_ptr<FrameSink> sink;
         std::thread finisher;
@@ -165,6 +199,7 @@ private:
         void reset() {
             state = Idle;
             photo = false;
+            builtin = false;
             frame = frames = 0;
             sink.reset();
             finished = false;
@@ -174,11 +209,13 @@ private:
             started = 0.0;
         }
     };
-    void start_export();
+    void start_export(bool no_builtin = false);
     void cancel_export();
     void poll_export();
     Encoder pick_encoder();
     void probe_encoder();
+    // Frames the output has: one a photo, a loop's last left out.
+    int frame_count() const;
 
     // ---- panel pieces (RenderPanel.cpp) ----
     void draw_output_section(float full);
@@ -194,6 +231,11 @@ private:
     bool _have_project = false;
     // Up came from a dataset or from the user, not from the frame's +Z.
     bool _up_known = false;
+    // The primary model's read the keys follow, and a save that moved it.
+    uint64_t _tracked_load = 0;
+    std::string _baked_path;
+    spirula::Sim3 _baked;
+    std::string _sources_sig;
     void take_up_from_view();
     std::vector<SourceInfo> _sources;
     spirula::Sim3 _w2s;
@@ -206,6 +248,9 @@ private:
     uint64_t _traj_rev = 0;
 
     std::vector<uint8_t> _sel;           // one flag per key
+    int _sel_anchor = -1;                // where a Shift-click range starts
+    float _smooth_strength = 0.5f;
+    float _cam_size = 1.0f;
     double _time = 0.0;                  // the playhead, seconds
     bool _playing = false;
     double _play_from = 0.0, _play_clock = 0.0;
@@ -215,6 +260,14 @@ private:
     FrameRenderer _frames;
     PreviewMode _preview_mode = PreviewMode::Corner;
     float _preview_scale = 0.5f;         // of the output size, capped
+    float _beside_share = 0.5f;
+    // The picture in the corner: its width as a share of the pane's, where
+    // it was drawn, and a drag of its inner corner resizing it.
+    float _pip_share = 0.32f;
+    float _pip_rect[4] = {0, 0, 0, 0};
+    bool _pip_resizing = false, _pip_hot = false, _pip_right = true;
+    float _pip_pane_w = 0.0f;
+    bool over_pip() const;
     std::string _preview_key;
     bool _preview_wanted = true;
     int _preview_w = 0, _preview_h = 0;
@@ -236,12 +289,17 @@ private:
     int _drag_key = -1;
     double _drag_key_from = 0.0;
     bool _scrubbing = false;
+    bool _timeline_hovered = false;
     float _timeline_zoom = 1.0f;
 
     Job _job;
     std::atomic<int> _encoder_probe{0};  // 0 unknown, 1 probing, 2 built-in works, 3 not
-    std::atomic<int> _encoder_codecs{0}; // bit 0 H.264, bit 1 H.265
-    bool builtin_encodes(bool h265) const;
+    std::atomic<int> _encoder_codecs{0}; // bit 0 H.264, bit 1 H.265, bit 2 AV1
+    int _encoder_max[3][2] = {};         // largest frame per codec
+    std::atomic<int> _ffmpeg_probe{0};   // 0 unknown, 1 asking, 2 known
+    std::vector<std::string> _ffmpeg_encoders;
+    bool _fallback_tried = false;        // the GPU encoder failed; ffmpeg next
+    bool builtin_encodes(Codec codec, int width, int height) const;
     std::thread _probe;
     std::string _ffmpeg = "ffmpeg";
 
@@ -250,6 +308,7 @@ private:
 
     std::function<void(Pick, const std::string&, const std::string&)> _pick;
     std::function<void()> _to_edit, _leave;
+    std::function<void(int)> _remove_model;
     std::vector<std::string> _log;
     std::string _status;
     bool _status_err = false;

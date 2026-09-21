@@ -247,6 +247,10 @@ inline bool SmallButton(const Msg& m) {
 inline bool ButtonRaw(const char* id, const ImVec2& size = ImVec2(0, 0)) {
     return ImGui::Button(id, size);
 }
+// An arrow, which has no words to translate.
+inline bool ArrowButtonRaw(const char* id, ImGuiDir dir) {
+    return ImGui::ArrowButton(id, dir);
+}
 // A region that holds the mouse without drawing anything: a canvas that is
 // dragged on, which without an item under it would drag the window instead.
 inline bool InvisibleButtonRaw(const char* id, const ImVec2& size,

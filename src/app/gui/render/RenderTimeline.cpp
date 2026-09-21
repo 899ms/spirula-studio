@@ -13,6 +13,7 @@
 #include <cstdio>
 
 namespace msg = spirula::i18n::msg::render;
+using spirula::i18n::Msg;
 using spirula::i18n::format;
 
 namespace gui::render {
@@ -85,23 +86,28 @@ void RenderSession::draw_timeline() {
     char now[64];
     const double fps = std::max(_project.output.fps, 1.0);
     std::snprintf(now, sizeof now, "%6.2f / %.2f s   #%d", _time, _project.duration(),
-                  (int)std::lround((_time - first) * fps) + 1);
+                  std::max(1, (int)std::lround((_time - first) * fps) + 1));
     ui::TextRaw(now);
     ImGui::SameLine();
     ui::Checkbox(msg::tl_loop, &_loop);
 
     // Preview: where the camera's picture goes, and how sharp it is drawn.
-    const float combo_w = px(150.0f), scale_w = px(90.0f);
+    const Msg* modes[3] = {&msg::pv_corner, &msg::pv_beside, &msg::pv_through};
+    float modes_w = 0.0f;
+    for (const Msg* m : modes)
+        modes_w += ImGui::CalcTextSize(m->get()).x + 2.0f * st.FramePadding.x + st.ItemSpacing.x;
+    const float scale_w = px(90.0f);
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(),
-                             ImGui::GetContentRegionMax().x - combo_w - scale_w -
-                                 st.ItemSpacing.x));
-    int mode = (int)_preview_mode;
-    ImGui::SetNextItemWidth(combo_w);
-    if (ui::ComboRaw("##pvmode", &mode, {&msg::pv_corner, &msg::pv_beside, &msg::pv_through})) {
-        _preview_mode = (PreviewMode)mode;
-        _preview_key.clear();
+                             ImGui::GetContentRegionMax().x - modes_w - scale_w));
+    for (int i = 0; i < 3; i++) {
+        if (i) ImGui::SameLine();
+        const bool on = (int)_preview_mode == i;
+        if (ui::KeyButton(*modes[i], 0.0f, nullptr, on) && !on) {
+            _preview_mode = (PreviewMode)i;
+            _preview_key.clear();
+        }
+        ui::help_on_hover(msg::pv_help);
     }
-    ui::help_on_hover(msg::pv_help);
     ImGui::SameLine();
     int q = _preview_scale <= 0.26f ? 0 : _preview_scale <= 0.51f ? 1 : 2;
     const char* qs[] = {"25%", "50%", "100%"};
@@ -120,6 +126,7 @@ void RenderSession::draw_timeline() {
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
     const bool hovered = ImGui::IsItemHovered();
     const bool active = ImGui::IsItemActive();
+    _timeline_hovered = hovered;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float pad = px(10.0f);
     const double span = T * 1.04 + 1e-6;
@@ -194,6 +201,13 @@ void RenderSession::draw_timeline() {
         if (k.hold) dl->AddRect(ImVec2(x - r, key_y - r), ImVec2(x + r, key_y + r), col, 0, 0, px(1.0f));
         if (k.own_lens && i > 0) dl->AddCircle(ImVec2(x, key_y), r + px(3.0f), col, 12, px(1.0f));
     }
+    // A loop comes back to its first key: drawn there, hollow.
+    if (_project.looped()) {
+        const float x = x_of(T), r = px(6.0f);
+        const ImVec2 pts[4] = {ImVec2(x, key_y - r), ImVec2(x + r, key_y),
+                               ImVec2(x, key_y + r), ImVec2(x - r, key_y)};
+        dl->AddPolyline(pts, 4, IM_COL32(220, 220, 220, 200), ImDrawFlags_Closed, px(1.5f));
+    }
 
     // The playhead.
     const float xh = x_of(std::min(_time, T));
@@ -205,11 +219,9 @@ void RenderSession::draw_timeline() {
     const double frame = 1.0 / fps;
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         if (hot >= 0) {
-            if (ImGui::GetIO().KeyShift || ImGui::GetIO().KeyCtrl) {
-                if (hot < (int)_sel.size()) _sel[(size_t)hot] ^= 1;
-            } else if (!selected(hot)) {
-                select_only(hot);
-            }
+            const ImGuiIO& io = ImGui::GetIO();
+            // A plain click on a selected key keeps the group, to drag it.
+            if (io.KeyShift || io.KeyCtrl || !selected(hot)) click_select(hot, io.KeyCtrl, io.KeyShift);
             _drag_key = hot;
             _drag_key_from = _project.keys[(size_t)hot].time;
             _time = _drag_key_from;
@@ -230,18 +242,27 @@ void RenderSession::draw_timeline() {
                     _project.keys[(size_t)i].time = std::max(0.0, _project.keys[(size_t)i].time + shift);
             const double keep = _project.keys[(size_t)_drag_key].time;
             std::vector<uint8_t> sel = _sel;
-            std::vector<std::pair<Keyframe, uint8_t>> tmp;
-            for (size_t i = 0; i < _project.keys.size(); i++)
-                tmp.push_back({_project.keys[i], i < sel.size() ? sel[i] : 0});
-            std::stable_sort(tmp.begin(), tmp.end(), [](const auto& x, const auto& y) {
-                return x.first.time < y.first.time;
-            });
-            for (size_t i = 0; i < tmp.size(); i++) {
-                _project.keys[i] = tmp[i].first;
-                _sel[i] = tmp[i].second;
-                if (tmp[i].first.time == keep) _drag_key = (int)i;
+            std::vector<Lens> lenses;
+            std::vector<int> order;
+            for (int i = 0; i < (int)_project.keys.size(); i++) {
+                lenses.push_back(_project.lens_at(i));
+                order.push_back(i);
             }
-            _project.keys[0].own_lens = true;
+            // Passing another key changes which lens a "same" key copies:
+            // each keeps the one it had.
+            const std::vector<Keyframe> was = _project.keys;
+            std::stable_sort(order.begin(), order.end(), [&](int x, int y) {
+                return was[(size_t)x].time < was[(size_t)y].time;
+            });
+            _sel.resize(order.size(), 0);
+            int dragged = _drag_key;
+            for (size_t i = 0; i < order.size(); i++) {
+                _project.keys[i] = was[(size_t)order[i]];
+                _sel[i] = (size_t)order[i] < sel.size() ? sel[(size_t)order[i]] : 0;
+                if (order[i] == _drag_key) dragged = (int)i;
+            }
+            _drag_key = dragged;
+            keep_lenses(lenses, order);
             _time = keep;
             project_changed();
         }
@@ -252,7 +273,7 @@ void RenderSession::draw_timeline() {
         _scrubbing = false;
     }
     if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && hot < 0)
-        add_key_from_view(std::round(t_of(mouse.x) / frame) * frame, true);
+        add_key(std::round(t_of(mouse.x) / frame) * frame, true);
     if (hovered && hot >= 0 && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         if (!selected(hot)) select_only(hot);
         ImGui::OpenPopup("##keymenu");

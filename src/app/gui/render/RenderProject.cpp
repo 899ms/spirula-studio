@@ -31,6 +31,9 @@ const char* const kPointStyleNames[kNumPointStyles] = {
     "square", "circle", "gaussian", "sphere"};
 const char* const kOutputNames[3] = {"photo", "video", "frames"};
 const char* const kFadeNames[3] = {"none", "black", "white"};
+const char* const kImageFormatNames[kNumImageFormats] = {"png", "png_alpha", "jpeg"};
+const char* const kCodecNames[kNumCodecs] = {"h264", "h265", "av1", "gif"};
+const char* const kCurveNames[kNumCurves] = {"spline", "catmull_rom", "linear"};
 
 template <int N>
 int name_index(const char* const (&names)[N], const std::string& s, int def) {
@@ -183,8 +186,11 @@ void lens_intrinsics(const Lens& l, int w, int h, float out[4]) {
 // ===========================================================================
 
 double RenderProject::duration() const {
-    double t = keys.empty() ? 0.0 : keys.back().time;
-    return end > 0.0 ? std::max(end, t) : t;
+    const double t = keys.empty() ? 0.0 : keys.back().time;
+    if (!looped()) return t;
+    if (end > t + 1e-6) return end;
+    const double spacing = (t - keys.front().time) / (double)(keys.size() - 1);
+    return t + std::max(spacing, 0.1);
 }
 
 const Lens& RenderProject::lens_at(int i) const {
@@ -197,9 +203,16 @@ const Lens& RenderProject::lens_at(int i) const {
 }
 
 void RenderProject::sort_keys() {
-    std::stable_sort(keys.begin(), keys.end(),
-                     [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; });
-    if (!keys.empty()) keys[0].own_lens = true;
+    if (keys.empty()) return;
+    std::vector<std::pair<Keyframe, Lens>> tagged;
+    tagged.reserve(keys.size());
+    for (size_t i = 0; i < keys.size(); i++) tagged.push_back({keys[i], lens_at((int)i)});
+    std::stable_sort(tagged.begin(), tagged.end(), [](const auto& a, const auto& b) {
+        return a.first.time < b.first.time;
+    });
+    for (size_t i = 0; i < keys.size(); i++) keys[i] = tagged[i].first;
+    if (!keys[0].own_lens) keys[0].lens = tagged[0].second;
+    keys[0].own_lens = true;
 }
 
 void aim_rotation(const double pos[3], const double target[3],
@@ -294,18 +307,18 @@ std::string project_to_json(const RenderProject& p) {
     w.field("width", p.output.width);
     w.field("height", p.output.height);
     w.key("fps").raw(json_number_exact(p.output.fps));
-    w.field("image_format", p.output.format == ImageFormat::Jpeg ? "jpeg" : "png");
+    w.field("image_format", kImageFormatNames[(int)p.output.format]);
     w.field("jpeg_quality", p.output.jpeg_quality);
-    w.field("transparent", p.output.transparent);
-    w.field("codec", p.output.codec == Codec::H265 ? "h265" : "h264");
+    w.field("codec", kCodecNames[(int)p.output.codec]);
     w.field("quality", p.output.quality);
     if (!p.output.path.empty()) w.field("path", p.output.path);
     w.end();
 
     w.key("motion").object();
-    w.field("smooth", p.motion.smooth);
+    w.field("curve", kCurveNames[(int)p.motion.curve]);
     w.field("ease", p.motion.ease);
     w.field("constant_speed", p.motion.constant_speed);
+    w.field("loop", p.motion.loop);
     w.key("tension").raw(json_number_exact(p.motion.tension));
     w.end();
 
@@ -331,6 +344,7 @@ std::string project_to_json(const RenderProject& p) {
         w.field("flat", s.style.flat);
         w.field("colour", s.style.colour);
         w.field("sh_degree", s.style.sh_degree);
+        if (!s.style.primitive.empty()) w.field("primitive", s.style.primitive);
         w.end();
         w.end();
     }
@@ -389,18 +403,25 @@ RenderProject project_from_json(const std::string& text) {
         out.width = std::clamp((int)get_num(*o, "width", out.width), 16, 16384);
         out.height = std::clamp((int)get_num(*o, "height", out.height), 16, 16384);
         out.fps = std::clamp(get_num(*o, "fps", out.fps), 1.0, 240.0);
-        out.format = get_str(*o, "image_format") == "jpeg" ? ImageFormat::Jpeg
-                                                           : ImageFormat::Png;
+        out.format = (ImageFormat)name_index(kImageFormatNames, get_str(*o, "image_format"), 0);
+        // Written before PNG with transparency was a format of its own.
+        if (out.format == ImageFormat::Png && get_bool(*o, "transparent", false))
+            out.format = ImageFormat::PngAlpha;
         out.jpeg_quality = std::clamp((int)get_num(*o, "jpeg_quality", 95), 10, 100);
-        out.transparent = get_bool(*o, "transparent", false);
-        out.codec = get_str(*o, "codec") == "h265" ? Codec::H265 : Codec::H264;
+        out.codec = (Codec)name_index(kCodecNames, get_str(*o, "codec"), 0);
         out.quality = std::clamp((int)get_num(*o, "quality", 1), 0, 2);
         out.path = get_str(*o, "path");
     }
     if (const JsonValue* o = root.find("motion"); o && o->is_object()) {
-        p.motion.smooth = get_bool(*o, "smooth", true);
+        // A file from before "curve" meant Catmull-Rom, or lines when not smooth.
+        const std::string curve = get_str(*o, "curve");
+        if (!curve.empty())
+            p.motion.curve = (Curve)name_index(kCurveNames, curve, 0);
+        else
+            p.motion.curve = get_bool(*o, "smooth", true) ? Curve::CatmullRom : Curve::Linear;
         p.motion.ease = get_bool(*o, "ease", true);
         p.motion.constant_speed = get_bool(*o, "constant_speed", false);
+        p.motion.loop = get_bool(*o, "loop", false);
         p.motion.tension = std::clamp(get_num(*o, "tension", 0.0), 0.0, 1.0);
     }
     auto fade = [&](const char* key, Fade& f) {
@@ -428,6 +449,7 @@ RenderProject project_from_json(const std::string& text) {
                 y.flat = get_bool(*st, "flat", false);
                 y.colour = get_bool(*st, "colour", true);
                 y.sh_degree = std::clamp((int)get_num(*st, "sh_degree", -1), -1, 3);
+                y.primitive = get_str(*st, "primitive");
             }
             p.sources.push_back(std::move(s));
         }

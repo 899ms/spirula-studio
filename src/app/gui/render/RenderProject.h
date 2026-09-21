@@ -92,6 +92,8 @@ struct SourceStyle {
     bool cameras = false;               // a reconstruction's own cameras
     bool shade = true, flat = false, colour = true;   // meshes
     int sh_degree = -1;                 // splats; < 0 = all the file has
+    // Splats: a `--primitive` name, or empty for what the viewport shows.
+    std::string primitive;
 };
 
 struct Source {
@@ -100,8 +102,12 @@ struct Source {
 };
 
 enum class OutputKind { Photo = 0, Video, Frames };
-enum class ImageFormat { Png = 0, Jpeg };
-enum class Codec { H264 = 0, H265 };
+// Photos and frames; PngAlpha keeps what is not the model transparent.
+enum class ImageFormat { Png = 0, PngAlpha, Jpeg };
+constexpr int kNumImageFormats = 3;
+// Videos: an MP4 in one of three codecs, or an animated GIF.
+enum class Codec { H264 = 0, H265, Av1, Gif };
+constexpr int kNumCodecs = 4;
 
 struct Output {
     OutputKind kind = OutputKind::Video;
@@ -109,17 +115,24 @@ struct Output {
     double fps = 30.0;
     ImageFormat format = ImageFormat::Png;
     int jpeg_quality = 95;
-    bool transparent = false;           // PNG photos and frames only
     Codec codec = Codec::H264;
     int quality = 1;                    // 0 best, 1 standard, 2 smallest
     std::string path;                   // where the last one went
 };
 
+// How the keys are joined. Spline is C2 through every key; Catmull-Rom is
+// the older local curve, which `tension` tightens.
+enum class Curve { Spline = 0, CatmullRom, Linear };
+constexpr int kNumCurves = 3;
+
 struct Motion {
-    bool smooth = true;                 // curves through the keys, not lines
+    Curve curve = Curve::Spline;
     bool ease = true;                   // start from rest and come to rest
     bool constant_speed = false;        // the same speed all the way along
-    double tension = 0.0;               // 0 Catmull-Rom .. 1 a stop at every key
+    // After the last key the camera goes back to the first, and the video
+    // ends where it began.
+    bool loop = false;
+    double tension = 0.0;               // Catmull-Rom: 0 loose .. 1 a stop at every key
 };
 
 enum class FadeColour { None = 0, Black, White };
@@ -139,15 +152,19 @@ struct RenderProject {
     double up[3] = {0, 0, 1};
     std::vector<Source> sources;        // [0] is the primary model
     std::vector<Shot> shots;            // empty: the primary model throughout
-    double end = 0.0;                   // 0 = the last key's time
+    // A loop's end, back at the first key; 0 = one average key spacing on.
+    double end = 0.0;
     // The editor's placement of the primary model, file coordinates, that the
     // poses were laid out against: opened against another, the whole move is
     // carried across the difference.
     spirula::Sim3 placement;
 
     double duration() const;
+    bool looped() const { return motion.loop && keys.size() >= 2; }
     // The lens in force at key `i`: its own, or the last one before it.
     const Lens& lens_at(int i) const;
+    // Sorted by time. A key that becomes the first keeps the lens it was
+    // seen through rather than taking a default one.
     void sort_keys();
 };
 

@@ -49,16 +49,6 @@ LensPreset fisheye_of(const char* camera, int size, double focal,
     return p;
 }
 
-LensPreset panorama_of(const char* camera, int w) {
-    LensPreset p;
-    p.name = &msg::preset_panorama;
-    p.arg = camera;
-    p.lens.projection = Projection::Equirect;
-    p.width = w;
-    p.height = w / 2;
-    return p;
-}
-
 }  // namespace
 
 const std::vector<LensPreset>& generic_lens_presets() {
@@ -92,11 +82,6 @@ const std::vector<LensPreset>& camera_lens_presets() {
         v.push_back(fisheye_of("Insta360 X3 / X4", 2880, 518.3 / 1920.0, kInsta));
         v.push_back(fisheye_of("Insta360 X4 / X5 (8K)", 3840, 518.3 / 1920.0, kInsta));
         v.push_back(fisheye_of("DJI Osmo 360", 3840, 1049.5 / 3840.0, kOsmo));
-        v.push_back(panorama_of("Insta360 X3", 5760));
-        v.push_back(panorama_of("Insta360 X4 / X5", 7680));
-        v.push_back(panorama_of("DJI Osmo 360", 7680));
-        v.push_back(panorama_of("GoPro MAX", 5376));
-        v.push_back(panorama_of("GoPro MAX 2", 7680));
         return v;
     }();
     return presets;

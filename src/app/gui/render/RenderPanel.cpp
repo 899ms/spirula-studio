@@ -48,6 +48,14 @@ const Msg* const kTransitions[kNumTransitions] = {
     &msg::tr_iris, &msg::tr_sweep, &msg::tr_grow};
 const Msg* const kPointStyles[kNumPointStyles] = {
     &msg::pt_square, &msg::pt_circle, &msg::pt_gaussian, &msg::pt_sphere};
+const Msg* const kCurves[kNumCurves] = {&msg::curve_spline, &msg::curve_catmull,
+                                        &msg::curve_linear};
+const Msg* const kImageFormats[kNumImageFormats] = {&msg::format_png, &msg::format_png_alpha,
+                                                    &msg::format_jpeg};
+const Msg* const kCodecs[kNumCodecs] = {&msg::codec_h264, &msg::codec_h265, &msg::codec_av1,
+                                        &msg::codec_gif};
+// The splat primitives a model can be rendered as, ViewportPanel's names.
+const char* const kPrimitives[3] = {"3dgs", "mip", "3dgut"};
 
 // Keys the whole panel answers to, beside the viewport's own. A key is an
 // identifier, so it never gets translated.
@@ -71,8 +79,11 @@ void fit_output_path(Output& o) {
     const std::string ext = p.extension().string();
     if (o.kind == OutputKind::Frames) {
         if (!ext.empty()) p.replace_extension();
+    } else if (o.kind == OutputKind::Video && o.codec == Codec::Gif) {
+        if (ext != ".gif") p.replace_extension(".gif");
     } else if (o.kind == OutputKind::Video) {
-        if (ext != ".mp4" && ext != ".h264" && ext != ".h265") p.replace_extension(".mp4");
+        if (ext != ".mp4" && ext != ".h264" && ext != ".h265" && ext != ".obu")
+            p.replace_extension(".mp4");
     } else {
         const char* want = o.format == ImageFormat::Jpeg ? ".jpg" : ".png";
         if (ext != want && !(o.format == ImageFormat::Jpeg && ext == ".jpeg"))
@@ -93,7 +104,7 @@ bool combo_msgs(const char* id, int* cur, const Msg* const* items, int n) {
 // Keys
 // ===========================================================================
 
-void RenderSession::handle_keys(bool over_view) {
+void RenderSession::handle_keys(bool over_view, bool over_list) {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput || ImGui::IsAnyItemActive() || _xform.active()) return;
     const bool plain = !io.KeyCtrl && !io.KeyAlt && !io.KeyShift;
@@ -140,14 +151,33 @@ void RenderSession::handle_keys(bool over_view) {
         }
         _time = best;
     }
+    bool any = false;
+    for (uint8_t v : _sel) any = any || v;
+    // Deleting is about the selection, wherever the pointer is.
+    if (any && plain && (pressed(ImGuiKey_Delete) || pressed(ImGuiKey_Backspace))) {
+        delete_selected();
+        return;
+    }
+    // Over the list or the timeline, the letters that pick and delete.
+    if (over_list && !over_view) {
+        if (plain && pressed(ImGuiKey_A)) {
+            bool all = !_project.keys.empty();
+            for (uint8_t v : _sel) all = all && v;
+            _sel.assign(_project.keys.size(), all ? 0 : 1);
+        } else if (!io.KeyCtrl && !io.KeyShift && io.KeyAlt && pressed(ImGuiKey_A)) {
+            _sel.assign(_project.keys.size(), 0);
+        } else if (any && plain && pressed(ImGuiKey_X)) {
+            delete_selected();
+        }
+        return;
+    }
     if (!over_view) return;
 
     // Letters the camera also flies with are the camera's until a key is
     // selected, which is what G / R / S then act on.
     const bool letters = blocks_fly_keys();
     if (plain && (pressed(ImGuiKey_K) || pressed(ImGuiKey_I))) {
-        const int at = add_key_from_view(_time, true);
-        (void)at;
+        add_key(next_key_time(), true);
         _fly_block_key = pressed(ImGuiKey_K) ? ImGuiKey_K : ImGuiKey_I;
         return;
     }
@@ -170,7 +200,7 @@ void RenderSession::handle_keys(bool over_view) {
         _sel.assign(_project.keys.size(), 0);
         return;
     }
-    if (plain && (pressed(ImGuiKey_X) || pressed(ImGuiKey_Delete))) {
+    if (plain && pressed(ImGuiKey_X)) {
         delete_selected();
         return;
     }
@@ -206,7 +236,8 @@ void RenderSession::draw_status() {
 
 void RenderSession::draw_panel() {
     if (!_panel) return;
-    handle_keys(_mouse_in);
+    handle_keys(_mouse_in, _timeline_hovered ||
+                               ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows));
     const ImGuiStyle& st = ImGui::GetStyle();
     const float strip = ImGui::GetFrameHeightWithSpacing() * 2.0f;
     ImGui::BeginChild("##renderbody", ImVec2(0, -strip));
@@ -289,10 +320,10 @@ void RenderSession::draw_panel() {
 void RenderSession::draw_keys_section(float full) {
     const ImGuiStyle& st = ImGui::GetStyle();
     const float half = (full - st.ItemSpacing.x) * 0.5f;
-    if (ui::KeyButton(msg::key_add, half, "K")) add_key_from_view(_time, true);
+    if (ui::KeyButton(msg::key_add, half, "K")) add_key(next_key_time(), true);
     ui::help_on_hover(msg::key_add_help);
     ImGui::SameLine();
-    const int one = single_selected();
+    int one = single_selected();
     ImGui::BeginDisabled(one < 0);
     if (ui::Button(msg::key_update, ImVec2(half, 0))) update_key_from_view(one);
     ImGui::EndDisabled();
@@ -305,6 +336,8 @@ void RenderSession::draw_keys_section(float full) {
     ImGui::BeginDisabled(!any);
     if (ui::KeyButton(msg::key_delete, half, "X")) delete_selected();
     ImGui::EndDisabled();
+    // The buttons may have added or deleted keys.
+    one = single_selected();
 
     // The keys as a list: the viewport's cameras, in time order.
     const int n = (int)_project.keys.size();
@@ -327,11 +360,7 @@ void RenderSession::draw_keys_section(float full) {
             char label[16];
             std::snprintf(label, sizeof label, "%d", i + 1);
             if (ui::SelectableRaw(label, selected(i), ImGuiSelectableFlags_SpanAllColumns)) {
-                if (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) {
-                    if (i < (int)_sel.size()) _sel[(size_t)i] ^= 1;
-                } else {
-                    select_only(i);
-                }
+                click_select(i, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift);
                 _time = k.time;
             }
             ImGui::TableNextColumn();
@@ -367,7 +396,9 @@ void RenderSession::draw_keys_section(float full) {
         }
         ImGui::SameLine();
         ui::Text(msg::key_time);
-        Keyframe& kk = _project.keys[(size_t)single_selected()];
+        one = single_selected();
+        if (one < 0) return;
+        Keyframe& kk = _project.keys[(size_t)one];
         if (ui::Checkbox(msg::key_hold, &kk.hold)) project_changed();
         ui::help_on_hover(msg::key_hold_help);
         if (ui::Checkbox(msg::key_aim, &kk.aim)) {
@@ -423,9 +454,16 @@ void RenderSession::draw_keys_section(float full) {
         ui::TextDisabledWrapped(msg::keys_many_hint);
     }
 
+    ImGui::SetNextItemWidth(full * 0.45f);
+    ui::SliderFloatRaw("##camsize", &_cam_size, 0.1f, 10.0f, "\xc3\x97%.2f",
+                       ImGuiSliderFlags_Logarithmic);
+    ImGui::SameLine();
+    ui::Text(msg::key_camera_size);
+    ui::help_on_hover(msg::key_camera_size_help);
+
     if (n >= 2) {
         static float total = 0.0f;
-        if (total <= 0.0f) total = (float)_project.duration();
+        if (total <= 0.0f) total = (float)(_project.duration() - _project.keys.front().time);
         ImGui::SetNextItemWidth(full * 0.3f);
         ui::InputFloatRaw("##total", &total, "%.1f s");
         ImGui::SameLine();
@@ -527,6 +565,7 @@ void RenderSession::draw_lens_section(float full) {
             }
             ui::SeparatorText(msg::lens_presets_dataset);
             for (const DatasetLens& d : _dataset_lenses) {
+                if (d.lens.projection == Projection::Equirect) continue;
                 char b[160];
                 std::snprintf(b, sizeof b, "%s  %dx%d  %.0f\xc2\xb0",
                               kProjections[(int)d.lens.projection]->get(), d.width,
@@ -633,15 +672,19 @@ void RenderSession::draw_lens_section(float full) {
 
 void RenderSession::draw_motion_section(float full) {
     Motion& m = _project.motion;
-    if (ui::Checkbox(msg::motion_smooth, &m.smooth)) project_changed();
-    ui::help_on_hover(msg::motion_smooth_help);
-    if (ui::Checkbox(msg::motion_ease, &m.ease)) project_changed();
-    ui::help_on_hover(msg::motion_ease_help);
-    if (ui::Checkbox(msg::motion_constant, &m.constant_speed)) project_changed();
-    ui::help_on_hover(msg::motion_constant_help);
-    if (m.smooth) {
+    const float w = full * 0.55f;
+    int curve = (int)m.curve;
+    ImGui::SetNextItemWidth(w);
+    if (combo_msgs("##curve", &curve, kCurves, kNumCurves)) {
+        m.curve = (Curve)curve;
+        project_changed();
+    }
+    ImGui::SameLine();
+    ui::Text(msg::motion_curve);
+    ui::help_on_hover(msg::motion_curve_help);
+    if (m.curve == Curve::CatmullRom) {
         float t = (float)m.tension;
-        ImGui::SetNextItemWidth(full * 0.5f);
+        ImGui::SetNextItemWidth(w);
         if (ui::SliderFloatRaw("##tension", &t, 0.0f, 1.0f, "%.2f")) {
             m.tension = t;
             project_changed();
@@ -650,6 +693,36 @@ void RenderSession::draw_motion_section(float full) {
         ui::Text(msg::motion_tension);
         ui::help_on_hover(msg::motion_tension_help);
     }
+    if (ui::Checkbox(msg::motion_loop, &m.loop)) project_changed();
+    ui::help_on_hover(msg::motion_loop_help);
+    if (m.loop && _project.keys.size() >= 2) {
+        float end = (float)_project.duration();
+        ImGui::SetNextItemWidth(w);
+        if (ui::InputFloatRaw("##loopend", &end, 0.1f, 1.0f, "%.2f s")) {
+            _project.end = std::max((double)end, _project.keys.back().time + 0.1);
+            project_changed();
+        }
+        ImGui::SameLine();
+        ui::Text(msg::motion_loop_end);
+    }
+    ImGui::BeginDisabled(m.loop);
+    if (ui::Checkbox(msg::motion_ease, &m.ease)) project_changed();
+    ImGui::EndDisabled();
+    ui::help_on_hover(msg::motion_ease_help);
+    if (ui::Checkbox(msg::motion_constant, &m.constant_speed)) project_changed();
+    ui::help_on_hover(msg::motion_constant_help);
+
+    // Ironing out kinks by moving the keys themselves.
+    ImGui::BeginDisabled(_project.keys.size() < 3);
+    if (ui::Button(msg::smooth_keys)) smooth_keys(_smooth_strength);
+    ui::help_on_hover(msg::smooth_keys_help);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(full * 0.3f);
+    ui::SliderFloatRaw("##smooth", &_smooth_strength, 0.05f, 1.0f, "%.2f");
+    ImGui::SameLine();
+    ui::TextDisabled(msg::smooth_strength);
+    ImGui::EndDisabled();
+
     if (ui::Button(msg::up_from_view)) take_up_from_view();
     ui::help_on_hover(msg::up_from_view_help);
     char len[32];
@@ -692,6 +765,7 @@ void RenderSession::draw_effects_section(float full) {
 
     // The models, and how each is drawn.
     ui::SeparatorText(msg::sec_models);
+    int remove = -1;
     for (int i = 0; i < (int)_sources.size(); i++) {
         const SourceInfo& s = _sources[(size_t)i];
         if (i >= (int)_project.sources.size()) break;
@@ -702,6 +776,12 @@ void RenderSession::draw_effects_section(float full) {
                                                             : msg::model_splats;
         ui::TextRaw(format(msg::model_line, {(long long)(i + 1), kind.get(), s.name}));
         if (ImGui::IsItemHovered()) ui::SetTooltipRaw(s.path);
+        if (i > 0) {
+            // The primary one is what the camera move is laid out on.
+            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), full - px(24.0f)));
+            if (ui::ButtonRaw("x##rm", ImVec2(px(24.0f), 0))) remove = i;
+            ui::help_on_hover(msg::model_remove_help);
+        }
         ImGui::Indent();
         if (s.view.kind == SourceView::Points) {
             int ps = (int)y.point_style;
@@ -730,24 +810,48 @@ void RenderSession::draw_effects_section(float full) {
             if (ui::Checkbox(msg::mesh_flat, &y.flat)) project_changed();
             ImGui::SameLine();
             if (ui::Checkbox(msg::mesh_colour, &y.colour)) project_changed();
-        } else if (s.view.sh_max > 0) {
-            int sh = y.sh_degree < 0 ? s.view.sh_max : y.sh_degree;
+        } else {
+            // What it is rendered as: the viewport's choice unless set here.
+            int prim = 0;
+            for (int k = 0; k < 3; k++)
+                if (y.primitive == kPrimitives[k]) prim = k + 1;
+            std::vector<std::string> names = {format(msg::primitive_viewport,
+                                                     {s.view.primitive.empty() ? std::string("3dgs")
+                                                                               : s.view.primitive})};
+            for (const char* p : kPrimitives) names.push_back(p);
             ImGui::SetNextItemWidth(w);
-            if (ui::SliderIntRaw("##sh", &sh, 0, s.view.sh_max, "SH %d")) {
-                y.sh_degree = sh == s.view.sh_max ? -1 : sh;
-                project_changed();
+            if (ui::BeginComboRaw("##prim", names[(size_t)prim].c_str())) {
+                for (int k = 0; k < 4; k++)
+                    if (ui::SelectableRaw(names[(size_t)k], k == prim)) {
+                        y.primitive = k == 0 ? std::string() : kPrimitives[k - 1];
+                        project_changed();
+                    }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            ui::Text(msg::model_primitive);
+            ui::help_on_hover(msg::model_primitive_help);
+            if (s.view.sh_max > 0) {
+                int sh = y.sh_degree < 0 ? s.view.sh_max : y.sh_degree;
+                ImGui::SetNextItemWidth(w);
+                if (ui::SliderIntRaw("##sh", &sh, 0, s.view.sh_max, "SH %d")) {
+                    y.sh_degree = sh == s.view.sh_max ? -1 : sh;
+                    project_changed();
+                }
             }
         }
         ImGui::Unindent();
         ImGui::PopID();
     }
+    if (remove > 0) remove_source(remove);
     if (ui::Button(msg::model_add) && _pick)
         _pick(Pick::AddModel, _sources.empty() ? std::string() : _sources[0].path, "");
     ui::help_on_hover(msg::model_add_help);
 
     // Shots: which model is shown from when, and how it arrives.
     ui::SeparatorText(msg::sec_shots);
-    int remove = -1;
+    remove = -1;
+    int swap = -1;
     for (int i = 0; i < (int)_project.shots.size(); i++) {
         Shot& s = _project.shots[(size_t)i];
         ImGui::PushID(1000 + i);
@@ -780,6 +884,17 @@ void RenderSession::draw_effects_section(float full) {
         }
         ImGui::SameLine();
         if (ui::ButtonRaw("x##del", ImVec2(px(28.0f), 0))) remove = i;
+        // Earlier or later: the models trade places, the times stay.
+        ImGui::BeginDisabled(i == 0);
+        if (ui::ArrowButtonRaw("##up", ImGuiDir_Up)) swap = i - 1;
+        ImGui::EndDisabled();
+        ui::help_on_hover(msg::shot_move_help);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(i + 1 >= (int)_project.shots.size());
+        if (ui::ArrowButtonRaw("##down", ImGuiDir_Down)) swap = i;
+        ImGui::EndDisabled();
+        ui::help_on_hover(msg::shot_move_help);
+        if (s.transition != Transition::Cut) ImGui::SameLine();
         if (s.transition != Transition::Cut) {
             float d = (float)s.duration;
             ImGui::SetNextItemWidth(px(120.0f));
@@ -796,6 +911,14 @@ void RenderSession::draw_effects_section(float full) {
         _project.shots.erase(_project.shots.begin() + remove);
         project_changed();
     }
+    if (swap >= 0 && swap + 1 < (int)_project.shots.size()) {
+        Shot& a = _project.shots[(size_t)swap];
+        Shot& b = _project.shots[(size_t)swap + 1];
+        std::swap(a.source, b.source);
+        std::swap(a.transition, b.transition);
+        std::swap(a.duration, b.duration);
+        project_changed();
+    }
     if (ui::Button(msg::shot_add)) {
         Shot s;
         s.start = _time;
@@ -809,33 +932,35 @@ void RenderSession::draw_effects_section(float full) {
     }
     ui::help_on_hover(msg::shot_add_help);
 
-    // The one-button story: the cameras' points, the splats growing out of
-    // them, the surface sweeping up over both.
-    int points = -1, splats = -1, mesh = -1;
-    for (int i = 0; i < (int)_sources.size(); i++) {
-        const SourceView::Kind k = _sources[(size_t)i].view.kind;
-        if (k == SourceView::Points && points < 0) points = i;
-        if (k == SourceView::Splats && splats < 0) splats = i;
-        if (k == SourceView::Mesh && mesh < 0) mesh = i;
-    }
-    const bool can_story = splats >= 0 && (points >= 0 || mesh >= 0);
-    ImGui::BeginDisabled(!can_story || _project.duration() <= 0.0);
+    // Every model in turn, points before splats before meshes: the story a
+    // reconstruction tells, each arriving the way that suits it.
+    std::vector<int> order;
+    for (SourceView::Kind k : {SourceView::Points, SourceView::Splats, SourceView::Mesh})
+        for (int i = 0; i < (int)_sources.size(); i++)
+            if (_sources[(size_t)i].view.kind == k) order.push_back(i);
+    const bool can = order.size() >= 2;
+    ImGui::BeginDisabled(!can || _project.duration() <= 0.0);
     if (ui::Button(msg::story_button, ImVec2(full, 0))) {
-        const double T = _project.duration();
+        const double t0 = _project.keys.front().time, T = _project.duration() - t0;
+        const double each = T / (double)order.size();
         _project.shots.clear();
-        if (points >= 0) {
-            _project.shots.push_back({0.0, points, Transition::Crossfade, 0.8});
-            _project.shots.push_back({T * (mesh >= 0 ? 0.22 : 0.35), splats,
-                                      Transition::Grow, T * (mesh >= 0 ? 0.25 : 0.35)});
-        } else {
-            _project.shots.push_back({0.0, splats, Transition::Crossfade, 0.8});
+        for (size_t j = 0; j < order.size(); j++) {
+            Shot sh;
+            sh.start = t0 + each * (double)j;
+            sh.source = order[j];
+            const SourceView::Kind k = _sources[(size_t)order[j]].view.kind;
+            const SourceView::Kind before = j ? _sources[(size_t)order[j - 1]].view.kind : k;
+            sh.transition = j == 0 ? Transition::Cut
+                            : k == SourceView::Splats && before == SourceView::Points ? Transition::Grow
+                            : k == SourceView::Mesh ? Transition::Sweep
+                                                    : Transition::Crossfade;
+            sh.duration = j == 0 ? 0.0 : std::min(each * 0.6, 3.0);
+            _project.shots.push_back(sh);
         }
-        if (mesh >= 0)
-            _project.shots.push_back({T * 0.62, mesh, Transition::Sweep, T * 0.22});
         project_changed();
     }
     ImGui::EndDisabled();
-    ui::help_on_hover_disabled(can_story ? msg::story_help : msg::story_needs);
+    ui::help_on_hover_disabled(can ? msg::story_help : msg::story_needs);
 }
 
 void RenderSession::draw_project_section(float full) {
@@ -954,12 +1079,13 @@ void RenderSession::draw_output_section(float full) {
     if (o.kind == OutputKind::Video) {
         int codec = (int)o.codec;
         ImGui::SetNextItemWidth(w);
-        if (ui::ComboRaw("##codec", &codec, {&msg::codec_h264, &msg::codec_h265})) {
+        if (combo_msgs("##codec", &codec, kCodecs, kNumCodecs)) {
             o.codec = (Codec)codec;
+            fit_output_path(o);
             project_changed();
         }
         ImGui::SameLine();
-        ui::Text(msg::out_codec);
+        ui::Text(msg::out_format);
         ui::help_on_hover(msg::out_codec_help);
         ImGui::SetNextItemWidth(w);
         if (ui::ComboRaw("##q", &o.quality, {&msg::quality_best, &msg::quality_standard,
@@ -967,15 +1093,33 @@ void RenderSession::draw_output_section(float full) {
             project_changed();
         ImGui::SameLine();
         ui::Text(msg::out_quality);
-        const int probe = _encoder_probe.load();
-        const Msg& enc = builtin_encodes(o.codec == Codec::H265) ? msg::encoder_builtin
-                         : probe == 1 ? msg::encoder_checking
-                         : command_exists(_ffmpeg) ? msg::encoder_ffmpeg : msg::encoder_none;
-        ui::TextDisabledWrapped(enc);
+        // Which program will make it, and why when it is not the GPU.
+        if (o.codec == Codec::Gif) {
+            ui::TextDisabledWrapped(msg::encoder_gif);
+        } else if (_encoder_probe.load() == 1) {
+            ui::TextDisabledWrapped(msg::encoder_checking);
+        } else {
+            const int W = o.width + (o.width & 1), H = o.height + (o.height & 1);
+            const Encoder e = pick_encoder();
+            const int c = std::min((int)o.codec, 2);
+            const bool gpu_codec = (_encoder_codecs.load() & (1 << c)) != 0;
+            if (e.kind == Encoder::BuiltIn) {
+                ui::TextDisabledWrapped(msg::encoder_builtin);
+            } else if (gpu_codec && !builtin_encodes(o.codec, W, H)) {
+                ui::TextDisabledWrapped(e.kind == Encoder::Ffmpeg ? msg::encoder_too_large
+                                                                  : msg::encoder_too_large_none,
+                                        {kCodecs[c]->get(), (long long)_encoder_max[c][0],
+                                         (long long)_encoder_max[c][1]});
+            } else if (e.kind == Encoder::Ffmpeg) {
+                ui::TextDisabledWrapped(msg::encoder_ffmpeg, {e.codec});
+            } else {
+                ui::TextDisabledWrapped(msg::encoder_none);
+            }
+        }
     } else {
         int f = (int)o.format;
         ImGui::SetNextItemWidth(w);
-        if (ui::ComboRaw("##fmt", &f, {&msg::format_png, &msg::format_jpeg})) {
+        if (combo_msgs("##fmt", &f, kImageFormats, kNumImageFormats)) {
             o.format = (ImageFormat)f;
             fit_output_path(o);
             project_changed();
@@ -987,8 +1131,6 @@ void RenderSession::draw_output_section(float full) {
             if (ui::SliderIntRaw("##jq", &o.jpeg_quality, 50, 100, "%d")) project_changed();
             ImGui::SameLine();
             ui::Text(msg::out_quality);
-        } else if (ui::Checkbox(msg::out_transparent, &o.transparent)) {
-            project_changed();
         }
     }
 
@@ -1012,10 +1154,9 @@ void RenderSession::draw_output_section(float full) {
         ImGui::BeginDisabled(_project.keys.empty());
         if (ui::Button(go, ImVec2(full, ImGui::GetFrameHeight() * 1.6f))) start_export();
         ImGui::EndDisabled();
-        const double T = _project.duration();
+        const double T = _project.duration() - (_project.keys.empty() ? 0.0 : _project.keys.front().time);
         if (o.kind != OutputKind::Photo)
-            ui::TextDisabled(msg::out_summary, {seconds(T),
-                             (long long)std::max(1L, std::lround(T * o.fps) + 1)});
+            ui::TextDisabled(msg::out_summary, {seconds(T), (long long)frame_count()});
     } else {
         const float frac = _job.frames > 0 ? (float)_job.frame / (float)_job.frames : 0.0f;
         ui::ProgressBar(frac, ImVec2(full, 0), msg::render_progress,

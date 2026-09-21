@@ -1,5 +1,5 @@
-// `spirula encode` -- raw RGB frames on stdin to an MP4 (or a raw H.264 /
-// H.265 stream), encoded on the GPU. What the GUI's render mode pipes its
+// `spirula encode` -- raw RGB frames on stdin to an MP4 (or a raw H.264,
+// H.265 or AV1 stream), encoded on the GPU. What the GUI's render mode pipes its
 // frames into; a separate process because it needs a Vulkan device of its
 // own beside the engine's (AGENTS.md, "Three Vulkan devices"). PATENT-GATED.
 
@@ -30,13 +30,16 @@ bool ends_with(const std::string& s, const char* tail) {
     return s.size() >= n && s.compare(s.size() - n, n, tail) == 0;
 }
 
+const char* const kCodecNames[3] = {"h264", "h265", "av1"};
+
 // Encode two small frames with each codec: a device that lists an encode
-// queue can still refuse a session, and the GUI should learn that here.
+// queue can still refuse a session, and the GUI should learn that here --
+// with the largest frame each takes, so it knows when to use ffmpeg instead.
 int probe() {
     int found = 0;
-    for (bool h265 : {false, true}) {
+    for (int c = 0; c < 3; c++) {
         video::EncodeOptions o;
-        o.h265 = h265;
+        o.codec = (video::Codec)c;
         o.width = 256;
         o.height = 144;
         video::VideoEncoder e;
@@ -46,11 +49,13 @@ int probe() {
         for (int i = 0; i < 2 && ok; i++) ok = e.encode(rgb.data(), au, sync, err) && !au.empty();
         if (!ok) {
             // Why not goes to stderr; stdout is the list a caller reads.
-            std::fprintf(stderr, "%s: %s\n", h265 ? "h265" : "h264",
+            std::fprintf(stderr, "%s: %s\n", kCodecNames[c],
                          format(msg::encode_failed, {err}).c_str());
             continue;
         }
-        std::printf("%s\n", h265 ? "h265" : "h264");
+        int w = 0, h = 0;
+        e.max_size(w, h);
+        std::printf("%s %d %d\n", kCodecNames[c], w, h);
         found++;
     }
     return found ? 0 : 1;
@@ -69,7 +74,11 @@ int spirula_encode_main(int argc, char** argv) {
         if (a == "--probe") want_probe = true;
         else if (a == "--size") std::sscanf(next(), "%dx%d", &o.width, &o.height);
         else if (a == "--fps") o.fps = std::atof(next());
-        else if (a == "--codec") o.h265 = std::string(next()) == "h265";
+        else if (a == "--codec") {
+            const std::string c = next();
+            o.codec = c == "h265" ? video::Codec::H265 : c == "av1" ? video::Codec::Av1
+                                                                    : video::Codec::H264;
+        }
         else if (a == "--quality") o.quality = std::atoi(next());
         else if (a == "--spherical") spherical = true;
         else if (a == "-o" || a == "--output") out = next();
@@ -100,16 +109,21 @@ int spirula_encode_main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", format(msg::encode_failed, {err}).c_str());
         return 1;
     }
-    // A raw stream carries its parameter sets before every IDR; an MP4 keeps
-    // them in the sample entry.
+    // A raw stream carries its parameter sets before every key frame (AV1's
+    // after a temporal delimiter opening every frame); an MP4 keeps them in
+    // the sample entry.
+    const bool av1 = o.codec == video::Codec::Av1;
     const bool raw = ends_with(out, ".h264") || ends_with(out, ".264") ||
-                     ends_with(out, ".h265") || ends_with(out, ".265") || ends_with(out, ".hevc");
+                     ends_with(out, ".h265") || ends_with(out, ".265") ||
+                     ends_with(out, ".hevc") || ends_with(out, ".obu");
     video::Mp4Writer mp4;
     std::FILE* raw_file = nullptr;
     if (raw) {
         raw_file = std::fopen(out.c_str(), "wb");
         if (!raw_file) err = "cannot create " + out;
-    } else if (mp4.open(out, o.h265, o.width, o.height, o.fps, spherical, err)) {
+    } else if (mp4.open(out, o.codec, o.width + (o.width & 1), o.height + (o.height & 1), o.fps,
+                        spherical, err)) {
+        // 4:2:0 crops in pairs of pixels, so an odd size decodes one larger.
         mp4.set_parameter_sets(enc.headers());
     }
     if (!err.empty()) {
@@ -132,8 +146,10 @@ int spirula_encode_main(int argc, char** argv) {
         if (!enc.encode(rgb.data(), au, sync, err)) break;
         bool ok = true;
         if (raw_file) {
-            if (sync) ok = std::fwrite(enc.headers().data(), 1, enc.headers().size(), raw_file) ==
-                           enc.headers().size();
+            static const uint8_t kDelimiter[2] = {0x12, 0x00};
+            if (av1) ok = std::fwrite(kDelimiter, 1, 2, raw_file) == 2;
+            if (sync) ok = ok && std::fwrite(enc.headers().data(), 1, enc.headers().size(), raw_file) ==
+                                     enc.headers().size();
             ok = ok && std::fwrite(au.data(), 1, au.size(), raw_file) == au.size();
         } else {
             ok = mp4.write_sample(au.data(), au.size(), sync);

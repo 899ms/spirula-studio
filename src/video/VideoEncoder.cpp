@@ -43,8 +43,15 @@ struct VideoEncoder::Impl {
     uint32_t family = 0, cfamily = 0;
     VkExtent2D coded{0, 0};
 
+    bool h265() const { return o.codec == Codec::H265; }
+    bool av1() const { return o.codec == Codec::Av1; }
+    const char* name() const { return av1() ? "AV1" : h265() ? "H.265" : "H.264"; }
+    // The size of the frames, which AV1 codes exactly and H.26x crops to.
+    VkExtent2D picture{0, 0};
+
     VkVideoEncodeH264ProfileInfoKHR h264_profile{VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PROFILE_INFO_KHR};
     VkVideoEncodeH265ProfileInfoKHR h265_profile{VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_PROFILE_INFO_KHR};
+    VkVideoEncodeAV1ProfileInfoKHR av1_profile{VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_PROFILE_INFO_KHR};
     VkVideoEncodeUsageInfoKHR usage{VK_STRUCTURE_TYPE_VIDEO_ENCODE_USAGE_INFO_KHR};
     VkVideoProfileInfoKHR profile{VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR};
     VkVideoProfileListInfoKHR plist{VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR};
@@ -53,17 +60,22 @@ struct VideoEncoder::Impl {
     VkVideoEncodeCapabilitiesKHR ecaps{VK_STRUCTURE_TYPE_VIDEO_ENCODE_CAPABILITIES_KHR};
     VkVideoEncodeH264CapabilitiesKHR h264caps{VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_CAPABILITIES_KHR};
     VkVideoEncodeH265CapabilitiesKHR h265caps{VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_CAPABILITIES_KHR};
+    VkVideoEncodeAV1CapabilitiesKHR av1caps{VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_CAPABILITIES_KHR};
 
     VkVideoSessionKHR session = VK_NULL_HANDLE;
     std::vector<VkDeviceMemory> session_mem;
     VkVideoSessionParametersKHR params = VK_NULL_HANDLE;
     VkFormat src_format = VK_FORMAT_UNDEFINED, dpb_format = VK_FORMAT_UNDEFINED;
 
-    VkImage src = VK_NULL_HANDLE, dpb = VK_NULL_HANDLE;
-    VkDeviceMemory src_mem = VK_NULL_HANDLE, dpb_mem = VK_NULL_HANDLE;
-    VkImageView src_view = VK_NULL_HANDLE, dpb_views[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    // The DPB: an image per slot where the device allows it, as NVIDIA's own
+    // samples do, else one image with a layer per slot.
+    VkImage src = VK_NULL_HANDLE, dpb[2] = {};
+    VkDeviceMemory src_mem = VK_NULL_HANDLE, dpb_mem[2] = {};
+    VkImageView src_view = VK_NULL_HANDLE, dpb_views[2] = {};
+    const int nslots = 2;
     VkImageLayout src_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     bool dpb_ready = false;
+    bool separate_dpb = false;
 
     VkBuffer bs = VK_NULL_HANDLE;
     VkDeviceMemory bs_mem = VK_NULL_HANDLE;
@@ -83,15 +95,21 @@ struct VideoEncoder::Impl {
     VkVideoEncodeRateControlLayerInfoKHR rc_layer{VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_LAYER_INFO_KHR};
     VkVideoEncodeH264RateControlInfoKHR h264_rc{VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_INFO_KHR};
     VkVideoEncodeH265RateControlInfoKHR h265_rc{VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_RATE_CONTROL_INFO_KHR};
+    VkVideoEncodeAV1RateControlInfoKHR av1_rc{VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_RATE_CONTROL_INFO_KHR};
 
     int gop = 60;
     int64_t frame = 0;
     int in_gop = 0;
     uint16_t idr_id = 0;
     // What each DPB slot holds: its frame_num and picture order count.
-    uint32_t slot_frame_num[2] = {0, 0};
-    int32_t slot_poc[2] = {0, 0};
-    bool slot_idr[2] = {false, false};
+    uint32_t slot_frame_num[2] = {};
+    int32_t slot_poc[2] = {};
+    bool slot_idr[2] = {};
+    // AV1: the order hint in each of the decoder's eight reference buffers,
+    // and which reference name the hardware predicts from.
+    uint8_t vbi_hint[8] = {};
+    int av1_name = 0;
+    StdVideoAV1Level av1_level = STD_VIDEO_AV1_LEVEL_4_0;
 
     std::vector<uint8_t> headers;
 
@@ -115,9 +133,9 @@ VideoEncoder::Impl::~Impl() {
     for (VkImageView v : dpb_views) if (v) vkDestroyImageView(dev, v, nullptr);
     if (src_view) vkDestroyImageView(dev, src_view, nullptr);
     if (src) vkDestroyImage(dev, src, nullptr);
-    if (dpb) vkDestroyImage(dev, dpb, nullptr);
+    for (VkImage i : dpb) if (i) vkDestroyImage(dev, i, nullptr);
     if (src_mem) vkFreeMemory(dev, src_mem, nullptr);
-    if (dpb_mem) vkFreeMemory(dev, dpb_mem, nullptr);
+    for (VkDeviceMemory m : dpb_mem) if (m) vkFreeMemory(dev, m, nullptr);
     if (params && api.destroyParameters) api.destroyParameters(dev, params, nullptr);
     if (session && api.destroySession) api.destroySession(dev, session, nullptr);
     for (VkDeviceMemory m : session_mem) vkFreeMemory(dev, m, nullptr);
@@ -137,11 +155,11 @@ bool VideoEncoder::Impl::create(std::string& error) {
         return false;
     }
     const VkVideoCodecOperationFlagBitsKHR op =
-        o.h265 ? VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR
-               : VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
+        av1() ? VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR
+        : h265() ? VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR
+                 : VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
     if (!(ctx.encodeCodecs() & op)) {
-        error = std::string(o.h265 ? "H.265" : "H.264") + " encode is not supported on " +
-                ctx.info().name;
+        error = std::string(name()) + " encode is not supported on " + ctx.info().name;
         return false;
     }
     dev = ctx.device();
@@ -151,10 +169,12 @@ bool VideoEncoder::Impl::create(std::string& error) {
 
     h264_profile.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH;
     h265_profile.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN;
+    av1_profile.stdProfile = STD_VIDEO_AV1_PROFILE_MAIN;
     usage.videoUsageHints = VK_VIDEO_ENCODE_USAGE_RECORDING_BIT_KHR;
     usage.videoContentHints = VK_VIDEO_ENCODE_CONTENT_RENDERED_BIT_KHR;
     usage.tuningMode = VK_VIDEO_ENCODE_TUNING_MODE_HIGH_QUALITY_KHR;
-    usage.pNext = o.h265 ? (const void*)&h265_profile : (const void*)&h264_profile;
+    usage.pNext = av1() ? (const void*)&av1_profile
+                  : h265() ? (const void*)&h265_profile : (const void*)&h264_profile;
     profile.pNext = &usage;
     profile.videoCodecOperation = op;
     profile.chromaSubsampling = VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR;
@@ -163,17 +183,18 @@ bool VideoEncoder::Impl::create(std::string& error) {
     plist.profileCount = 1;
     plist.pProfiles = &profile;
 
-    ecaps.pNext = o.h265 ? (void*)&h265caps : (void*)&h264caps;
+    ecaps.pNext = av1() ? (void*)&av1caps : h265() ? (void*)&h265caps : (void*)&h264caps;
     caps.pNext = &ecaps;
     VkResult r = api.getCapabilities(ctx.physical(), &profile, &caps);
     if (r != VK_SUCCESS) {
-        error = std::string("no ") + (o.h265 ? "H.265 Main" : "H.264 High") +
+        error = std::string("no ") + (av1() ? "AV1 Main" : h265() ? "H.265 Main" : "H.264 High") +
                 " encode profile: " + vk::Context::resultName(r);
         return false;
     }
 
-    // Macroblocks for H.264, the smallest coding block for H.265.
-    const uint32_t block = 16u;
+    // Macroblocks for H.264, the smallest coding block for H.265, AV1's 8x8
+    // mode-info units.
+    const uint32_t block = av1() ? 8u : 16u;
     uint32_t gw = std::max({block, caps.pictureAccessGranularity.width,
                             ecaps.encodeInputPictureGranularity.width});
     uint32_t gh = std::max({block, caps.pictureAccessGranularity.height,
@@ -182,9 +203,13 @@ bool VideoEncoder::Impl::create(std::string& error) {
     coded.height = std::max(align_up((uint32_t)o.height, gh), caps.minCodedExtent.height);
     // The kernel writes 4x2 blocks.
     coded.width = align_up(coded.width, 4);
+    // AV1 has no cropping: its frames are the size asked for (even, for
+    // 4:2:0), inside pictures padded to what the hardware reads.
+    picture = av1() ? VkExtent2D{align_up((uint32_t)o.width, 2), align_up((uint32_t)o.height, 2)}
+                  : coded;
     if (coded.width > caps.maxCodedExtent.width || coded.height > caps.maxCodedExtent.height) {
         error = std::to_string(o.width) + "x" + std::to_string(o.height) + " is larger than " +
-                std::string(o.h265 ? "H.265" : "H.264") + " encode allows on this device (" +
+                std::string(name()) + " encode allows on this device (" +
                 std::to_string(caps.maxCodedExtent.width) + "x" +
                 std::to_string(caps.maxCodedExtent.height) + ")";
         return false;
@@ -217,7 +242,7 @@ bool VideoEncoder::Impl::create(std::string& error) {
     sci.pictureFormat = src_format;
     sci.maxCodedExtent = coded;
     sci.referencePictureFormat = dpb_format;
-    sci.maxDpbSlots = std::min(2u, caps.maxDpbSlots);
+    sci.maxDpbSlots = std::min((uint32_t)nslots, caps.maxDpbSlots);
     sci.maxActiveReferencePictures = std::min(1u, caps.maxActiveReferencePictures);
     sci.pStdHeaderVersion = &caps.stdHeaderVersion;
     if (sci.maxDpbSlots < 2 || sci.maxActiveReferencePictures < 1) {
@@ -259,13 +284,19 @@ bool VideoEncoder::Impl::create(std::string& error) {
     }
 
     // ---- rate control: constant QP where offered ----
-    static const int kQp264[3] = {20, 24, 29}, kQp265[3] = {22, 26, 31};
+    // AV1's quantizer index runs 0..255, about four to an H.265 QP step.
+    static const int kQp264[3] = {20, 24, 29}, kQp265[3] = {22, 26, 31}, kQAv1[3] = {70, 100, 140};
     const int q = std::clamp(o.quality, 0, 2);
-    qp_i = o.h265 ? kQp265[q] : kQp264[q];
-    const int min_qp = o.h265 ? h265caps.minQp : h264caps.minQp;
-    const int max_qp = o.h265 ? h265caps.maxQp : h264caps.maxQp;
+    qp_i = av1() ? kQAv1[q] : h265() ? kQp265[q] : kQp264[q];
+    const int min_qp = av1() ? (int)av1caps.minQIndex : h265() ? h265caps.minQp : h264caps.minQp;
+    const int max_qp = av1() ? (int)av1caps.maxQIndex : h265() ? h265caps.maxQp : h264caps.maxQp;
     qp_i = std::clamp(qp_i, min_qp, max_qp);
-    qp_p = std::clamp(qp_i + 2, min_qp, max_qp);
+    qp_p = std::clamp(qp_i + (av1() ? 8 : 2), min_qp, max_qp);
+    // The reference name a single-reference frame predicts from: LAST where
+    // the hardware allows it.
+    av1_name = 0;
+    for (int i = 0; i < 7; i++)
+        if (av1caps.singleReferenceNameMask & (1u << i)) { av1_name = i; break; }
     gop = std::max(1, (int)std::lround(o.fps * 2.0));
     cqp = (ecaps.rateControlModes & VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR) != 0;
     if (cqp) {
@@ -295,13 +326,20 @@ bool VideoEncoder::Impl::create(std::string& error) {
         h265_rc.gopFrameCount = (uint32_t)gop;
         h265_rc.idrPeriod = (uint32_t)gop;
         h265_rc.subLayerCount = 1;
-        rc.pNext = o.h265 ? (const void*)&h265_rc : (const void*)&h264_rc;
+        av1_rc.flags = VK_VIDEO_ENCODE_AV1_RATE_CONTROL_REGULAR_GOP_BIT_KHR |
+                       VK_VIDEO_ENCODE_AV1_RATE_CONTROL_REFERENCE_PATTERN_FLAT_BIT_KHR;
+        av1_rc.gopFrameCount = (uint32_t)gop;
+        av1_rc.keyFramePeriod = (uint32_t)gop;
+        av1_rc.temporalLayerCount = 1;
+        rc.pNext = av1() ? (const void*)&av1_rc
+                   : h265() ? (const void*)&h265_rc : (const void*)&h264_rc;
     }
 
     if (!create_parameters(error)) return false;
     if (!fetch_headers(error)) return false;
 
     // ---- pictures ----
+    separate_dpb = (caps.flags & VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR) != 0;
     const uint32_t families[2] = {family, cfamily};
     auto make_image = [&](VkFormat format, uint32_t layers, VkImageUsageFlags use, bool shared,
                           VkImage& image, VkDeviceMemory& mem) {
@@ -343,9 +381,22 @@ bool VideoEncoder::Impl::create(std::string& error) {
                     VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                     true, src, src_mem) ||
         !make_view(src, src_format, 0, src_view) ||
-        !make_image(dpb_format, 2, VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR, false, dpb, dpb_mem) ||
-        !make_view(dpb, dpb_format, 0, dpb_views[0]) ||
-        !make_view(dpb, dpb_format, 1, dpb_views[1])) {
+        ![&] {
+            if (separate_dpb) {
+                for (int k = 0; k < nslots; k++)
+                    if (!make_image(dpb_format, 1, VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR, false,
+                                    dpb[k], dpb_mem[k]) ||
+                        !make_view(dpb[k], dpb_format, 0, dpb_views[k]))
+                        return false;
+                return true;
+            }
+            if (!make_image(dpb_format, (uint32_t)nslots, VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR,
+                            false, dpb[0], dpb_mem[0]))
+                return false;
+            for (int k = 0; k < nslots; k++)
+                if (!make_view(dpb[0], dpb_format, (uint32_t)k, dpb_views[k])) return false;
+            return true;
+        }()) {
         error = "cannot allocate the encoder's pictures";
         return false;
     }
@@ -428,7 +479,57 @@ bool VideoEncoder::Impl::create_parameters(std::string& error) {
     // BT.709 studio range, said once in the stream so no player has to guess.
     const uint8_t kPrimaries = 1, kTransfer = 1, kMatrix = 1;
 
-    if (!o.h265) {
+    if (av1()) {
+        StdVideoAV1ColorConfig cc{};
+        cc.flags.color_description_present_flag = 1;
+        cc.BitDepth = 8;
+        cc.subsampling_x = 1;
+        cc.subsampling_y = 1;
+        cc.color_primaries = STD_VIDEO_AV1_COLOR_PRIMARIES_BT_709;
+        cc.transfer_characteristics = STD_VIDEO_AV1_TRANSFER_CHARACTERISTICS_BT_709;
+        cc.matrix_coefficients = STD_VIDEO_AV1_MATRIX_COEFFICIENTS_BT_709;
+        auto bits_for = [](uint32_t v) { uint32_t b = 1; while ((1u << b) <= v) b++; return b; };
+        StdVideoAV1SequenceHeader sh{};
+        sh.flags.enable_order_hint = 1;
+        sh.flags.use_128x128_superblock =
+            (av1caps.superblockSizes & VK_VIDEO_ENCODE_AV1_SUPERBLOCK_SIZE_64_BIT_KHR) ? 0 : 1;
+        sh.seq_profile = STD_VIDEO_AV1_PROFILE_MAIN;
+        sh.frame_width_bits_minus_1 = (uint8_t)(bits_for(picture.width - 1) - 1);
+        sh.frame_height_bits_minus_1 = (uint8_t)(bits_for(picture.height - 1) - 1);
+        sh.max_frame_width_minus_1 = (uint16_t)(picture.width - 1);
+        sh.max_frame_height_minus_1 = (uint16_t)(picture.height - 1);
+        sh.order_hint_bits_minus_1 = 7;
+        sh.seq_force_integer_mv = 2;               // SELECT_INTEGER_MV
+        sh.seq_force_screen_content_tools = 2;     // SELECT_SCREEN_CONTENT_TOOLS
+        sh.pColorConfig = &cc;
+        // Level by picture size and sample rate (AV1 spec, Annex A).
+        const double px = (double)picture.width * picture.height, rate = px * o.fps;
+        av1_level = px <= 2228224.0 ? (rate <= 66846720.0 ? STD_VIDEO_AV1_LEVEL_4_0
+                                     : rate <= 133693440.0 ? STD_VIDEO_AV1_LEVEL_4_1
+                                                           : STD_VIDEO_AV1_LEVEL_5_1)
+                    : px <= 8912896.0 ? (rate <= 267386880.0 ? STD_VIDEO_AV1_LEVEL_5_0
+                                         : rate <= 534773760.0 ? STD_VIDEO_AV1_LEVEL_5_1
+                                                               : STD_VIDEO_AV1_LEVEL_5_2)
+                    : rate <= 1069547520.0 ? STD_VIDEO_AV1_LEVEL_6_0 : STD_VIDEO_AV1_LEVEL_6_1;
+        av1_level = std::min(av1_level, av1caps.maxLevel);
+        StdVideoEncodeAV1OperatingPointInfo op{};
+        op.seq_level_idx = (uint8_t)av1_level;
+        VkVideoEncodeAV1SessionParametersCreateInfoKHR a{
+            VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_SESSION_PARAMETERS_CREATE_INFO_KHR};
+        a.pNext = &ql;
+        a.pStdSequenceHeader = &sh;
+        a.stdOperatingPointCount = 1;
+        a.pStdOperatingPoints = &op;
+        pci.pNext = &a;
+        const VkResult r = api.createParameters(dev, &pci, nullptr, &params);
+        if (r != VK_SUCCESS) {
+            error = std::string("AV1 sequence header refused: ") + vk::Context::resultName(r);
+            return false;
+        }
+        return true;
+    }
+
+    if (!h265()) {
         StdVideoH264SequenceParameterSetVui vui{};
         vui.flags.video_signal_type_present_flag = 1;
         vui.flags.color_description_present_flag = 1;
@@ -589,7 +690,8 @@ bool VideoEncoder::Impl::fetch_headers(std::string& error) {
     g265.writeStdPPS = VK_TRUE;
     VkVideoEncodeSessionParametersGetInfoKHR gi{
         VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_GET_INFO_KHR};
-    gi.pNext = o.h265 ? (const void*)&g265 : (const void*)&g264;
+    // AV1 has nothing to choose: the one sequence header comes back.
+    gi.pNext = av1() ? nullptr : h265() ? (const void*)&g265 : (const void*)&g264;
     gi.videoSessionParameters = params;
     size_t n = 0;
     if (api.getEncodedParameters(dev, &gi, nullptr, &n, nullptr) != VK_SUCCESS || !n) {
@@ -666,7 +768,14 @@ bool VideoEncoder::Impl::upload(const uint8_t* rgb, std::string& error) {
 bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
                                            std::string& error) {
     const VideoApi& api = video_api();
-    const int cur = (int)(frame & 1), ref = 1 - cur;
+    int cur = (int)(frame & 1), ref = 1 - cur;
+    // AV1 predicts every P frame from the key frame, kept in slot 0: on
+    // NVIDIA 595 a P frame's own reconstruction does not serve as a reference
+    // (the next frame drifts, static content too), a key frame's does.
+    if (av1()) {
+        cur = idr ? 0 : 1;
+        ref = 0;
+    }
     if (idr) {
         in_gop = 0;
         slot_idr[0] = slot_idr[1] = false;
@@ -685,21 +794,26 @@ bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
         ib.newLayout = VK_IMAGE_LAYOUT_VIDEO_ENCODE_DPB_KHR;
         ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        ib.image = dpb;
-        ib.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 2};
+        VkImageMemoryBarrier all[2] = {ib, ib};
+        for (int s = 0; s < nslots; s++) {
+            all[s].image = separate_dpb ? dpb[s] : dpb[0];
+            all[s].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0,
+                                       separate_dpb ? 1u : (uint32_t)nslots};
+        }
         vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib);
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr,
+                             separate_dpb ? (uint32_t)nslots : 1u, all);
         dpb_ready = true;
     }
 
     VkVideoPictureResourceInfoKHR pic[2];
-    for (int s = 0; s < 2; s++) {
+    for (int s = 0; s < nslots; s++) {
         pic[s] = {VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR};
-        pic[s].codedExtent = coded;
+        pic[s].codedExtent = picture;
         pic[s].imageViewBinding = dpb_views[s];
     }
     VkVideoPictureResourceInfoKHR src_pic{VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR};
-    src_pic.codedExtent = coded;
+    src_pic.codedExtent = picture;
     src_pic.imageViewBinding = src_view;
 
     // ---- the codec's view of this picture and of its reference ----
@@ -707,7 +821,21 @@ bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
     VkVideoEncodeH264DpbSlotInfoKHR d264[2];
     StdVideoEncodeH265ReferenceInfo r265[2]{};
     VkVideoEncodeH265DpbSlotInfoKHR d265[2];
-    for (int s = 0; s < 2; s++) {
+    StdVideoEncodeAV1ExtensionHeader ext_av1{};
+    StdVideoEncodeAV1ReferenceInfo rav1[2]{};
+    VkVideoEncodeAV1DpbSlotInfoKHR dav1[2];
+    const uint8_t hint = (uint8_t)(in_gop & 0xFF);
+    for (int s = 0; s < nslots; s++) {
+        const bool is_cur = s == cur;
+        rav1[s].RefFrameId = (uint32_t)s;
+        rav1[s].frame_type = (is_cur ? idr : slot_idr[s]) ? STD_VIDEO_AV1_FRAME_TYPE_KEY
+                                                          : STD_VIDEO_AV1_FRAME_TYPE_INTER;
+        rav1[s].OrderHint = is_cur ? hint : (uint8_t)slot_poc[s];
+        rav1[s].pExtensionHeader = &ext_av1;
+        dav1[s] = {VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_DPB_SLOT_INFO_KHR};
+        dav1[s].pStdReferenceInfo = &rav1[s];
+    }
+    for (int s = 0; s < nslots; s++) {
         const bool is_cur = s == cur;
         r264[s].primary_pic_type = (is_cur ? idr : slot_idr[s]) ? STD_VIDEO_H264_PICTURE_TYPE_IDR
                                                                 : STD_VIDEO_H264_PICTURE_TYPE_P;
@@ -722,7 +850,7 @@ bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
         d265[s].pStdReferenceInfo = &r265[s];
     }
     auto dpb_info = [&](int s) {
-        return o.h265 ? (const void*)&d265[s] : (const void*)&d264[s];
+        return av1() ? (const void*)&dav1[s] : h265() ? (const void*)&d265[s] : (const void*)&d264[s];
     };
 
     // Bound: the reference, and the picture being reconstructed -- listed
@@ -823,6 +951,57 @@ bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
     pi265.pNaluSliceSegmentEntries = &slice265;
     pi265.pStdPictureInfo = &p265;
 
+    // AV1: a key frame fills all eight reference buffers; a P frame refreshes
+    // buffer 1, never used, and predicts from buffer 0, the key frame.
+    StdVideoAV1Quantization q_av1{};
+    q_av1.base_q_idx = (uint8_t)qp;
+    StdVideoAV1Segmentation seg_av1{};
+    StdVideoAV1LoopFilter lf_av1{};
+    static const int8_t kRefDeltas[8] = {1, 0, 0, 0, -1, 0, -1, -1};
+    for (int k = 0; k < 8; k++) lf_av1.loop_filter_ref_deltas[k] = kRefDeltas[k];
+    lf_av1.update_mode_delta = 1;
+    StdVideoAV1CDEF cdef_av1{};
+    StdVideoAV1LoopRestoration lr_av1{};
+    for (int k = 0; k < 3; k++) {
+        lr_av1.FrameRestorationType[k] = STD_VIDEO_AV1_FRAME_RESTORATION_TYPE_NONE;
+        lr_av1.LoopRestorationSize[k] = 1;
+    }
+    StdVideoAV1GlobalMotion gm_av1{};
+    StdVideoEncodeAV1PictureInfo pav1{};
+    pav1.flags.error_resilient_mode = idr ? 1 : 0;
+    pav1.flags.show_frame = 1;
+    pav1.flags.showable_frame = idr ? 0 : 1;
+    // A render size apart from the frame size, the odd pixel's worth, is
+    // written in a way decoders reject: the frame is the size it says.
+    pav1.frame_type = idr ? STD_VIDEO_AV1_FRAME_TYPE_KEY : STD_VIDEO_AV1_FRAME_TYPE_INTER;
+    pav1.current_frame_id = (uint32_t)cur;
+    pav1.order_hint = hint;
+    pav1.primary_ref_frame = idr ? STD_VIDEO_AV1_PRIMARY_REF_NONE : (uint8_t)av1_name;
+    pav1.refresh_frame_flags = idr ? 0xFF : 0x02;
+    pav1.render_width_minus_1 = (uint16_t)(picture.width - 1);
+    pav1.render_height_minus_1 = (uint16_t)(picture.height - 1);
+    pav1.interpolation_filter = STD_VIDEO_AV1_INTERPOLATION_FILTER_EIGHTTAP;
+    pav1.TxMode = STD_VIDEO_AV1_TX_MODE_SELECT;
+    for (int k = 0; k < 8; k++) pav1.ref_order_hint[k] = vbi_hint[k];
+    for (int k = 0; k < 7; k++) pav1.ref_frame_idx[k] = 0;
+    pav1.pQuantization = &q_av1;
+    pav1.pSegmentation = &seg_av1;
+    pav1.pLoopFilter = &lf_av1;
+    pav1.pCDEF = &cdef_av1;
+    pav1.pLoopRestoration = &lr_av1;
+    pav1.pGlobalMotion = &gm_av1;
+    pav1.pExtensionHeader = &ext_av1;
+    VkVideoEncodeAV1PictureInfoKHR piav1{VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_PICTURE_INFO_KHR};
+    piav1.predictionMode = idr ? VK_VIDEO_ENCODE_AV1_PREDICTION_MODE_INTRA_ONLY_KHR
+                               : VK_VIDEO_ENCODE_AV1_PREDICTION_MODE_SINGLE_REFERENCE_KHR;
+    piav1.rateControlGroup = idr ? VK_VIDEO_ENCODE_AV1_RATE_CONTROL_GROUP_INTRA_KHR
+                                 : VK_VIDEO_ENCODE_AV1_RATE_CONTROL_GROUP_PREDICTIVE_KHR;
+    piav1.constantQIndex = cqp ? (uint32_t)qp : 0;
+    piav1.pStdPictureInfo = &pav1;
+    for (int k = 0; k < VK_MAX_VIDEO_AV1_REFERENCES_PER_FRAME_KHR; k++)
+        piav1.referenceNameSlotIndices[k] = -1;
+    if (!idr) piav1.referenceNameSlotIndices[av1_name] = ref;
+
     VkVideoReferenceSlotInfoKHR setup{VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR};
     setup.pNext = dpb_info(cur);
     setup.slotIndex = cur;
@@ -833,7 +1012,7 @@ bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
     refs.pPictureResource = &pic[ref];
 
     VkVideoEncodeInfoKHR ei{VK_STRUCTURE_TYPE_VIDEO_ENCODE_INFO_KHR};
-    ei.pNext = o.h265 ? (const void*)&pi265 : (const void*)&pi264;
+    ei.pNext = av1() ? (const void*)&piav1 : h265() ? (const void*)&pi265 : (const void*)&pi264;
     ei.dstBuffer = bs;
     ei.dstBufferOffset = 0;
     ei.dstBufferRange = bs_size;
@@ -893,8 +1072,10 @@ bool VideoEncoder::Impl::record_and_submit(bool idr, std::vector<uint8_t>& out,
     out.assign((const uint8_t*)bs_map + off, (const uint8_t*)bs_map + off + bytes);
 
     slot_frame_num[cur] = frame_num;
-    slot_poc[cur] = poc;
+    slot_poc[cur] = av1() ? hint : poc;
     slot_idr[cur] = idr;
+    if (idr) for (uint8_t& h : vbi_hint) h = hint;
+    else vbi_hint[1] = hint;
     if (idr) idr_id = (uint16_t)(idr_id + 1);
     in_gop++;
     frame++;
@@ -933,5 +1114,10 @@ bool VideoEncoder::encode(const uint8_t* rgb, std::vector<uint8_t>& au, bool& sy
 }
 
 const std::vector<uint8_t>& VideoEncoder::headers() const { return _impl->headers; }
+
+void VideoEncoder::max_size(int& width, int& height) const {
+    width = (int)_impl->caps.maxCodedExtent.width;
+    height = (int)_impl->caps.maxCodedExtent.height;
+}
 
 }  // namespace video

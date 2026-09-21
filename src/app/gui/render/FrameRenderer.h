@@ -34,6 +34,7 @@ struct SourceView {
     // Splats: how the viewer renders them, and the file an effect reads back.
     ViewerRenderConfig cfg;
     ViewerHooks hooks;
+    std::string primitive;              // what the viewport renders it as
     std::string file;
     int sh_max = 0;
     // Splats being edited: which survive, or empty when all do.

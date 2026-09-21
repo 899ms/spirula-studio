@@ -10,7 +10,8 @@ the GPU video encoder it feeds is `src/video/VideoEncoder.cpp`.
 RenderProject    the move, the lens, the output, the shots: one JSON file
 Trajectory       keys -> a camera at any time
 FrameRenderer    one frame: every model drawn by its own renderer, composited
-FrameSink        where frames go: image files, or an encoder process
+FrameSink        where frames go: image files, a GIF, or an encoder process
+GifWriter        animated GIF: a palette per frame, ordered dither, LZW
 RenderSession    the mode: viewport interaction, preview, playback, export
 RenderPanel.cpp, RenderTimeline.cpp    its panel and its timeline
 ```
@@ -36,10 +37,14 @@ next. Every source is taken to share it (a dataset, its splats and a mesh made
 from them do), which is why the render ignores the comparison view's
 per-pane alignment and uses each model's own file frame instead.
 
-A project records the placement it was laid out against. Opened against
-another placement of the same model it is carried across the difference, and
-a model saved moved in the editor gets moved copies of its projects beside it
-(`copy_moved_projects`) while the originals stay with the original.
+A project records the placement it was laid out against, and the keys follow
+the model: turn it in the editor and the move turns with it
+(`RenderSession::follow_placement`). A save that writes the placement into
+the file is remembered, so the model read back from it -- the same place in
+the world, now with no placement -- does not move the keys a second time.
+Opened against another placement of the same model a project is carried
+across the difference, and a model saved moved gets moved copies of its
+projects beside it (`copy_moved_projects`) while the originals stay.
 
 *Up* comes from the dataset when there is one (the parsers' levelling guess,
 `ParsedDataset::normalized_rotation`, found through the run's `config.json`
@@ -51,24 +56,38 @@ than 60 degrees is tipped to 30, since from overhead it would only spin.
 ## The motion
 
 Every channel -- position, rotation, look-at target, roll, log focal length --
-runs on one cubic Hermite spline in **time**, so a hold or an eased end stops
-all of them together:
+is a cubic through the keys on one shared parameter, so a stop or an eased
+end stops all of them together. The *Curve* decides the slopes at the keys:
 
-- tangents are the time-weighted Catmull-Rom slope, scaled by `1 - tension`;
-- zero at a key marked *Stop here*, and at the ends when *Start and stop
-  gently* is on;
-- limited on the whole vector (position, target): no faster than three times
-  the slower neighbouring chord, and easing off towards rest as the path
-  doubles back. Without it, unevenly timed keys send the camera past a key and
-  back; limiting per component instead would make a turned path move
-  differently from the path turned, which `render_project_test` checks.
+- **Smooth spline (C2)**, the default: the interpolating cubic B-spline, one
+  tridiagonal solve per channel, so speed *and* acceleration are continuous
+  through every key. Free ends have zero second derivative; a key marked
+  *Stop here*, and the ends when *Start and stop gently* is on, have zero
+  slope and split the solve there.
+- **Catmull-Rom**: the local time-weighted slope, scaled by `1 - tension` and
+  limited on the whole vector (no faster than three times the slower
+  neighbouring chord, easing off as the path doubles back). Only C1; moving
+  a key changes less of the path.
+- **Straight lines**.
+
+The parameter is key time, unless *Constant speed* is on: then it is the
+distance along the keys, so unevenly timed keys cannot make the spline
+overshoot, and time is warped by arc length (a 48-samples-per-segment
+table). A **closed loop** adds a knot back at the first key and solves the
+spline cyclically (Sherman-Morrison); a rotation that makes a full turn comes
+back as -q, which the cyclic system carries as a sign. A loop's video leaves
+out its last frame, which would be its first again.
 
 Rotations are the normalized spline of hemisphere-aligned quaternions. Between
 two aimed keys the rotation is instead derived from the interpolated position,
-target and roll, which is what keeps an orbit on its subject. *Constant speed*
-is a warp of time by arc length (a 48-samples-per-segment table), with the
-easing applied to the warp. The projection and the distortion tier cannot be
-blended and change at the key; the zoom glides.
+target and roll, which keeps an orbit on its subject. The projection and the
+distortion tier cannot be blended and change at the key; the zoom glides.
+
+Editing keys keeps the move: a key added between two others goes where the
+camera already passes (`add_key`), a deleted or reordered key's neighbours
+keep the lens they were seen through (`keep_lenses`), R turns cameras about
+their own middle, and *Smooth keyframes* pulls keys towards their neighbours'
+line with Taubin's second outward pass so a loop does not shrink.
 
 ## One frame
 
@@ -98,7 +117,15 @@ stay deleted: the rewrite starts from the editor's survivors.
 
 A mesh under a fisheye or equirectangular lens is projected per vertex, so a
 long triangle keeps straight edges where the lens would bend them; the splats
-and the points are exact.
+and the points are exact. Splats render with the primitive the viewport shows
+them with (3DGUT follows a wide lens where 3DGS smears at the edge) unless a
+model's *Render as* says otherwise.
+
+The keys are drawn one size in the world, through the same lens model the
+engine renders with (`camhost::generate_ray`): a pyramid, curved by
+distortion, a dome for a fisheye, a globe for the whole sphere. The camera's
+own picture sits in a resizable corner, side by side behind a splitter, or
+fills the view.
 
 ## Transitions
 
@@ -111,24 +138,33 @@ A **shot** is a start time, a model (or nothing) and how it arrives:
 | sweep upward | a level rises along *up*, the new model below it, the old above, the band at the cut lit |
 | grow in | the new model's splats swell out of points while the old one fades |
 
-*From dataset to splats to mesh* lays out the three shots that tell a
-reconstruction's story. Fade in and fade out are separate from the shots, as
-in an editor, and a photo has none.
+*Show each model in turn* splits the video into one shot per model -- points,
+then splats, then meshes -- with the transition that suits each; shots can
+then be reordered (models and transitions trade places, times stay). Fade in
+and fade out are separate from the shots, as in an editor, and a photo has
+none.
 
 ## Output
 
-A photo, a video, or a folder of numbered frames. PNG and JPEG are written by
-`stb_image_write` on a few threads (`FrameSink.cpp`). A video is raw RGB piped
-into an encoder process:
+A photo, a video, or a folder of numbered frames. Photos and frames are PNG,
+PNG with transparency, or JPEG, written by `stb_image_write` on a few threads
+(`FrameSink.cpp`). A video is an MP4 (H.264, H.265 or AV1) or an animated GIF.
+GIF is written here (`GifWriter.cpp`): a median-cut palette per frame, an 8x8
+ordered dither that does not crawl between frames as error diffusion would,
+and frames dropped where a delay would fall under 2/100 s, which players
+stretch. An MP4 is raw RGB piped into an encoder process, chosen per size:
 
-- **`spirula encode`**, where the build has it. It is `src/video/`'s encoder,
-  so it is **patent-gated** like the decoder (`SS_ENABLE_PATENTED`, off by
-  default), and it runs in its own process because it needs a Vulkan device
-  of its own beside the engine's (AGENTS.md, "Three Vulkan devices"). The GUI
-  runs `spirula encode --probe` once, which encodes two small frames per codec
-  and prints the ones that worked.
-- **ffmpeg** otherwise (libx264 / libx265, the same three quality steps).
-- Neither: frames still work, and the panel says why video does not.
+- **`spirula encode`** for H.264 and H.265 when the frame fits the device
+  (`--probe` reports each codec's largest frame; NVIDIA's H.264 stops at
+  4096). It is `src/video/`'s encoder, so it is **patent-gated**
+  (`SS_ENABLE_PATENTED`, off by default), and a process of its own because it
+  needs a Vulkan device beside the engine's. If it fails, the export starts
+  again with ffmpeg.
+- **ffmpeg** otherwise, and first for AV1: libx264 / libx265 / SVT-AV1 where
+  it has them, a GPU encoder of its own next. The built-in AV1 predicts every
+  P frame from its key frame (src/video/README.md, "Encode"), which is
+  correct and about 2.5 times the size.
+- Neither: frames and GIF still work, and the panel says why the rest does not.
 
 An equirectangular video is tagged as 360 (Spherical Video V1 and V2).
 
@@ -146,11 +182,14 @@ opened with a different set of models shows whatever is open in each slot.
 ## Testing
 
 `render_project_test` covers the pure half: the path through its keys, holds,
-eased ends, constant speed, rigid transforms of the path, aim and roll, the
-lens arithmetic, JSON round trips, moved-project copies and the dataset lens
-clustering. The rest was driven through the GUI automation surface
-([gui-automation.md](gui-automation.md)) on a trained scene with its sparse
-model and a mesh: orbit and capture presets, G / R / S on keys, undo, the
-three preview layouts, every projection, the story transitions, and PNG, H.264
-and H.265 output checked with ffprobe and against a libx264 reference (42-44
-dB luma PSNR).
+eased ends, constant speed, C2 joins against Catmull-Rom's C1, closed loops
+(a circle stays a circle within 1%, a looped full turn keeps turning through
+the seam), rigid transforms of the path, aim and roll, the lens arithmetic,
+JSON round trips including older files, moved-project copies, dataset lens
+clustering, and a GIF read back through a decoder of its own. The rest was
+driven through the GUI automation surface ([gui-automation.md](gui-automation.md))
+on a trained scene with a mesh: orbit loops, insertion, deletion, R, the
+lens-aware gizmos, the three preview layouts, keys following a turned model,
+3DGS against 3DGUT, shots and model removal, and H.264 at 4946x3286 through
+ffmpeg, SVT-AV1, GIF and RGBA frames checked with ffprobe. `spirula encode`
+was checked against the source by PSNR: H.264 40, H.265 39, AV1 39 dB.

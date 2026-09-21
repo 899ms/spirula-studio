@@ -705,12 +705,24 @@ void Context::createDevice(const ContextOptions& opts) {
                 encode_codec_ops_ &= ~(uint32_t)VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
             if (!has(VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME))
                 encode_codec_ops_ &= ~(uint32_t)VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR;
-            encode_codec_ops_ &= (uint32_t)(VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR |
-                                            VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR);
+            uint32_t keep = VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR |
+                            VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR;
+#ifdef VK_KHR_video_encode_av1
+            // AV1 is a device feature as well as an extension.
+            if (has(VK_KHR_VIDEO_ENCODE_AV1_EXTENSION_NAME)) {
+                VkPhysicalDeviceVideoEncodeAV1FeaturesKHR fav1{
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_AV1_FEATURES_KHR};
+                VkPhysicalDeviceFeatures2 q{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+                q.pNext = &fav1;
+                vkGetPhysicalDeviceFeatures2(physical_, &q);
+                if (fav1.videoEncodeAV1) keep |= VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR;
+            }
+#endif
+            encode_codec_ops_ &= keep;
             if (encode_queue_family_ == UINT32_MAX) {
                 encode_reason_ = "no queue family advertises VIDEO_ENCODE";
             } else if (encode_codec_ops_ == 0) {
-                encode_reason_ = "video-encode queue exists but neither H.264 nor H.265 encode";
+                encode_reason_ = "video-encode queue exists but no H.264, H.265 or AV1 encode";
                 encode_queue_family_ = UINT32_MAX;
             } else {
                 encode_reason_.clear();
@@ -723,6 +735,10 @@ void Context::createDevice(const ContextOptions& opts) {
                     exts.push_back(VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME);
                 if (encode_codec_ops_ & VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR)
                     exts.push_back(VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME);
+#ifdef VK_KHR_video_encode_av1
+                if (encode_codec_ops_ & VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR)
+                    exts.push_back(VK_KHR_VIDEO_ENCODE_AV1_EXTENSION_NAME);
+#endif
             }
         }
     }
@@ -785,6 +801,16 @@ void Context::createDevice(const ContextOptions& opts) {
     // an image in one of those formats is gated on this feature.
     if (video_queue_family_ != UINT32_MAX || encode_queue_family_ != UINT32_MAX)
         f11.samplerYcbcrConversion = VK_TRUE;
+
+#if defined(SS_HAVE_VIDEO) && defined(VK_KHR_video_encode_av1)
+    VkPhysicalDeviceVideoEncodeAV1FeaturesKHR fav1{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_AV1_FEATURES_KHR};
+    if (encode_codec_ops_ & VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR) {
+        fav1.videoEncodeAV1 = VK_TRUE;
+        fav1.pNext = chain;
+        chain = &fav1;
+    }
+#endif
 
     VkPhysicalDeviceSubgroupSizeControlFeaturesEXT fsg{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};

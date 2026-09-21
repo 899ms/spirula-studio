@@ -612,6 +612,10 @@ bool ViewportPanel::take_pick(float out[3], bool& hit) {
     return true;
 }
 
+std::string ViewportPanel::primitive() const {
+    return _scene_options ? kViewerPrimitives[_primitive_idx] : "";
+}
+
 void ViewportPanel::edit_transform(float out[12]) const {
     std::memcpy(out, _m2s_edit, sizeof _m2s_edit);
 }

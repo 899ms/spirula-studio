@@ -89,6 +89,9 @@ public:
 
     // Once a frame, before the viewport draws.
     void poll();
+    // Off while another panel is showing -- the render's, over this same
+    // pane -- whose keys G, X and Ctrl+A are then.
+    void set_keys(bool on) { _keys_on = on; }
     // The editing panel: tools, options, selection, actions, history.
     void draw_panel();
     // One line under the viewport: the active tool and its keys.
@@ -334,6 +337,7 @@ private:
     // Set when the Save button is pressed; the panel puts the question up and
     // clears it when it is answered.
     bool _ask_overwrite = false;
+    bool _keys_on = true;
 };
 
 }  // namespace gui

@@ -1,9 +1,10 @@
 #pragma once
 
 // Where the camera is at a given time: the keyframes of a RenderProject
-// joined into one motion. Position, rotation, aim and zoom all run on the
-// same time-based Hermite spline, so a hold or an eased end stops all of
-// them together; constant speed is a warp of time along the path's length.
+// joined into one motion. Every channel -- position, rotation, aim, zoom --
+// is a cubic through the keys on one shared parameter: key time, or the
+// distance along the path when the speed is held constant. The Spline curve
+// is C2 (a cubic B-spline through the keys), Catmull-Rom is C1 and local.
 
 #include "app/gui/render/RenderProject.h"
 
@@ -25,21 +26,26 @@ class Trajectory {
 public:
     explicit Trajectory(const RenderProject& p);
     CameraState at(double t) const;
-    // The path as `n` evenly timed positions, for drawing it.
+    // The path as `n` evenly spaced positions, for drawing it.
     std::vector<double> sample_path(int n) const;
     double length() const { return _length; }
 
 private:
-    // Keyframe time a frame at `t` is evaluated at: `t` itself, or where the
-    // arc length says it is when the speed is held constant.
+    // Curve parameter of the frame at `t`.
     double warp(double t) const;
-    CameraState eval(double t) const;
+    CameraState eval(double u) const;
 
     const RenderProject& _p;
-    // Per key: the tangents of every channel, in units per second.
+    // Knots: one per key, and a loop repeats the first at its end.
+    int _n = 0, _knots = 0;
+    bool _closed = false;
+    std::vector<double> _u;              // parameter at each knot
+    std::vector<int> _src;               // the key each knot is
+    std::vector<double> _t;              // output time at each knot
+    // Per knot: every channel's value and slope (per unit of parameter).
+    std::vector<double> _pos, _rot, _tgt, _roll, _logf;
     std::vector<double> _dpos, _drot, _dtgt, _droll, _dfocal;
-    std::vector<double> _rot;            // keys' rotations, hemisphere-aligned
-    std::vector<double> _cum_time, _cum_len;   // arc-length table
+    std::vector<double> _cum_u, _cum_len;    // arc-length table
     double _length = 0.0;
 };
 

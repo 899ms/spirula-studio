@@ -130,6 +130,8 @@ public:
     // The display lens: camera model index (kViewerCameraModels) and its
     // field of view, degrees across the width.
     int view_model() const { return _cam_model; }
+    // The primitive the scene options render with; empty without them.
+    std::string primitive() const;
     float view_fov() const { return _fov_deg[_cam_model]; }
     void set_view_lens(int model, float fov_deg);
     // The point under a fraction of the image (0..1 each way), found on the

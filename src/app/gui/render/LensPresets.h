@@ -1,8 +1,8 @@
 #pragma once
 
-// Lenses to start from: the focal lengths photographers name, a few 360
-// cameras measured off real reconstructions, and the lenses a dataset was
-// shot with, grouped so a thousand frames of one camera are one entry.
+// Lenses to start from: the focal lengths photographers name, the lenses of
+// a few 360 cameras measured off real reconstructions, and the lenses a
+// dataset was shot with, grouped so a thousand frames of one camera are one.
 
 #include "app/gui/render/RenderProject.h"
 #include "i18n/Message.h"
@@ -24,9 +24,10 @@ struct LensPreset {
 };
 
 // Ordinary lenses by their 35 mm-equivalent focal length, then fisheyes and
-// the whole sphere.
+// the whole sphere -- one entry, since a sphere has no lens to tell apart,
+// only a size, which is the output's.
 const std::vector<LensPreset>& generic_lens_presets();
-// 360 cameras: one lens of each, and the stitched panorama.
+// 360 cameras: one lens of each.
 const std::vector<LensPreset>& camera_lens_presets();
 
 // The lenses in `ds`, one per group of cameras sharing a model, a size and a

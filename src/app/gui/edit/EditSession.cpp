@@ -610,7 +610,7 @@ void EditSession::poll() {
         if (_panel) _panel->invalidate();
         return;
     }
-    handle_keys();
+    if (_keys_on) handle_keys();
     if (!_xform.active()) {
         follow_history();
         push_placement();

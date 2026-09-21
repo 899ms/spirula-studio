@@ -99,6 +99,7 @@ void CompareView::add(const std::string& path,
     m->path = path;
     m->title = title;
     m->slot = claim_slot();
+    m->load_id = ++_loads;
     m->src.open(path, m->slot, &_engine_mutex);
     _models.push_back(std::move(m));
 }
@@ -323,6 +324,7 @@ void CompareView::poll() {
         begin_render(0);
     }
     finish_edit_load();
+    _edit.set_keys(_render_index < 0);
     if (_edit.active()) _edit.poll();
     if (_render_index >= 0) {
         feed_render();
@@ -355,6 +357,7 @@ void CompareView::reload(int index) {
     m.panel.detach();
     m.src.close();
     m.src.open(m.path, m.slot, &_engine_mutex);
+    m.load_id = ++_loads;
     m.attached = false;
     if (index == 0) _overlay_key.clear();
 }
@@ -406,6 +409,7 @@ void CompareView::begin_edit(int index) {
     _edit.set_on_saved([this](const std::string& source, const std::string& saved,
                               const spirula::Sim3& placement) {
         std::string dir;
+        _render.note_saved(saved, placement);
         const int n = render::copy_moved_projects(source, saved, placement, dir);
         if (n > 0) _log.push_back(spirula::i18n::format(rmsg::projects_moved, {(long long)n, dir}));
     });
@@ -493,6 +497,9 @@ void CompareView::begin_render(int index) {
         if (_render_index >= 0) begin_edit(_render_index);
     });
     _render.set_leave([this] { end_render(); });
+    _render.set_remove_model([this](int pane) {
+        if (pane >= 0 && pane < count() && pane != _render_index) _pending_remove = pane;
+    });
     if (index < 0 || index >= count() || !_models[(size_t)index]->attached) return;
     // An edit on another pane would be left drawing nowhere.
     if (_edit_index >= 0 && _edit_index != index) {
@@ -599,6 +606,8 @@ void CompareView::feed_render() {
         if (!m.attached || !m.src.ready()) continue;
         render::SourceInfo si;
         si.path = m.path;
+        si.load_id = m.load_id;
+        si.pane = i;
         si.name = display_name(m.src.file().empty() ? m.path : m.src.file());
         render::SourceView& v = si.view;
         v.key = m.src.scene_key();
@@ -632,6 +641,7 @@ void CompareView::feed_render() {
                 file_to_norm = spirula::Sim3::from_3x4(t);
                 v.cfg = m.src.render_config();
                 v.hooks = m.src.make_hooks();
+                v.primitive = m.panel.primitive();
                 v.file = m.src.file();
                 v.sh_max = m.src.sh_degree();
                 si.dataset = run_dataset(v.file);
@@ -964,9 +974,13 @@ void CompareView::draw(float height) {
             _render.draw_preview_pane();
             ImGui::EndChild();
         } else if (mode == PM::Beside) {
-            const float w = (avail.x - st.ItemSpacing.x) * 0.5f;
+            // A splitter between them: the camera's share of the width.
+            const float room = std::max(1.0f, avail.x - splitter_extent());
+            float& share = _render.beside_share();
+            float w = std::clamp(room * (1.0f - share), px(160.0f), std::max(px(160.0f), room - px(160.0f)));
             draw_pane(_render_index, ImVec2(w, avail.y));
-            ImGui::SameLine();
+            if (splitter_v("##besidesplit", &w, px(160.0f), room - px(160.0f), avail.y))
+                share = std::clamp(1.0f - w / room, 0.1f, 0.9f);
             ImGui::BeginChild("##camera", ImVec2(0, avail.y), ImGuiChildFlags_Borders);
             _render.draw_preview_pane();
             ImGui::EndChild();

@@ -1,16 +1,20 @@
 // render_project_test -- the render mode's pure half (app/gui/render/): the
-// trajectory through its keys, holds, eased ends and constant speed; the
-// lens arithmetic; a project's JSON round trip; and moved-project copies.
+// trajectory through its keys, holds, eased ends, constant speed, C2 joins
+// and closed loops; the lens arithmetic; a project's JSON round trip;
+// moved-project copies; and a GIF read back through a decoder of its own.
 
+#include "app/gui/render/GifWriter.h"
 #include "app/gui/render/LensPresets.h"
 #include "app/gui/render/RenderProject.h"
 #include "app/gui/render/Trajectory.h"
 #include "data/DatasetParser.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace gui::render;
@@ -162,7 +166,11 @@ void test_json_and_moves() {
     p.sources[1].style.point_style = PointStyle::Sphere;
     p.fade_out.colour = FadeColour::White;
     p.output.kind = OutputKind::Frames;
-    p.output.codec = Codec::H265;
+    p.output.codec = Codec::Av1;
+    p.output.format = ImageFormat::PngAlpha;
+    p.motion.curve = Curve::CatmullRom;
+    p.motion.loop = true;
+    p.sources[0].style.primitive = "3dgut";
     const RenderProject q = project_from_json(project_to_json(p));
     bool same = q.keys.size() == p.keys.size();
     for (size_t i = 0; same && i < p.keys.size(); i++)
@@ -171,8 +179,15 @@ void test_json_and_moves() {
     same = same && q.keys[1].lens == p.keys[1].lens && q.shots.size() == 2 &&
            q.shots[1].transition == Transition::Sweep && q.sources[1].style.point_style == PointStyle::Sphere &&
            q.fade_out.colour == FadeColour::White && q.output.kind == OutputKind::Frames &&
-           q.output.codec == Codec::H265;
+           q.output.codec == Codec::Av1 && q.output.format == ImageFormat::PngAlpha &&
+           q.motion.curve == Curve::CatmullRom && q.motion.loop &&
+           q.sources[0].style.primitive == "3dgut";
     check(same, "a project survives its JSON");
+    const RenderProject old = project_from_json(
+        "{\"format\":\"spirula-render\",\"version\":1,\"motion\":{\"smooth\":true},"
+        "\"output\":{\"image_format\":\"png\",\"transparent\":true}}");
+    check(old.motion.curve == Curve::CatmullRom && old.output.format == ImageFormat::PngAlpha,
+          "an older project keeps its curve and its transparency");
     check(project_to_json(q) == project_to_json(p), "and writes back byte for byte");
 
     // Turning the whole path keeps every camera aimed at the turned target.
@@ -231,6 +246,253 @@ void test_dataset_lenses() {
           "a zoom's two ends come out as two lenses, the common one first");
 }
 
+// The second derivative either side of each interior key, by differences.
+double accel(const Trajectory& tr, double t, double h, int side) {
+    const double a = t + side * 2.0 * h, b = t + side * h;
+    const CameraState p0 = tr.at(t), p1 = tr.at(b), p2 = tr.at(a);
+    double m = 0.0;
+    for (int d = 0; d < 3; d++) m = std::max(m, std::fabs(p2.pos[d] - 2.0 * p1.pos[d] + p0.pos[d]) / (h * h));
+    return m;
+}
+
+void test_spline_is_c2() {
+    RenderProject p;
+    p.keys = {key(0, 0, 0, 0), key(1, 1, 0.5, 0), key(2.5, 2, -0.3, 0.4), key(3, 3, 0, 0),
+              key(4, 3.5, 1, 0)};
+    p.keys[0].own_lens = true;
+    p.motion.ease = false;
+    const Trajectory tr(p);
+    bool c2 = true;
+    for (int i = 1; i + 1 < (int)p.keys.size(); i++) {
+        const double t = p.keys[(size_t)i].time, h = 1e-3;
+        // Second differences from each side, against the pair taken across.
+        const CameraState l2 = tr.at(t - 2 * h), l1 = tr.at(t - h), c = tr.at(t),
+                          r1 = tr.at(t + h), r2 = tr.at(t + 2 * h);
+        for (int d = 0; d < 3; d++) {
+            const double left = (c.pos[d] - 2 * l1.pos[d] + l2.pos[d]) / (h * h);
+            const double right = (r2.pos[d] - 2 * r1.pos[d] + c.pos[d]) / (h * h);
+            c2 = c2 && std::fabs(left - right) < 0.05 * (1.0 + std::fabs(left));
+        }
+    }
+    check(c2, "the spline's acceleration is continuous through every key");
+
+    p.motion.curve = Curve::CatmullRom;
+    const Trajectory cr(p);
+    bool jumps = false;
+    for (int i = 1; i + 1 < (int)p.keys.size(); i++) {
+        const double t = p.keys[(size_t)i].time;
+        jumps = jumps || std::fabs(accel(cr, t, 1e-3, -1) - accel(cr, t, 1e-3, 1)) > 0.5;
+    }
+    check(jumps, "Catmull-Rom, for comparison, is only C1");
+}
+
+void test_closed_loop() {
+    // Eight keys round a circle, aimed at its middle, as a closed loop.
+    RenderProject p;
+    const double kPi = 3.14159265358979323846;
+    for (int i = 0; i < 8; i++) {
+        const double a = 2.0 * kPi * i / 8.0;
+        Keyframe k = key(1.5 * i, 3.0 * std::cos(a), 3.0 * std::sin(a), 1.0);
+        k.aim = true;
+        update_aim(k, p.up);
+        p.keys.push_back(k);
+    }
+    p.keys[0].own_lens = true;
+    p.motion.loop = true;
+    p.motion.ease = false;
+    p.end = 12.0;
+    const Trajectory tr(p);
+    check(std::fabs(p.duration() - 12.0) < 1e-12, "a loop lasts until it is back at the start");
+    const CameraState a = tr.at(0.0), b = tr.at(12.0);
+    check(dist3(a.pos, b.pos) < 1e-9 && qsame(a.rot, b.rot) > 1 - 1e-9, "and ends where it began");
+    const CameraState a1 = tr.at(0.01), b1 = tr.at(11.99);
+    double va[3], vb[3];
+    for (int d = 0; d < 3; d++) {
+        va[d] = (a1.pos[d] - a.pos[d]) / 0.01;
+        vb[d] = (b.pos[d] - b1.pos[d]) / 0.01;
+    }
+    check(dist3(va, vb) < 0.02 * std::sqrt(va[0]*va[0] + va[1]*va[1] + va[2]*va[2]),
+          "with no kink in its speed across the seam");
+    double r_lo = 1e30, r_hi = 0.0;
+    for (int i = 0; i < 120; i++) {
+        const CameraState c = tr.at(0.1 * i);
+        const double r = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1]);
+        r_lo = std::min(r_lo, r);
+        r_hi = std::max(r_hi, r);
+    }
+    check(r_hi / r_lo < 1.01, "eight keys on a circle make a circle within 1%");
+
+    // A full turn of rotation, not aimed: the double cover comes back as -q.
+    RenderProject t;
+    for (int i = 0; i < 4; i++) {
+        Keyframe k = key(i, 0, 0, 0);
+        const double h = kPi * i / 4.0;   // half of a quarter turn about +Z
+        k.rot[0] = std::cos(h);
+        k.rot[3] = std::sin(h);
+        t.keys.push_back(k);
+    }
+    t.keys[0].own_lens = true;
+    t.motion.loop = true;
+    t.motion.ease = false;
+    const Trajectory tt(t);
+    bool steady = true;
+    for (int i = 0; i < 40; i++) {
+        const CameraState x = tt.at(0.1 * i), y = tt.at(0.1 * i + 0.1);
+        const double step = 2.0 * std::acos(std::min(1.0, qsame(x.rot, y.rot)));
+        steady = steady && std::fabs(step - kPi / 20.0) < 0.01;
+    }
+    check(steady, "a looped full turn keeps turning the same way through the seam");
+}
+
+void test_lens_kept_on_sort() {
+    RenderProject p;
+    p.keys = {key(1, 0, 0, 0), key(2, 1, 0, 0), key(0.5, 2, 0, 0)};
+    p.keys[0].own_lens = true;
+    lens_set_fov(p.keys[0].lens, 90.0);
+    p.sort_keys();
+    check(std::fabs(lens_fov(p.keys[0].lens) - 90.0) < 1e-9 && p.keys[0].own_lens,
+          "a key that becomes the first keeps the lens it was seen through");
+}
+
+// ---- a GIF decoder, just enough to read back what GifWriter wrote ----
+
+struct Gif {
+    int w = 0, h = 0;
+    std::vector<std::vector<uint8_t>> frames;   // RGB
+    std::vector<int> delays;
+    bool ok = false;
+};
+
+Gif read_gif(const std::vector<uint8_t>& b) {
+    Gif g;
+    size_t at = 6;
+    auto u16 = [&](size_t i) { return b[i] | (b[i + 1] << 8); };
+    if (b.size() < 13 || std::string(b.begin(), b.begin() + 6) != "GIF89a") return g;
+    g.w = u16(6);
+    g.h = u16(8);
+    at = 13;
+    int delay = 0;
+    while (at < b.size()) {
+        const uint8_t tag = b[at++];
+        if (tag == 0x3B) { g.ok = true; break; }
+        if (tag == 0x21) {
+            const uint8_t label = b[at++];
+            if (label == 0xF9) delay = u16(at + 2);
+            while (b[at]) at += b[at] + 1;
+            at++;
+            continue;
+        }
+        if (tag != 0x2C) return g;
+        const int fw = u16(at + 4), fh = u16(at + 6), packed = b[at + 8];
+        at += 9;
+        std::vector<uint8_t> pal;
+        if (packed & 0x80) {
+            const int n = 3 << ((packed & 7) + 1);
+            pal.assign(b.begin() + (ptrdiff_t)at, b.begin() + (ptrdiff_t)(at + n));
+            at += (size_t)n;
+        }
+        const int min = b[at++];
+        std::vector<uint8_t> data;
+        while (b[at]) {
+            data.insert(data.end(), b.begin() + (ptrdiff_t)at + 1, b.begin() + (ptrdiff_t)(at + 1 + b[at]));
+            at += b[at] + 1;
+        }
+        at++;
+        // LZW, the reader's way round.
+        const int clear = 1 << min, eoi = clear + 1;
+        std::vector<std::vector<uint8_t>> table;
+        auto reset = [&] {
+            table.assign((size_t)eoi + 1, {});
+            for (int i = 0; i < clear; i++) table[(size_t)i] = {(uint8_t)i};
+        };
+        reset();
+        int width = min + 1, prev = -1;
+        size_t bit = 0;
+        std::vector<uint8_t> idx;
+        for (;;) {
+            if (bit + width > data.size() * 8) break;
+            int code = 0;
+            for (int k = 0; k < width; k++, bit++)
+                code |= ((data[bit >> 3] >> (bit & 7)) & 1) << k;
+            if (code == clear) { reset(); width = min + 1; prev = -1; continue; }
+            if (code == eoi) break;
+            std::vector<uint8_t> entry;
+            if (code < (int)table.size() && !table[(size_t)code].empty()) entry = table[(size_t)code];
+            else if (prev >= 0) { entry = table[(size_t)prev]; entry.push_back(table[(size_t)prev][0]); }
+            else return g;
+            idx.insert(idx.end(), entry.begin(), entry.end());
+            if (prev >= 0 && table.size() < 4096) {
+                std::vector<uint8_t> e = table[(size_t)prev];
+                e.push_back(entry[0]);
+                table.push_back(e);
+                if ((int)table.size() == (1 << width) && width < 12) width++;
+            }
+            prev = code;
+        }
+        if ((int)idx.size() != fw * fh) return g;
+        std::vector<uint8_t> rgb((size_t)fw * fh * 3);
+        for (size_t i = 0; i < idx.size(); i++)
+            for (int c = 0; c < 3; c++) rgb[i * 3 + c] = pal[(size_t)idx[i] * 3 + c];
+        g.frames.push_back(rgb);
+        g.delays.push_back(delay);
+    }
+    return g;
+}
+
+void test_gif() {
+    const int W = 97, H = 61;
+    const fs::path path = fs::temp_directory_path() / "spirula_render_test.gif";
+    std::vector<std::vector<uint8_t>> frames;
+    for (int f = 0; f < 3; f++) {
+        std::vector<uint8_t> rgb((size_t)W * H * 3);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                uint8_t* p = &rgb[((size_t)y * W + x) * 3];
+                p[0] = (uint8_t)(x * 255 / (W - 1));
+                p[1] = (uint8_t)(y * 255 / (H - 1));
+                p[2] = (uint8_t)((x + y + 40 * f) % 256);
+            }
+        frames.push_back(rgb);
+    }
+    {
+        GifWriter w;
+        bool ok = w.open(path.string(), W, H);
+        for (int f = 0; f < 3 && ok; f++)
+            ok = w.write(gif_encode_frame(frames[(size_t)f].data(), W, H, 256, gif_delay_cs(f, 3, 30.0)));
+        ok = w.close() && ok;
+        check(ok, "a GIF is written");
+    }
+    std::FILE* fp = std::fopen(path.string().c_str(), "rb");
+    std::vector<uint8_t> bytes;
+    if (fp) {
+        int c;
+        while ((c = std::fgetc(fp)) != EOF) bytes.push_back((uint8_t)c);
+        std::fclose(fp);
+    }
+    fs::remove(path);
+    const Gif g = read_gif(bytes);
+    bool close = g.ok && g.w == W && g.h == H && g.frames.size() == 3;
+    double err = 0.0;
+    for (size_t f = 0; close && f < 3; f++)
+        for (size_t i = 0; i < frames[f].size(); i++)
+            err += std::fabs((double)g.frames[f][i] - frames[f][i]);
+    err /= 3.0 * W * H * 3;
+    check(close && err < 12.0, "and read back frame for frame, near the original colours");
+    check(g.delays.size() == 3 && g.delays[0] + g.delays[1] + g.delays[2] >= 9 &&
+              g.delays[0] + g.delays[1] + g.delays[2] <= 11,
+          "at 30 frames a second, a tenth of a second for three frames");
+    int kept = 0, total = 0, shortest = 100;
+    for (int f = 0; f < 60; f++) {
+        const int d = gif_delay_cs(f, 60, 60.0);
+        if (d <= 0) continue;
+        kept++;
+        total += d;
+        shortest = std::min(shortest, d);
+    }
+    check(kept < 60 && shortest >= 2 && total == 100,
+          "at 60 frames a second it drops frames to keep every delay playable, and the time right");
+}
+
 }  // namespace
 
 int main() {
@@ -239,6 +501,10 @@ int main() {
     test_aim_and_lens();
     test_json_and_moves();
     test_dataset_lenses();
+    test_spline_is_c2();
+    test_closed_loop();
+    test_lens_kept_on_sort();
+    test_gif();
     if (g_failures) {
         std::printf("%d FAILED\n", g_failures);
         return 1;

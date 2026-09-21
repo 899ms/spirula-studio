@@ -149,7 +149,8 @@ src/
 │   │                              docs/notes/scene-transform.md
 │   │   └── render/           photos and videos of a model: keyframed
 │   │                           camera moves, lenses, transitions, and the
-│   │                           frames piped into an encoder
+│   │                           frames written as images, a GIF, or piped
+│   │                           into an encoder
 │   │                           -- docs/notes/render-video.md
 │   ├── webviewer/          HTTP server + render worker + viewer.html (the ONE
 │   │                         browser client, embedded into the engine library

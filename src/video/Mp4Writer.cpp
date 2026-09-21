@@ -87,6 +87,30 @@ struct Bits {
 
 }  // namespace
 
+std::vector<std::pair<int, std::pair<const uint8_t*, size_t>>> split_obus(const uint8_t* p,
+                                                                          size_t n) {
+    std::vector<std::pair<int, std::pair<const uint8_t*, size_t>>> out;
+    size_t i = 0;
+    while (i < n) {
+        const uint8_t h = p[i];
+        const int type = (h >> 3) & 0xF;
+        size_t at = i + 1 + ((h & 0x04) ? 1 : 0);
+        size_t size = n - at;
+        if (h & 0x02) {
+            size = 0;
+            for (int k = 0; k < 8 && at < n; k++) {
+                const uint8_t b = p[at++];
+                size |= (size_t)(b & 0x7F) << (7 * k);
+                if (!(b & 0x80)) break;
+            }
+        }
+        if (at + size > n) break;
+        out.push_back({type, {p + i, at + size - i}});
+        i = at + size;
+    }
+    return out;
+}
+
 std::vector<std::pair<const uint8_t*, size_t>> split_annexb(const uint8_t* p, size_t n) {
     std::vector<std::pair<const uint8_t*, size_t>> out;
     size_t i = 0, start = SIZE_MAX;
@@ -111,9 +135,11 @@ Mp4Writer::~Mp4Writer() {
     if (_f) std::fclose(_f);
 }
 
-bool Mp4Writer::open(const std::string& path, bool h265, int width, int height,
+bool Mp4Writer::open(const std::string& path, Codec codec, int width, int height,
                      double fps, bool spherical, std::string& error) {
-    _h265 = h265;
+    _codec = codec;
+    _h265 = codec == Codec::H265;
+    _av1 = codec == Codec::Av1;
     _spherical = spherical;
     _width = width;
     _height = height;
@@ -135,7 +161,8 @@ bool Mp4Writer::open(const std::string& path, bool h265, int width, int height,
     Box ftyp("ftyp");
     ftyp.bytes("isom", 4);
     ftyp.u32(0x200);
-    for (const char* b : {"isom", "iso2", h265 ? "hvc1" : "avc1", "mp41"}) ftyp.bytes(b, 4);
+    for (const char* b : {"isom", "iso2", _av1 ? "av01" : _h265 ? "hvc1" : "avc1", "mp41"})
+        ftyp.bytes(b, 4);
     const std::vector<uint8_t> f = ftyp.finish();
     std::fwrite(f.data(), 1, f.size(), _f);
     // A 64-bit mdat header: four bytes of size 1, the type, then the size.
@@ -147,6 +174,11 @@ bool Mp4Writer::open(const std::string& path, bool h265, int width, int height,
 }
 
 void Mp4Writer::set_parameter_sets(const std::vector<uint8_t>& annexb) {
+    if (_av1) {
+        for (const auto& [type, obu] : split_obus(annexb.data(), annexb.size()))
+            if (type == 1) _seq_obu.assign(obu.first, obu.first + obu.second);
+        return;
+    }
     for (const auto& [p, n] : split_annexb(annexb.data(), annexb.size())) {
         if (!n) continue;
         std::vector<uint8_t> nal(p, p + n);
@@ -167,6 +199,27 @@ bool Mp4Writer::write_sample(const uint8_t* annexb, size_t bytes, bool sync) {
     if (!_f || _failed) return false;
     const uint64_t at = _written;
     uint32_t size = 0;
+    if (_av1) {
+        // A temporal unit without its delimiter, the sequence header at
+        // every key frame.
+        const auto obus = split_obus(annexb, bytes);
+        bool has_seq = false;
+        for (const auto& o : obus) has_seq = has_seq || o.first == 1;
+        std::vector<uint8_t> sample;
+        if (sync && !has_seq) sample = _seq_obu;
+        for (const auto& [type, obu] : obus)
+            if (type != 2) sample.insert(sample.end(), obu.first, obu.first + obu.second);
+        if (!sample.empty() && std::fwrite(sample.data(), 1, sample.size(), _f) != sample.size()) {
+            _failed = true;
+            return false;
+        }
+        size = (uint32_t)sample.size();
+        _written += size;
+        _offsets.push_back(at);
+        _sizes.push_back(size);
+        if (sync) _syncs.push_back((uint32_t)_sizes.size());
+        return true;
+    }
     for (const auto& [p, n] : split_annexb(annexb, bytes)) {
         if (!n) continue;
         // Parameter sets live in the sample entry.
@@ -193,7 +246,7 @@ bool Mp4Writer::close(std::string& error) {
         error = "write failed";
         return false;
     }
-    if (_sps.empty() || _pps.empty() || (_h265 && _vps.empty())) {
+    if (_av1 ? _seq_obu.empty() : (_sps.empty() || _pps.empty() || (_h265 && _vps.empty()))) {
         error = "no parameter sets";
         return false;
     }
@@ -202,7 +255,7 @@ bool Mp4Writer::close(std::string& error) {
     const uint64_t movie_duration = duration * 1000 / _timescale;
 
     // ---- sample entry ----
-    Box entry(_h265 ? "hvc1" : "avc1");
+    Box entry(_av1 ? "av01" : _h265 ? "hvc1" : "avc1");
     entry.zeros(6);
     entry.u16(1);                     // data reference index
     entry.zeros(16);
@@ -215,7 +268,42 @@ bool Mp4Writer::close(std::string& error) {
     entry.zeros(32);                  // compressor name
     entry.u16(0x0018);
     entry.u16(0xFFFF);
-    if (!_h265) {
+    if (_av1) {
+        // The first operating point's profile, level and tier, read from the
+        // sequence header past its OBU header and size.
+        std::vector<uint8_t> body;
+        {
+            const uint8_t h = _seq_obu[0];
+            size_t at = 1 + ((h & 0x04) ? 1 : 0);
+            if (h & 0x02)
+                while (at < _seq_obu.size() && (_seq_obu[at++] & 0x80)) {}
+            body.assign(_seq_obu.begin() + (ptrdiff_t)std::min(at, _seq_obu.size()), _seq_obu.end());
+        }
+        Bits b(body, 0);
+        b.pos = 0;
+        b.rbsp = body;
+        const uint32_t profile = b.bits(3);
+        b.bit();                                   // still_picture
+        const uint32_t reduced = b.bit();
+        uint32_t level = 8, tier = 0;
+        if (reduced) {
+            level = b.bits(5);
+        } else if (!b.bit()) {                     // no timing info to step over
+            b.bit();                               // initial_display_delay_present
+            b.bits(5);                             // operating_points_cnt_minus_1
+            b.bits(12);                            // operating_point_idc
+            level = b.bits(5);
+            if (level > 7) tier = b.bit();
+        }
+        Box av1c("av1C");
+        av1c.u8(0x81);                             // marker, version 1
+        av1c.u8((uint8_t)((profile << 5) | (level & 0x1F)));
+        // 8-bit 4:2:0, chroma position unknown.
+        av1c.u8((uint8_t)((tier << 7) | (1 << 3) | (1 << 2)));
+        av1c.u8(0);
+        av1c.bytes(_seq_obu.data(), _seq_obu.size());
+        entry.child(av1c);
+    } else if (!_h265) {
         const std::vector<uint8_t>& sps = _sps[0];
         Box avcc("avcC");
         avcc.u8(1);

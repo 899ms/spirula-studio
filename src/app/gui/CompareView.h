@@ -122,6 +122,7 @@ private:
         ViewportPanel panel;
         const spirula::i18n::Msg* title = nullptr;
         int slot = -1;              // engine scene slot
+        uint64_t load_id = 0;       // a new one each time the file is read
         bool attached = false;
         // Placement in the shared frame. `align` puts the model in the FIRST
         // model's frame rather than in its own; the rest is the hand
@@ -161,6 +162,7 @@ private:
     // Whose frame the axes/grid overlay was built for; "" when there is none.
     std::string _overlay_key;
     uint32_t _slots_used = 0;
+    uint64_t _loads = 0;
     // Pane-menu actions, applied by the next poll(): a pane cannot remove or
     // reorder itself while its own popup is being drawn inside it.
     int _pending_remove = -1;

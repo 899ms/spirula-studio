@@ -8,6 +8,7 @@
 #include "app/gui/Subprocess.h"
 #include "app/gui/ViewportPanel.h"
 #include "app/gui/edit/SelectShape.h"
+#include "data/CameraMath.h"
 #include "i18n/catalog/Render.h"
 
 #include "imgui.h"
@@ -147,9 +148,19 @@ void RenderSession::set_sources(std::vector<SourceInfo> sources) {
             }
     std::vector<SourceView> views;
     views.reserve(_sources.size());
-    for (const SourceInfo& s : _sources) views.push_back(s.view);
+    std::string sig;
+    for (const SourceInfo& s : _sources) {
+        views.push_back(s.view);
+        sig += s.view.key + "|" + s.view.primitive + "|";
+    }
     _frames.set_sources(views);
+    // What the viewport renders a model with is part of the picture.
+    if (sig != _sources_sig) {
+        _sources_sig = sig;
+        _preview_key.clear();
+    }
     if (!_have_project) return;
+    follow_placement();
     // The project's list follows what is open, by position; a style set for
     // a model that has gone stays for the one that takes its place.
     if (_project.sources.size() < _sources.size())
@@ -190,6 +201,9 @@ void RenderSession::new_project() {
             _project.output.height = 1920;
         }
     }
+    _project.placement = primary_placement();
+    _tracked_load = _sources.empty() ? 0 : _sources[0].load_id;
+    _baked_path.clear();
     _project_path.clear();
     _saved_json = project_to_json(_project);
     _stable_json = _saved_json;
@@ -286,6 +300,8 @@ void RenderSession::open_from(const std::string& path) {
         p.placement = now;
         _project = std::move(p);
         _have_project = true;
+        _tracked_load = _sources.empty() ? 0 : _sources[0].load_id;
+        _baked_path.clear();
         // The models are whatever is open now, in the order it is open.
         if (_project.sources.size() < _sources.size())
             _project.sources.resize(_sources.size());
@@ -346,7 +362,8 @@ bool RenderSession::selected(int i) const {
 
 int RenderSession::single_selected() const {
     int found = -1;
-    for (int i = 0; i < (int)_sel.size(); i++)
+    const int n = std::min((int)_sel.size(), (int)_project.keys.size());
+    for (int i = 0; i < n; i++)
         if (_sel[(size_t)i]) {
             if (found >= 0) return -1;
             found = i;
@@ -357,6 +374,93 @@ int RenderSession::single_selected() const {
 void RenderSession::select_only(int index) {
     _sel.assign(_project.keys.size(), 0);
     if (index >= 0 && index < (int)_sel.size()) _sel[(size_t)index] = 1;
+    _sel_anchor = index;
+}
+
+// A list's click: alone, Ctrl toggles one, Shift takes the run from the
+// last one clicked.
+void RenderSession::click_select(int index, bool ctrl, bool shift) {
+    const int n = (int)_project.keys.size();
+    if (index < 0 || index >= n) return;
+    _sel.resize((size_t)n, 0);
+    if (shift && _sel_anchor >= 0 && _sel_anchor < n) {
+        if (!ctrl) _sel.assign((size_t)n, 0);
+        const int a = std::min(_sel_anchor, index), b = std::max(_sel_anchor, index);
+        for (int i = a; i <= b; i++) _sel[(size_t)i] = 1;
+        return;
+    }
+    if (ctrl) _sel[(size_t)index] ^= 1;
+    else _sel.assign((size_t)n, 0), _sel[(size_t)index] = 1;
+    _sel_anchor = index;
+}
+
+double RenderSession::next_key_time() const {
+    const std::vector<Keyframe>& k = _project.keys;
+    if (k.empty()) return 0.0;
+    const int one = single_selected();
+    if (one >= 0 && one + 1 < (int)k.size())
+        return 0.5 * (k[(size_t)one].time + k[(size_t)one + 1].time);
+    if (one >= 0 || _time >= k.back().time - 1e-6) {
+        // Past the end, one average spacing on.
+        const double gap = k.size() >= 2 ? (k.back().time - k.front().time) / (k.size() - 1) : 2.0;
+        return k.back().time + std::max(gap, 0.5);
+    }
+    return _time;
+}
+
+int RenderSession::add_key(double time, bool select) {
+    std::vector<Keyframe>& keys = _project.keys;
+    time = std::max(0.0, time);
+    const double frame = 0.5 / std::max(_project.output.fps, 1.0);
+    const bool inside = keys.size() >= 2 && time > keys.front().time + frame &&
+                        (time < keys.back().time - frame ||
+                         (_project.looped() && time < _project.duration() - frame));
+    if (!inside) return add_key_from_view(time, select);
+    // Where the camera already is at that moment, so nothing else moves.
+    const CameraState c = trajectory().at(time);
+    Keyframe k;
+    k.time = time;
+    for (int d = 0; d < 3; d++) k.pos[d] = c.pos[d];
+    for (int d = 0; d < 4; d++) k.rot[d] = c.rot[d];
+    int before = 0;
+    for (int i = 0; i < (int)keys.size(); i++)
+        if (keys[(size_t)i].time <= time) before = i;
+    const Keyframe& a = keys[(size_t)before];
+    const Keyframe& b = keys[((size_t)before + 1) % keys.size()];
+    if (a.aim && b.aim) {
+        // Aimed on both sides: aimed here too, at the point between theirs.
+        const double span = std::max(b.time > a.time ? b.time - a.time
+                                                     : _project.duration() - a.time, 1e-9);
+        const double f = std::clamp((time - a.time) / span, 0.0, 1.0);
+        k.aim = true;
+        for (int d = 0; d < 3; d++) k.target[d] = a.target[d] + (b.target[d] - a.target[d]) * f;
+        k.roll = roll_of(k.rot, k.pos, k.target, _project.up);
+        update_aim(k, _project.up);
+    } else {
+        double R[9];
+        quat_to_matrix3(k.rot, R);
+        const double ahead = 1.0 / std::max(_w2s.s, 1e-12);
+        for (int d = 0; d < 3; d++) k.target[d] = k.pos[d] - R[d*3+2] * ahead;
+    }
+    if (c.lens != _project.lens_at(before)) {
+        k.own_lens = true;
+        k.lens = c.lens;
+    }
+    const std::vector<Lens> lenses = [&] {
+        std::vector<Lens> v;
+        for (int i = 0; i < (int)keys.size(); i++) v.push_back(_project.lens_at(i));
+        return v;
+    }();
+    keys.insert(keys.begin() + before + 1, k);
+    std::vector<int> from;
+    for (int i = 0; i < (int)keys.size(); i++)
+        from.push_back(i <= before ? i : i == before + 1 ? -1 : i - 1);
+    keep_lenses(lenses, from);
+    _sel.insert(_sel.begin() + std::min((int)_sel.size(), before + 1), 0);
+    project_changed();
+    if (select) select_only(before + 1);
+    _time = time;
+    return before + 1;
 }
 
 int RenderSession::add_key_from_view(double time, bool select) {
@@ -365,8 +469,7 @@ int RenderSession::add_key_from_view(double time, bool select) {
     if (!view_pose(k.pos, k.rot, k.target)) return -1;
     if (_project.keys.empty()) {
         k.own_lens = true;
-        k.lens.projection = (Projection)std::clamp(_panel->view_model(), 0, 3);
-        lens_set_fov(k.lens, _panel->view_fov());
+        k.lens = view_lens();
     }
     _project.keys.push_back(k);
     const double t = k.time;
@@ -374,10 +477,32 @@ int RenderSession::add_key_from_view(double time, bool select) {
     int index = 0;
     for (int i = 0; i < (int)_project.keys.size(); i++)
         if (_project.keys[(size_t)i].time == t) index = i;
-    _sel.insert(_sel.begin() + index, 0);
+    _sel.insert(_sel.begin() + std::min((int)_sel.size(), index), 0);
     project_changed();
     if (select) select_only(index);
+    _time = t;
     return index;
+}
+
+Lens RenderSession::view_lens() const {
+    Lens l;
+    if (!_panel) return l;
+    l.projection = (Projection)std::clamp(_panel->view_model(), 0, 3);
+    lens_set_fov(l, _panel->view_fov());
+    return l;
+}
+
+void RenderSession::keep_lenses(const std::vector<Lens>& before, const std::vector<int>& from) {
+    std::vector<Keyframe>& keys = _project.keys;
+    for (int i = 0; i < (int)keys.size() && i < (int)from.size(); i++) {
+        const int j = from[(size_t)i];
+        if (j < 0 || j >= (int)before.size() || keys[(size_t)i].own_lens) continue;
+        if (i == 0 || _project.lens_at(i) != before[(size_t)j]) {
+            keys[(size_t)i].own_lens = true;
+            keys[(size_t)i].lens = before[(size_t)j];
+        }
+    }
+    if (!keys.empty()) keys[0].own_lens = true;
 }
 
 void RenderSession::update_key_from_view(int index) {
@@ -424,22 +549,153 @@ void RenderSession::look_through(double time) {
 }
 
 void RenderSession::delete_selected() {
+    std::vector<Lens> lenses;
     std::vector<Keyframe> kept;
-    for (size_t i = 0; i < _project.keys.size(); i++)
-        if (!selected((int)i)) kept.push_back(_project.keys[i]);
+    std::vector<int> from;
+    for (int i = 0; i < (int)_project.keys.size(); i++) {
+        lenses.push_back(_project.lens_at(i));
+        if (selected(i)) continue;
+        kept.push_back(_project.keys[(size_t)i]);
+        from.push_back(i);
+    }
     if (kept.size() == _project.keys.size()) return;
     _project.keys = std::move(kept);
-    _project.sort_keys();
+    // A key that said "same" keeps what it showed, even with the key it
+    // copied gone.
+    keep_lenses(lenses, from);
     _sel.assign(_project.keys.size(), 0);
+    _sel_anchor = -1;
     project_changed();
 }
 
 void RenderSession::space_evenly(double total) {
     const int n = (int)_project.keys.size();
     if (n < 2) return;
-    total = std::max(total, 0.1 * (n - 1));
-    for (int i = 0; i < n; i++) _project.keys[(size_t)i].time = total * i / (n - 1);
+    // A loop spends one more interval getting back to the start.
+    const int gaps = _project.motion.loop ? n : n - 1;
+    total = std::max(total, 0.1 * gaps);
+    for (int i = 0; i < n; i++) _project.keys[(size_t)i].time = total * i / gaps;
+    if (_project.motion.loop) _project.end = total;
     project_changed();
+}
+
+// Each key moves part way to where its neighbours' straight line passes at
+// its time; the ends, the stops and the timing stay. Taubin's outward second
+// pass keeps an orbit from shrinking with every press.
+void RenderSession::smooth_keys(double strength) {
+    if (_project.keys.size() < 3) return;
+    strength = std::clamp(strength, 0.01, 1.0);
+    smooth_pass(strength);
+    smooth_pass(1.0 / (0.1 - 1.0 / strength));
+    project_changed();
+}
+
+void RenderSession::smooth_pass(double strength) {
+    std::vector<Keyframe>& k = _project.keys;
+    const int n = (int)k.size();
+    bool any = false;
+    for (int i = 0; i < n; i++) any = any || selected(i);
+    const bool loop = _project.looped();
+    const double period = _project.duration() - k.front().time;
+    const std::vector<Keyframe> was = k;
+    auto lerp_at = [&](int i, auto get, int dims, double* out) {
+        const int a = i - 1, b = i + 1;
+        const Keyframe& ka = was[(size_t)((a + n) % n)];
+        const Keyframe& kb = was[(size_t)(b % n)];
+        const double ta = a < 0 ? ka.time - period : ka.time;
+        const double tb = b >= n ? kb.time + period : kb.time;
+        const double f = tb > ta ? (was[(size_t)i].time - ta) / (tb - ta) : 0.5;
+        for (int d = 0; d < dims; d++) out[d] = get(ka, d) + (get(kb, d) - get(ka, d)) * f;
+        return f;
+    };
+    for (int i = 0; i < n; i++) {
+        if ((any && !selected(i)) || was[(size_t)i].hold) continue;
+        if (!loop && (i == 0 || i == n - 1)) continue;
+        Keyframe& ki = k[(size_t)i];
+        double p[3];
+        const double f = lerp_at(i, [](const Keyframe& x, int d) { return x.pos[d]; }, 3, p);
+        for (int d = 0; d < 3; d++) ki.pos[d] += strength * (p[d] - ki.pos[d]);
+        const Keyframe& ka = was[(size_t)((i - 1 + n) % n)];
+        const Keyframe& kb = was[(size_t)((i + 1) % n)];
+        if (ki.aim && ka.aim && kb.aim) {
+            double t[3];
+            lerp_at(i, [](const Keyframe& x, int d) { return x.target[d]; }, 3, t);
+            for (int d = 0; d < 3; d++) ki.target[d] += strength * (t[d] - ki.target[d]);
+            ki.roll += strength * ((ka.roll + (kb.roll - ka.roll) * f) - ki.roll);
+            update_aim(ki, _project.up);
+        } else if (ki.aim) {
+            update_aim(ki, _project.up);
+        } else {
+            // The turn its neighbours make between them, at its time.
+            double qa[4], qb[4], mid[4];
+            for (int d = 0; d < 4; d++) { qa[d] = ka.rot[d]; qb[d] = kb.rot[d]; }
+            double dot = qa[0]*qb[0] + qa[1]*qb[1] + qa[2]*qb[2] + qa[3]*qb[3];
+            if (dot < 0) { for (double& v : qb) v = -v; dot = -dot; }
+            for (int d = 0; d < 4; d++) mid[d] = qa[d] + (qb[d] - qa[d]) * f;
+            double own[4] = {ki.rot[0], ki.rot[1], ki.rot[2], ki.rot[3]};
+            if (own[0]*mid[0] + own[1]*mid[1] + own[2]*mid[2] + own[3]*mid[3] < 0)
+                for (double& v : own) v = -v;
+            double q[4], nq = 0.0;
+            for (int d = 0; d < 4; d++) { q[d] = own[d] + strength * (mid[d] - own[d]); nq += q[d] * q[d]; }
+            nq = std::sqrt(nq);
+            if (nq > 1e-12) for (int d = 0; d < 4; d++) ki.rot[d] = q[d] / nq;
+        }
+    }
+}
+
+void RenderSession::note_saved(const std::string& saved, const Sim3& placement) {
+    _baked_path = saved;
+    _baked = placement;
+}
+
+// The keys live in the primary model's saved coordinates, which its editor
+// placement moves: when the placement changes, so do they. A model read back
+// from a file that has the placement written in has not moved at all.
+void RenderSession::follow_placement() {
+    if (!_have_project || _sources.empty()) return;
+    const SourceInfo& s = _sources[0];
+    const Sim3 now = primary_placement();
+    Sim3 move;
+    if (s.load_id != _tracked_load) {
+        const bool baked = _tracked_load != 0 && !_baked_path.empty() && s.path == _baked_path;
+        _tracked_load = s.load_id;
+        if (!baked) {
+            _project.placement = now;
+            return;
+        }
+        // File coordinates became the old ones moved by the saved placement.
+        move = now * _baked * _project.placement.inverse();
+        _baked_path.clear();
+    } else {
+        move = now * _project.placement.inverse();
+    }
+    if (move.is_identity(1e-9)) {
+        _project.placement = now;
+        return;
+    }
+    // Not a step anyone takes back: every snapshot records its own placement
+    // and comes back through here.
+    const bool stable = project_to_json(_project) == _stable_json;
+    const bool saved = project_to_json(_project) == _saved_json;
+    transform_project(_project, move);
+    _project.placement = now;
+    if (stable) _stable_json = project_to_json(_project);
+    if (saved) _saved_json = project_to_json(_project);
+    _preview_key.clear();
+    project_changed();
+}
+
+void RenderSession::remove_source(int index) {
+    if (index <= 0 || index >= (int)_sources.size()) return;
+    const int pane = _sources[(size_t)index].pane;
+    for (Shot& sh : _project.shots) {
+        if (sh.source == index) sh.source = 0;
+        else if (sh.source > index) sh.source--;
+    }
+    if (index < (int)_project.sources.size())
+        _project.sources.erase(_project.sources.begin() + index);
+    project_changed();
+    if (_remove_model && pane >= 0) _remove_model(pane);
 }
 
 // The view's own up, for a model no dataset levels: turn the view until the
@@ -488,11 +744,11 @@ void RenderSession::make_orbit() {
                       up[0]*flat[1] - up[1]*flat[0]};
     const double sl = std::sqrt(side[0]*side[0] + side[1]*side[1] + side[2]*side[2]);
     for (double& v : side) v /= std::max(sl, 1e-12);
-    const Lens lens = _project.keys.empty() ? Lens() : _project.lens_at(0);
+    const Lens lens = _project.keys.empty() ? view_lens() : _project.lens_at(0);
     _project.keys.clear();
     constexpr int kSteps = 8;
     constexpr double kSeconds = 12.0;
-    for (int i = 0; i <= kSteps; i++) {
+    for (int i = 0; i < kSteps; i++) {
         const double a = 2.0 * kPi * i / kSteps;
         Keyframe k;
         k.time = kSeconds * i / kSteps;
@@ -504,9 +760,12 @@ void RenderSession::make_orbit() {
         update_aim(k, _project.up);
         _project.keys.push_back(k);
     }
-    _project.motion.smooth = true;
+    // A closed loop: the video ends where it began, and plays round and round.
+    _project.motion.curve = Curve::Spline;
     _project.motion.constant_speed = true;
     _project.motion.ease = false;
+    _project.motion.loop = true;
+    _project.end = kSeconds;
     _project.sort_keys();
     _sel.assign(_project.keys.size(), 0);
     _time = 0.0;
@@ -536,7 +795,7 @@ void RenderSession::follow_capture() {
     });
     const int want = std::clamp((int)order.size() / 12, 4, 16);
     // The capture's own lens, as the frames were taken.
-    Lens lens = _project.keys.empty() ? Lens() : _project.lens_at(0);
+    Lens lens = _project.keys.empty() ? view_lens() : _project.lens_at(0);
     const std::vector<DatasetLens> lenses = cluster_dataset_lenses(*ds);
     if (!lenses.empty()) lens = lenses.front().lens;
     _project.keys.clear();
@@ -555,8 +814,10 @@ void RenderSession::follow_capture() {
         if (j == 0) { k.own_lens = true; k.lens = lens; }
         _project.keys.push_back(k);
     }
-    _project.motion.smooth = true;
+    _project.motion.curve = Curve::Spline;
     _project.motion.ease = true;
+    _project.motion.loop = false;
+    _project.end = 0.0;
     _project.sort_keys();
     _sel.assign(_project.keys.size(), 0);
     _time = 0.0;
@@ -622,10 +883,9 @@ bool RenderSession::xform_frame(XformFrame& f, XformKind kind) {
         one = i;
     }
     if (!n) return false;
+    // About their middle: one camera turns on the spot.
     for (double& v : c) v /= n;
-    // One aimed camera turns about what it looks at: R orbits it.
-    if (n == 1 && keys[(size_t)one].aim && kind == XformKind::Rotate)
-        for (int d = 0; d < 3; d++) c[d] = keys[(size_t)one].target[d];
+    (void)kind;
     to_shared(c, f.pivot);
     for (int a = 0; a < 3; a++)
         for (int k = 0; k < 3; k++) f.global_axes[a*3+k] = _w2s.R[k*3+a];
@@ -678,22 +938,29 @@ void RenderSession::apply_xform(const Sim3& step_shared, bool scale_fov, double 
                 lens_set_fov(k.lens, std::clamp(fov * factor, 10.0, 360.0));
             continue;
         }
-        const bool orbit_one = n == 1 && k.aim;
-        double p[3];
+        double p[3], t[3];
         step.apply(k.pos, p);
-        const bool pure_turn = _xform.kind() == XformKind::Rotate && n == 1 && !k.aim;
-        if (!pure_turn) for (int d = 0; d < 3; d++) k.pos[d] = p[d];
-        if (k.aim) {
-            if (!orbit_one) {
-                double t[3];
+        for (int d = 0; d < 3; d++) k.pos[d] = p[d];
+        if (_xform.kind() == XformKind::Rotate) {
+            double q[4];
+            rotate_quat(step, k.rot, q);
+            for (int d = 0; d < 4; d++) k.rot[d] = q[d];
+            if (k.aim) {
+                // What it looks at swings round with it, and the roll is
+                // whatever the turn left.
+                step.apply(k.target, t);
+                for (int d = 0; d < 3; d++) k.target[d] = t[d];
+                k.roll = roll_of(k.rot, k.pos, k.target, _project.up);
+                update_aim(k, _project.up);
+            }
+        } else if (k.aim) {
+            // Moved on its own, an aimed camera keeps looking at its point;
+            // moved with others, the point goes along.
+            if (n > 1) {
                 step.apply(k.target, t);
                 for (int d = 0; d < 3; d++) k.target[d] = t[d];
             }
             update_aim(k, _project.up);
-        } else if (_xform.kind() == XformKind::Rotate) {
-            double q[4];
-            rotate_quat(step, k.rot, q);
-            for (int d = 0; d < 4; d++) k.rot[d] = q[d];
         }
     }
     project_changed();
@@ -701,7 +968,13 @@ void RenderSession::apply_xform(const Sim3& step_shared, bool scale_fov, double 
 
 bool RenderSession::owns_left_button() const {
     return _xform.active() || _pick_target || _pick_waiting || _hot >= 0 ||
-           _handle_hot >= 0;
+           _handle_hot >= 0 || _pip_hot || _pip_resizing || over_pip();
+}
+
+bool RenderSession::over_pip() const {
+    return _pip_rect[2] > 0.0f && _mouse_in && _mouse[0] >= _pip_rect[0] &&
+           _mouse[0] <= _pip_rect[0] + _pip_rect[2] && _mouse[1] >= _pip_rect[1] &&
+           _mouse[1] <= _pip_rect[1] + _pip_rect[3];
 }
 
 bool RenderSession::blocks_fly_keys() const {
@@ -715,6 +988,37 @@ bool RenderSession::on_viewport_input(const ViewportInput& in) {
     _mouse[0] = in.x;
     _mouse[1] = in.y;
     _mouse_in = in.hovered;
+
+    // The corner picture: its grip resizes it, a double-click makes it the view.
+    if (_pip_resizing) {
+        if (!in.down) {
+            _pip_resizing = false;
+        } else if (_pip_pane_w > 1.0f) {
+            const float m = px(10.0f);
+            const float w = _pip_right ? _pip_rect[0] + _pip_rect[2] - in.x : in.x - m;
+            _pip_share = std::clamp(w / _pip_pane_w, 0.1f, 0.9f);
+            _preview_key.clear();
+        }
+        return true;
+    }
+    _pip_hot = false;
+    if (_pip_rect[2] > 0.0f && in.hovered) {
+        const float gx = _pip_right ? _pip_rect[0] : _pip_rect[0] + _pip_rect[2];
+        const float gy = _pip_rect[1];
+        _pip_hot = std::fabs(in.x - gx) < px(14.0f) && std::fabs(in.y - gy) < px(14.0f);
+        const bool inside = in.x >= _pip_rect[0] && in.x <= _pip_rect[0] + _pip_rect[2] &&
+                            in.y >= _pip_rect[1] && in.y <= _pip_rect[1] + _pip_rect[3];
+        if (_pip_hot && in.clicked) {
+            _pip_resizing = true;
+            return true;
+        }
+        if (inside && in.double_clicked) {
+            _preview_mode = PreviewMode::Through;
+            _preview_key.clear();
+            return true;
+        }
+        if (_pip_hot || inside) return true;
+    }
     if (_project.keys.empty() && !_pick_target) { _hot = _handle_hot = -1; return false; }
 
     if (_xform.active()) {
@@ -772,31 +1076,17 @@ bool RenderSession::on_viewport_input(const ViewportInput& in) {
 
 void RenderSession::draw_camera(ImDrawList* dl, const ViewProjection& vp, float ox,
                                 float oy, const CameraState& c, unsigned col,
-                                float size, bool axes) const {
+                                float scale, bool axes) const {
     double s[3];
     to_shared(c.pos, s);
     const float sp[3] = {(float)s[0], (float)s[1], (float)s[2]};
     float cx, cy, depth;
     if (!vp.project(sp, cx, cy, depth) || depth <= 0.0f) return;
-    // A fixed size on screen: the cameras stay readable whatever the zoom.
+    // One size in the world for every camera, however near or far it is.
+    const double L = camera_size() * scale;
     double R[9];
     quat_to_matrix3(c.rot, R);
-    const double right_s[3] = {_w2s.R[0]*R[0] + _w2s.R[1]*R[3] + _w2s.R[2]*R[6],
-                               _w2s.R[3]*R[0] + _w2s.R[4]*R[3] + _w2s.R[5]*R[6],
-                               _w2s.R[6]*R[0] + _w2s.R[7]*R[3] + _w2s.R[8]*R[6]};
-    const float h = std::max(depth * 1e-3f, 1e-7f);
-    const float q[3] = {sp[0] + (float)right_s[0] * h, sp[1] + (float)right_s[1] * h,
-                        sp[2] + (float)right_s[2] * h};
-    float qx, qy, qd;
-    double pps = 0.0;
-    if (vp.project(q, qx, qy, qd)) pps = std::hypot(qx - cx, qy - cy) / h;
-    if (!(pps > 1e-9)) return;
-    const double L = size / pps / _w2s.s;   // world units
-    // Frustum corners at depth L, in the camera's own axes (x right, y up,
-    // -z ahead); a wide lens is drawn at a fov a pyramid can still show.
-    const double fov = std::min(lens_fov(c.lens), 150.0) * kPi / 180.0;
-    const double aspect = (double)_project.output.width / std::max(_project.output.height, 1);
-    const double tx = std::tan(fov * 0.5), ty = tx / aspect;
+    // Camera axes are OpenGL's; the lens model's rays are CV (+Y down, +Z on).
     auto world_of = [&](double x, double y, double z, double out[3]) {
         for (int r = 0; r < 3; r++)
             out[r] = c.pos[r] + L * (R[r*3+0]*x + R[r*3+1]*y + R[r*3+2]*z);
@@ -812,42 +1102,106 @@ void RenderSession::draw_camera(ImDrawList* dl, const ViewProjection& vp, float 
     };
     const ImVec2 apex(ox + cx, oy + cy);
     const float th = px(1.5f);
-    // A 360 camera looks everywhere: a horizon ring and an arrow where the
-    // middle of the picture is, not a pyramid.
-    if (c.lens.projection == Projection::Equirect) {
-        ImVec2 last;
-        for (int s = 0; s <= 32; s++) {
-            const double a = 2.0 * kPi * s / 32.0;
-            double w[3];
-            world_of(0.6 * std::sin(a), 0.0, -0.6 * std::cos(a), w);
-            ImVec2 e;
-            if (!screen(w, e)) continue;
-            if (s) dl->AddLine(last, e, col, th);
-            last = e;
+    const ImU32 dim = (col & 0x00ffffff) | 0x60000000;
+
+    // The picture's border as the lens sees it, through the same model the
+    // engine renders with: a pyramid for a plain lens, a curved one with
+    // distortion, a dome for a fisheye, a globe for the whole sphere.
+    const int W = std::max(_project.output.width, 1), H = std::max(_project.output.height, 1);
+    float in[4];
+    lens_intrinsics(c.lens, W, H, in);
+    const int model = std::clamp((int)c.lens.projection, 0, 3);
+    const int tier = model == 3 ? 0 : std::clamp(c.lens.tier, 0, 2);
+    const bool wide = model != 0;
+    auto ray = [&](double px_x, double px_y, double dir[3]) {
+        const double u = (px_x - in[2]) / in[0], v = (px_y - in[3]) / in[1];
+        if (camhost::generate_ray(u, v, model, tier, c.lens.dist, dir)) return;
+        // Past where the lens folds: the last point toward the middle that works.
+        double lo = 0.0, hi = 1.0;
+        dir[0] = dir[1] = 0.0;
+        dir[2] = 1.0;
+        for (int k = 0; k < 12; k++) {
+            const double m = 0.5 * (lo + hi);
+            double d[3];
+            if (camhost::generate_ray(u * m, v * m, model, tier, c.lens.dist, d)) {
+                lo = m;
+                for (int a = 0; a < 3; a++) dir[a] = d[a];
+            } else {
+                hi = m;
+            }
         }
-        double tip[3];
-        world_of(0.0, 0.0, -1.0, tip);
-        ImVec2 t;
-        if (screen(tip, t)) dl->AddLine(apex, t, col, px(2.0f));
-    }
-    const double corners[4][2] = {{-tx, ty}, {tx, ty}, {tx, -ty}, {-tx, -ty}};
-    ImVec2 cs[4];
-    bool ok = c.lens.projection != Projection::Equirect;
-    for (int i = 0; i < 4 && ok; i++) {
-        double w[3];
-        world_of(corners[i][0], corners[i][1], -1.0, w);
-        ok = screen(w, cs[i]);
-    }
-    if (ok) {
+    };
+    auto place = [&](const double d[3], double w[3]) {
+        // A plain lens on the plane one size ahead, a wide one on the sphere.
+        const double k = wide ? 1.0 : 1.0 / std::max(d[2], 1e-6);
+        world_of(d[0] * k, -d[1] * k, -d[2] * k, w);
+    };
+    constexpr int kSeg = 12;
+    auto polyline = [&](double x0, double y0, double x1, double y1, ImU32 cl, float t,
+                        std::vector<ImVec2>* keep) {
+        ImVec2 last;
+        bool have = false;
+        for (int i = 0; i <= kSeg; i++) {
+            const double f = (double)i / kSeg;
+            double d[3], w[3];
+            ray(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, d);
+            place(d, w);
+            ImVec2 e;
+            if (!screen(w, e)) { have = false; continue; }
+            if (have) dl->AddLine(last, e, cl, t);
+            if (keep) keep->push_back(e);
+            last = e;
+            have = true;
+        }
+    };
+    if (model == 3) {
+        for (int i = 0; i <= 4; i++) {
+            polyline(W * i / 4.0, 0, W * i / 4.0, H, i == 2 ? col : dim, i == 2 ? th : px(1.0f), nullptr);
+            polyline(0, H * i / 4.0, W, H * i / 4.0, i == 2 ? col : dim, i == 2 ? th : px(1.0f), nullptr);
+        }
+    } else {
+        const double corners[4][2] = {{0, 0}, {(double)W, 0}, {(double)W, (double)H}, {0, (double)H}};
+        for (int e = 0; e < 4; e++)
+            polyline(corners[e][0], corners[e][1], corners[(e + 1) % 4][0], corners[(e + 1) % 4][1],
+                     col, th, nullptr);
+        if (wide)
+            for (int i = 1; i <= 3; i++) {
+                polyline(W * i / 4.0, 0, W * i / 4.0, H, dim, px(1.0f), nullptr);
+                polyline(0, H * i / 4.0, W, H * i / 4.0, dim, px(1.0f), nullptr);
+            }
+        // The apex to the corners while they are ahead; a wider view to the
+        // middle of the picture instead.
+        bool ahead = true;
+        ImVec2 cs[4];
         for (int i = 0; i < 4; i++) {
-            dl->AddLine(apex, cs[i], col, th);
-            dl->AddLine(cs[i], cs[(i + 1) % 4], col, th);
+            double d[3], w[3];
+            ray(corners[i][0], corners[i][1], d);
+            ahead = ahead && d[2] > 0.05;
+            place(d, w);
+            ahead = ahead && screen(w, cs[i]);
+        }
+        if (ahead) {
+            for (const ImVec2& e : cs) dl->AddLine(apex, e, col, th);
+        } else {
+            double d[3], w[3];
+            ray(W * 0.5, H * 0.5, d);
+            place(d, w);
+            ImVec2 e;
+            if (screen(w, e)) dl->AddLine(apex, e, col, px(2.0f));
         }
         // Which way is up: the triangle on the top edge every camera gizmo has.
-        double tip[3];
-        world_of(0.0, ty * 1.6, -1.0, tip);
-        ImVec2 t;
-        if (screen(tip, t)) dl->AddTriangleFilled(cs[0], cs[1], t, (col & 0x00ffffff) | 0x90000000);
+        double a[3], b[3], m[3], d[3];
+        ray(W * 0.35, 0, d);
+        place(d, a);
+        ray(W * 0.65, 0, d);
+        place(d, b);
+        ray(W * 0.5, 0, d);
+        place(d, m);
+        const double lift = 0.25 * L;
+        for (int r = 0; r < 3; r++) m[r] += R[r*3+1] * lift;
+        ImVec2 ea, eb, em;
+        if (screen(a, ea) && screen(b, eb) && screen(m, em))
+            dl->AddTriangleFilled(ea, eb, em, (col & 0x00ffffff) | 0x90000000);
     }
     if (axes) {
         for (int a = 0; a < 3; a++) {
@@ -865,6 +1219,10 @@ void RenderSession::draw_camera(ImDrawList* dl, const ViewProjection& vp, float 
         }
     }
     dl->AddCircleFilled(apex, px(3.5f), col, 12);
+}
+
+double RenderSession::camera_size() const {
+    return 0.06 * _cam_size / std::max(_w2s.s, 1e-12);
 }
 
 void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
@@ -921,11 +1279,10 @@ void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
         for (int d = 0; d < 4; d++) c.rot[d] = k.rot[d];
         c.lens = k.own_lens ? k.lens : _project.lens_at(i);
         const ImU32 col = selected(i) ? kSelCol : i == _hot ? kHotCol : kKeyCol;
-        draw_camera(dl, vp, v.x, v.y, c, col, px(selected(i) ? 34.0f : 26.0f),
-                    !selected(i) || _project.keys.size() > 1);
+        draw_camera(dl, vp, v.x, v.y, c, col, 1.0f, true);
     }
     if (!_project.keys.empty())
-        draw_camera(dl, vp, v.x, v.y, tr.at(_time), kHeadCol, px(40.0f), false);
+        draw_camera(dl, vp, v.x, v.y, tr.at(_time), kHeadCol, 1.0f, false);
 
     // The handles of the one selected key, or the operator running on it.
     XformFrame f;
@@ -936,17 +1293,21 @@ void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
     }
 
     // The camera's picture in the corner -- the other corner when the
-    // selected camera is under it.
-    if (_preview_mode == PreviewMode::Corner && _frames.texture() && _frames.width() > 0) {
-        const float w = std::min(v.w * 0.32f, px(420.0f));
-        const float h = w * (float)_frames.height() / (float)_frames.width();
-        preview_size(w, h, _preview_w, _preview_h);
+    // selected camera is under it. Its inner corner drags to resize it.
+    _pip_rect[2] = 0.0f;
+    if (_preview_mode == PreviewMode::Corner && !_project.keys.empty() && _frames.texture() &&
+        _frames.width() > 0) {
+        const float aspect = (float)_frames.height() / (float)_frames.width();
         const float m = px(10.0f);
+        float w = std::clamp(v.w * _pip_share, px(120.0f), std::max(px(120.0f), v.w - 2.0f * m));
+        if (w * aspect > v.h - 2.0f * m) w = std::max(px(60.0f), (v.h - 2.0f * m) / aspect);
+        const float h = w * aspect;
+        preview_size(w, h, _preview_w, _preview_h);
         ImVec2 a(v.x + v.w - w - m, v.y + v.h - h - m);
         const int one = single_selected();
         float kx, ky;
-        if (one >= 0 && key_screen(one, vp, kx, ky) && v.x + kx > a.x - px(40.0f) &&
-            v.y + ky > a.y - px(40.0f))
+        if (!_pip_resizing && one >= 0 && key_screen(one, vp, kx, ky) &&
+            v.x + kx > a.x - px(40.0f) && v.y + ky > a.y - px(40.0f))
             a.x = v.x + m;
         const ImVec2 b(a.x + w, a.y + h);
         dl->AddRectFilled(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2),
@@ -954,6 +1315,18 @@ void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
         dl->AddImage((ImTextureID)(intptr_t)_frames.texture(), a, b, ImVec2(0, 1), ImVec2(1, 0));
         dl->AddRect(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), kHeadCol, 0.0f, 0,
                     px(1.5f));
+        // The grip: the corner facing into the pane.
+        const bool right = a.x > v.x + v.w * 0.5f;
+        const ImVec2 g(right ? a.x - 2 : b.x + 2, a.y - 2);
+        const float gs = px(12.0f), dir = right ? 1.0f : -1.0f;
+        dl->AddTriangleFilled(g, ImVec2(g.x + dir * gs, g.y), ImVec2(g.x, g.y + gs),
+                              _pip_hot || _pip_resizing ? kHotCol : kHeadCol);
+        _pip_rect[0] = a.x - v.x;
+        _pip_rect[1] = a.y - v.y;
+        _pip_rect[2] = w;
+        _pip_rect[3] = h;
+        _pip_right = right;
+        _pip_pane_w = v.w;
     }
 }
 
@@ -969,8 +1342,8 @@ FrameSpec RenderSession::frame_spec(double t, int W, int H, bool photo) {
     f.height = H;
     for (int k = 0; k < 3; k++) f.up[k] = _project.up[k];
     for (int k = 0; k < 3; k++) f.background[k] = _project.background[k];
-    const bool png = _project.output.format == ImageFormat::Png;
-    f.transparent = photo && png && _project.output.transparent;
+    f.transparent = _project.output.kind != OutputKind::Video &&
+                    _project.output.format == ImageFormat::PngAlpha;
     for (const Source& s : _project.sources) f.styles.push_back(s.style);
 
     // Which shot, and how far into its transition.
@@ -1171,45 +1544,98 @@ void RenderSession::poll() {
 // Export
 // ===========================================================================
 
-// Asks `spirula encode --probe` which codecs this GPU really encodes -- it
-// encodes two frames with each, since a device can list a codec and still
-// refuse a session.
+// Asks `spirula encode --probe` which codecs this GPU really encodes, and
+// how large -- it encodes two frames with each, since a device can list a
+// codec and still refuse a session -- and ffmpeg which encoders it has.
 void RenderSession::probe_encoder() {
-#ifdef SS_TOOL_ENCODE
     _encoder_probe = 1;
-    _probe = std::thread([this] {
+    _ffmpeg_probe = 1;
+    const std::string ffmpeg = _ffmpeg;
+    _probe = std::thread([this, ffmpeg] {
         std::atomic<bool> cancel{false};
+        std::vector<std::string> lines;
+        if (command_exists(ffmpeg))
+            run_process({ffmpeg, "-hide_banner", "-encoders"}, "",
+                        [&](const std::string& line) { lines.push_back(line); }, cancel);
+        _ffmpeg_encoders = parse_ffmpeg_encoders(lines);
+        _ffmpeg_probe = 2;
+#ifdef SS_TOOL_ENCODE
         int codecs = 0;
         const int code = run_process({app::exe_path(), "encode", "--probe"}, "",
                                      [&](const std::string& line) {
-                                         if (line == "h264") codecs |= 1;
-                                         if (line == "h265") codecs |= 2;
-                                     }, cancel);
+            // "h264 4096 4096": a codec and the largest frame it takes.
+            char name[16] = {};
+            int w = 0, h = 0;
+            if (std::sscanf(line.c_str(), "%15s %d %d", name, &w, &h) < 1) return;
+            const int c = std::string(name) == "h264" ? 0 : std::string(name) == "h265" ? 1
+                        : std::string(name) == "av1" ? 2 : -1;
+            if (c < 0) return;
+            codecs |= 1 << c;
+            _encoder_max[c][0] = w > 0 ? w : 4096;
+            _encoder_max[c][1] = h > 0 ? h : 4096;
+        }, cancel);
         _encoder_codecs = codecs;
         _encoder_probe = code == 0 && codecs ? 2 : 3;
-    });
 #else
-    _encoder_probe = 3;
+        _encoder_probe = 3;
 #endif
+    });
 }
 
-bool RenderSession::builtin_encodes(bool h265) const {
-    return _encoder_probe.load() == 2 && (_encoder_codecs.load() & (h265 ? 2 : 1));
+bool RenderSession::builtin_encodes(Codec codec, int width, int height) const {
+    if (codec == Codec::Gif || _encoder_probe.load() != 2) return false;
+    const int c = (int)codec;
+    return (_encoder_codecs.load() & (1 << c)) && width <= _encoder_max[c][0] &&
+           height <= _encoder_max[c][1];
 }
 
 Encoder RenderSession::pick_encoder() {
     Encoder e;
-    if (builtin_encodes(_project.output.codec == Codec::H265)) {
+    const Output& o = _project.output;
+    int W = std::max(16, o.width), H = std::max(16, o.height);
+    W += W & 1;
+    H += H & 1;
+    const bool gpu = !_fallback_tried && builtin_encodes(o.codec, W, H);
+    Encoder ff;
+    if (command_exists(_ffmpeg)) {
+        const std::vector<std::string>& want = ffmpeg_encoders_for(o.codec);
+        // Until ffmpeg has said what it has, the usual first choice.
+        if (_ffmpeg_probe.load() != 2) {
+            if (!want.empty()) ff = {Encoder::Ffmpeg, _ffmpeg, want[0]};
+        } else {
+            for (const std::string& name : want)
+                if (std::find(_ffmpeg_encoders.begin(), _ffmpeg_encoders.end(), name) !=
+                    _ffmpeg_encoders.end()) {
+                    ff = {Encoder::Ffmpeg, _ffmpeg, name};
+                    break;
+                }
+        }
+    }
+    // The GPU for H.264 and H.265. Its AV1 predicts only from key frames
+    // (src/video/README.md), so an AV1 encoder in ffmpeg makes the smaller file.
+    const bool gpu_first = o.codec != Codec::Av1 || ff.kind == Encoder::None;
+    if (gpu && gpu_first) {
         e.kind = Encoder::BuiltIn;
         e.exe = app::exe_path();
-    } else if (command_exists(_ffmpeg)) {
-        e.kind = Encoder::Ffmpeg;
-        e.exe = _ffmpeg;
+        return e;
+    }
+    if (ff.kind != Encoder::None) return ff;
+    if (gpu) {
+        e.kind = Encoder::BuiltIn;
+        e.exe = app::exe_path();
     }
     return e;
 }
 
-void RenderSession::start_export() {
+int RenderSession::frame_count() const {
+    if (_project.output.kind == OutputKind::Photo || _project.keys.empty()) return 1;
+    const double span = std::max(0.0, _project.duration() - _project.keys.front().time);
+    const long n = std::lround(span * std::max(_project.output.fps, 1.0));
+    // A loop's last frame would be its first again.
+    return (int)std::max(1L, _project.looped() ? n : n + 1);
+}
+
+void RenderSession::start_export(bool no_builtin) {
     if (_job.state != Job::Idle || _project.keys.empty()) return;
     Output& o = _project.output;
     const bool photo = o.kind == OutputKind::Photo;
@@ -1218,7 +1644,7 @@ void RenderSession::start_export() {
         return;
     }
     const double T = _project.duration();
-    if (!photo && T <= 0.0) {
+    if (!photo && T <= _project.keys.front().time) {
         note(msg::need_two_keys.get());
         _status_err = true;
         return;
@@ -1226,12 +1652,14 @@ void RenderSession::start_export() {
     _playing = false;
     if (_job.finisher.joinable()) _job.finisher.join();
     _job.reset();
+    _fallback_tried = no_builtin;
     int W = std::max(16, o.width), H = std::max(16, o.height);
-    if (o.kind == OutputKind::Video) { W += W & 1; H += H & 1; }
+    const bool mp4 = o.kind == OutputKind::Video && o.codec != Codec::Gif;
+    if (mp4) { W += W & 1; H += H & 1; }
     _job.photo = photo;
-    _job.frames = photo ? 1 : std::max(1, (int)std::lround(T * o.fps) + 1);
+    _job.frames = frame_count();
     _job.path = o.path;
-    if (o.kind == OutputKind::Video) {
+    if (mp4) {
         std::error_code ec;
         const fs::path parent = fs::u8path(o.path).parent_path();
         if (!parent.empty()) fs::create_directories(parent, ec);
@@ -1241,19 +1669,21 @@ void RenderSession::start_export() {
             _status_err = true;
             return;
         }
+        _job.builtin = e.kind == Encoder::BuiltIn;
         const bool sphere = !_project.keys.empty() &&
                             _project.lens_at(0).projection == Projection::Equirect;
-        _job.sink = open_pipe_sink(encoder_argv(e, W, H, o.fps, o.codec == Codec::H265,
-                                                o.quality, sphere, o.path), W, H);
+        _job.sink = open_pipe_sink(encoder_argv(e, W, H, o.fps, o.codec, o.quality, sphere,
+                                                o.path), W, H);
+    } else if (o.kind == OutputKind::Video) {
+        _job.sink = open_gif_sink(o.path, W, H, o.fps, _job.frames, o.quality);
     } else {
-        const bool jpeg = o.format == ImageFormat::Jpeg;
         std::string path = o.path;
         if (o.kind == OutputKind::Frames) {
             // A folder: the frames are numbered inside it.
-            path = (fs::u8path(o.path) / (jpeg ? "frame_%05d.jpg" : "frame_%05d.png")).string();
+            path = (fs::u8path(o.path) /
+                    (o.format == ImageFormat::Jpeg ? "frame_%05d.jpg" : "frame_%05d.png")).string();
         }
-        _job.sink = open_image_sink(path, W, H, jpeg, o.jpeg_quality,
-                                    !jpeg && o.transparent);
+        _job.sink = open_image_sink(path, W, H, o.format, o.jpeg_quality);
     }
     _job.state = Job::Preparing;
     _job.started = now_s();
@@ -1279,7 +1709,7 @@ void RenderSession::poll_export() {
     Job& j = _job;
     const Output& o = _project.output;
     int W = std::max(16, o.width), H = std::max(16, o.height);
-    if (o.kind == OutputKind::Video) { W += W & 1; H += H & 1; }
+    if (o.kind == OutputKind::Video && o.codec != Codec::Gif) { W += W & 1; H += H & 1; }
     if (j.state == Job::Preparing) {
         // Effects that rewrite splats need them read first.
         bool ready = true;
@@ -1298,7 +1728,8 @@ void RenderSession::poll_export() {
         do {
             if (!_frames.busy()) {
                 const double t = j.photo ? _time
-                                         : std::min(first + j.frame / o.fps, _project.duration());
+                                         : std::min(first + j.frame / std::max(o.fps, 1.0),
+                                                    _project.duration());
                 _frames.request(frame_spec(t, W, H, j.photo));
             }
             if (!_frames.poll(0.02)) continue;
@@ -1333,6 +1764,12 @@ void RenderSession::poll_export() {
         j.sink.reset();
         j.state = Job::Idle;
         _preview_key.clear();
+        if (!j.ok && j.builtin && command_exists(_ffmpeg)) {
+            // The GPU would not do it after all: ffmpeg, from the first frame.
+            note(format(msg::encoder_fallback, {j.error.substr(0, j.error.find('\n'))}));
+            start_export(true);
+            return;
+        }
         if (j.ok) {
             note(format(msg::render_saved, {j.path}));
         } else {
