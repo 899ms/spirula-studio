@@ -29,6 +29,9 @@ namespace {
 // steer by, seldom enough that a colour upload per frame is not the cost.
 constexpr double kPreviewEvery = 0.07;
 constexpr int kAdjustRange = 1, kAdjustColour = 2;
+// How much of a periodic axis is repeated, dimmed, past each seam: enough to
+// drag a range across, not enough to read as a second plot.
+constexpr double kPlotWrap = 0.12;
 
 std::string number(double v) {
     char buf[32];
@@ -231,17 +234,33 @@ void EditSession::draw_attribute_section(float full) {
     const ImVec2 p1(p0.x + full, p0.y + h);
     dl->AddRectFilled(p0, p1, IM_COL32(18, 20, 24, 255), px(3.0f));
 
+    // A periodic axis is drawn with a dimmed repeat of its far end on each
+    // side: the data is continuous across the seam, so a range dragged across
+    // it needs no gesture of its own. `u` is the axis, -wrap .. 1 + wrap.
+    const double wrap = hist.periodic ? kPlotWrap : 0.0;
+    const double span = 1.0 + 2.0 * wrap;
+    auto to_x = [&](double u) { return p0.x + (float)((u + wrap) / span) * full; };
+    const ImU32 seam = IM_COL32(255, 255, 255, 70);
+
     const float peak = _hist_log_counts ? std::log1p((float)hist.peak)
                                         : (float)hist.peak;
     if (peak > 0.0f) {
         const int cols = std::max(1, (int)full);
+        const int per_col = std::max(1, (int)std::ceil(span * hist.bins / cols));
         for (int x = 0; x < cols; x++) {
             // A column can cover several bins or a bin several columns; the
             // tallest bin under it is what a thin spike needs to stay visible.
-            const int b0 = x * hist.bins / cols;
-            const int b1 = std::max(b0 + 1, (x + 1) * hist.bins / cols);
+            const double u = ((double)x + 0.5) / cols * span - wrap;
+            const double f = u - std::floor(u);
+            const double left = u - 0.5 * span / cols;
+            const int b0 = std::min((int)((left - std::floor(left)) * hist.bins), hist.bins - 1);
             uint32_t all = 0, sel = 0;
-            for (int b = b0; b < b1 && b < hist.bins; b++) {
+            for (int j = 0; j < per_col; j++) {
+                int b = b0 + j;
+                if (b >= hist.bins) {
+                    if (!hist.periodic) break;
+                    b -= hist.bins;
+                }
                 all = std::max(all, hist.all[(size_t)b]);
                 sel = std::max(sel, hist.selected[(size_t)b]);
             }
@@ -250,25 +269,38 @@ void EditSession::draw_attribute_section(float full) {
                 const float v = _hist_log_counts ? std::log1p((float)c) : (float)c;
                 return std::max(1.0f, v / peak * (h - px(4.0f)));
             };
-            const float fx = ((float)x + 0.5f) / (float)cols;
+            const bool repeat = u < 0.0 || u > 1.0;
+            auto ink = [repeat](ImU32 c) {
+                return repeat ? (c & 0x00ffffffu) | (90u << 24) : c;
+            };
             dl->AddRectFilled(ImVec2(p0.x + x, p1.y - height(all)),
                               ImVec2(p0.x + x + 1, p1.y),
-                              attr_tint_colour(info.tint, hist.value_at(fx), fx));
+                              ink(attr_tint_colour(info.tint, hist.value_at(f), (float)f)));
             if (sel)
                 dl->AddRectFilled(ImVec2(p0.x + x, p1.y - height(sel)),
-                                  ImVec2(p0.x + x + 1, p1.y), IM_COL32(255, 120, 20, 255));
+                                  ImVec2(p0.x + x + 1, p1.y), ink(IM_COL32(255, 120, 20, 255)));
         }
     }
+    if (hist.periodic)
+        for (double u : {0.0, 1.0})
+            dl->AddLine(ImVec2(to_x(u), p0.y), ImVec2(to_x(u), p1.y), seam);
 
     // ---- the range ----
     const float mx = (ImGui::GetIO().MousePos.x - p0.x) / std::max(full, 1.0f);
-    const double mf = std::clamp((double)mx, 0.0, 1.0);
-    const float grab = px(6.0f) / std::max(full, 1.0f);
+    const double mf = std::clamp((double)mx, 0.0, 1.0) * span - wrap;
+    const double grab = px(6.0f) / std::max(full, 1.0f) * span;
     if (pressed) {
         begin_adjustable(kAdjustRange);
-        if (_range_set && std::fabs(mf - _range[0]) < grab) _range_drag = 1;
-        else if (_range_set && std::fabs(mf - _range[1]) < grab) _range_drag = 2;
-        else {
+        // An edge can be taken hold of at any of its repeats; the range moves
+        // over by whole turns so the edge in hand is the one under the pointer.
+        for (int k = hist.periodic ? -1 : 0; k <= (hist.periodic ? 1 : 0) && !_range_drag; k++)
+            for (int end = 0; end < 2 && !_range_drag; end++)
+                if (_range_set && std::fabs(mf - (_range[end] + k)) < grab) {
+                    _range_drag = end + 1;
+                    _range[0] += k;
+                    _range[1] += k;
+                }
+        if (!_range_drag) {
             _range_drag = 3;
             _range_anchor = mf;
             _range[0] = _range[1] = mf;
@@ -282,7 +314,10 @@ void EditSession::draw_attribute_section(float full) {
     // A whole-number axis selects whole bins, and says so in whole numbers.
     const double half = hist.whole ? 0.5 : 0.0;
     auto shown = [&](int end) {
-        return hist.value_at(_range[end]) + (end == 0 ? half : -half);
+        double f = _range[end];
+        // Round the circle: 350 to 20, never 350 to 380.
+        if (hist.periodic) f -= end == 1 && f > 0.0 ? std::ceil(f) - 1.0 : std::floor(f);
+        return hist.value_at(f) + (end == 0 ? half : -half);
     };
     auto snap = [&] {
         if (!hist.whole) return;
@@ -306,6 +341,11 @@ void EditSession::draw_attribute_section(float full) {
             std::swap(_range[0], _range[1]);
             if (_range_drag != 3) _range_drag = 3 - _range_drag;
         }
+        // Once round is everything; more than once is nothing new.
+        if (hist.periodic && _range[1] - _range[0] > 1.0) {
+            if (_range_drag == 1) _range[0] = _range[1] - 1.0;
+            else _range[1] = _range[0] + 1.0;
+        }
         snap();
         std::vector<uint8_t> w;
         tool_answer(w);
@@ -313,37 +353,59 @@ void EditSession::draw_attribute_section(float full) {
     }
     if (let_go && _range_drag) {
         _range_drag = 0;
+        if (hist.periodic) {
+            const double turns = std::floor(_range[0]);
+            _range[0] -= turns;
+            _range[1] -= turns;
+        }
         std::vector<uint8_t> w;
         tool_answer(w);
         commit_adjustable(w, label());
     }
     if (_range_set) {
-        const float x0 = p0.x + (float)_range[0] * full, x1 = p0.x + (float)_range[1] * full;
         const ImU32 wash = IM_COL32(255, 255, 255, 34);
-        if (_range_outside) {
-            dl->AddRectFilled(p0, ImVec2(x0, p1.y), wash);
-            dl->AddRectFilled(ImVec2(x1, p0.y), p1, wash);
-        } else {
-            dl->AddRectFilled(ImVec2(x0, p0.y), ImVec2(x1, p1.y), wash);
-        }
-        for (float x : {x0, x1}) {
+        auto band = [&](double a, double b) {
+            const float xa = std::max(to_x(a), p0.x), xb = std::min(to_x(b), p1.x);
+            if (xb > xa) dl->AddRectFilled(ImVec2(xa, p0.y), ImVec2(xb, p1.y), wash);
+        };
+        auto handle = [&](double u) {
+            const float x = to_x(u);
+            if (x < p0.x - 0.5f || x > p1.x + 0.5f) return;
             dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), IM_COL32(255, 255, 255, 220), px(1.5f));
             dl->AddRectFilled(ImVec2(x - px(3.0f), p0.y + h * 0.4f),
                               ImVec2(x + px(3.0f), p0.y + h * 0.6f),
                               IM_COL32(255, 255, 255, 230), px(2.0f));
+        };
+        // Every repeat of the range that is on the plot.
+        for (int k = hist.periodic ? -2 : 0; k <= (hist.periodic ? 1 : 0); k++) {
+            const double a = _range[0] + k, b = _range[1] + k;
+            if (!_range_outside) band(a, b);
+            else if (hist.periodic) band(b, a + 1.0);
+            else {
+                band(-wrap, a);
+                band(b, 1.0 + wrap);
+            }
+            handle(a);
+            handle(b);
         }
     }
     if (hovered && !held) {
-        dl->AddLine(ImVec2(p0.x + (float)mf * full, p0.y),
-                    ImVec2(p0.x + (float)mf * full, p1.y), IM_COL32(255, 255, 255, 70));
-        const double at = hist.value_at(mf);
+        const float x = to_x(mf);
+        dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), IM_COL32(255, 255, 255, 70));
+        const double at = hist.value_at(hist.periodic ? mf - std::floor(mf) : mf);
         ui::SetTooltipRaw(number(hist.whole ? std::round(at) : at));
     }
 
     // The ends of the axis, and what the range is in the attribute's units.
-    ui::TextDisabledRaw(number(hist.end_label(false)));
+    // On a periodic axis they stand at the seams, not at the ends of the plot.
     const std::string top = number(hist.end_label(true));
-    ImGui::SameLine(full - ImGui::CalcTextSize(top.c_str()).x);
+    const float seam0 = to_x(0.0) - p0.x, seam1 = to_x(1.0) - p0.x;
+    if (seam0 > 0.0f) {
+        ImGui::Dummy(ImVec2(0, 0));
+        ImGui::SameLine(seam0 + px(2.0f));
+    }
+    ui::TextDisabledRaw(number(hist.end_label(false)));
+    ImGui::SameLine(seam1 - ImGui::CalcTextSize(top.c_str()).x - (seam0 > 0.0f ? px(2.0f) : 0.0f));
     ui::TextDisabledRaw(top);
 
     if (_range_set) {
@@ -358,10 +420,17 @@ void EditSession::draw_attribute_section(float full) {
         ImGui::SetNextItemWidth(fw);
         ui::InputFloatRaw("##rangehi", &hi, "%.4g");
         changed |= ImGui::IsItemDeactivatedAfterEdit();
-        if (changed) {
+        if (changed && hist.periodic) {
+            // Typed the other way round is the range through the seam.
+            _range[0] = std::clamp(hist.frac_of(lo), 0.0, 1.0);
+            _range[1] = std::clamp(hist.frac_of(hi), 0.0, 1.0);
+            if (_range[1] < _range[0]) _range[1] += 1.0;
+        } else if (changed) {
             _range[0] = std::clamp(hist.frac_of(std::min(lo, hi) - half), 0.0, 1.0);
             _range[1] = std::clamp(hist.frac_of(std::max(lo, hi) + half), 0.0, 1.0);
             snap();
+        }
+        if (changed) {
             begin_adjustable(kAdjustRange);
             std::vector<uint8_t> w;
             tool_answer(w);
@@ -370,6 +439,7 @@ void EditSession::draw_attribute_section(float full) {
     } else {
         ui::TextDisabledWrapped(msg::range_hint);
     }
+    if (hist.periodic) ui::TextDisabledWrapped(msg::periodic_hint, {info.name->get()});
 
     if (ui::Checkbox(msg::range_outside, &_range_outside) && _range_set) {
         begin_adjustable(kAdjustRange);
@@ -418,8 +488,18 @@ void EditSession::draw_density_plot(float full) {
 
     const float w = std::max(full, px(80.0f));
     const float h = std::min(w * 0.82f, px(260.0f));
-    const int nx = std::clamp((int)(w / px(11.0f)), 8, 48);
-    const int ny = std::clamp((int)(h / px(11.0f)), 8, 48);
+    // Cells on the plot, of which `ex`/`ey` at each end of a periodic axis are
+    // dimmed repeats of the far end (the 1D plot's wrap, in whole cells).
+    const int tx = std::clamp((int)(w / px(11.0f)), 8, 48);
+    const int ty = std::clamp((int)(h / px(11.0f)), 8, 48);
+    auto repeats = [](bool periodic, int total) {
+        return periodic ? std::max(2, (int)std::lround(total * kPlotWrap / (1.0 + 2.0 * kPlotWrap)))
+                        : 0;
+    };
+    const int ex = repeats(ax.hist.periodic, tx), ey = repeats(ay.hist.periodic, ty);
+    const int nx = tx - 2 * ex, ny = ty - 2 * ey;
+    _plot_wrap[0] = (float)ex / (float)nx;
+    _plot_wrap[1] = (float)ey / (float)ny;
     const int key[4] = {ax.attr, ay.attr, nx, ny};
     if (_density_rev != _doc->revision() || std::memcmp(key, _density_key, sizeof key) ||
         _density_cell.size() != (size_t)_doc->count()) {
@@ -442,48 +522,55 @@ void EditSession::draw_density_plot(float full) {
     // for where the axes are colours, and the share of it that is selected an
     // orange sector.
     const ImU32 neutral = IM_COL32(125, 135, 150, 255), orange = IM_COL32(255, 120, 20, 255);
-    const ImU32 edge = IM_COL32(16, 18, 22, 255);
-    const float cw = w / (float)nx, ch = h / (float)ny;
+    const float cw = w / (float)tx, ch = h / (float)ty;
     const float rmax = 0.5f * std::min(cw, ch) * 0.94f;
     const float peak = _hist_log_counts ? std::log1p((float)_density.peak)
                                         : (float)_density.peak;
-    for (int cy = 0; cy < ny && peak > 0.0f; cy++)
-        for (int cx = 0; cx < nx; cx++) {
+    const int kSegments = 24;
+    for (int dy = 0; dy < ty && peak > 0.0f; dy++)
+        for (int dx = 0; dx < tx; dx++) {
+            const int cx = ((dx - ex) % nx + nx) % nx, cy = ((dy - ey) % ny + ny) % ny;
             const size_t c = (size_t)cy * nx + cx;
             const uint32_t all = _density.all[c];
             if (!all) continue;
+            const bool repeat = dx < ex || dx >= ex + nx || dy < ey || dy >= ey + ny;
+            auto ink = [repeat](ImU32 col) {
+                return repeat ? (col & 0x00ffffffu) | (90u << 24) : col;
+            };
             const float v = _hist_log_counts ? std::log1p((float)all) : (float)all;
             const float r = std::max(rmax * std::sqrt(v / peak), px(0.9f));
-            const ImVec2 at(p0.x + ((float)cx + 0.5f) * cw, p1.y - ((float)cy + 0.5f) * ch);
+            const ImVec2 at(p0.x + ((float)dx + 0.5f) * cw, p1.y - ((float)dy + 0.5f) * ch);
             const float fx = ((float)cx + 0.5f) / (float)nx, fy = ((float)cy + 0.5f) / (float)ny;
             ImU32 fill = attr_pair_colour(ix, ax.hist, fx, iy, ay.hist, fy);
             const bool tinted = fill != 0;
             if (!tinted) fill = neutral;
-            dl->AddCircleFilled(at, r, fill, 16);
+            dl->AddCircleFilled(at, r, ink(fill), kSegments);
             // A dark colour on a dark plot still has to show how big it is.
             const ImVec4 f4 = ImGui::ColorConvertU32ToFloat4(fill);
             if (tinted && 0.2126f * f4.x + 0.7152f * f4.y + 0.0722f * f4.z < 0.3f)
-                dl->AddCircle(at, r, IM_COL32(150, 158, 170, 140), 16, px(1.0f));
+                dl->AddCircle(at, r, ink(IM_COL32(150, 158, 170, 140)), kSegments, px(1.0f));
             const uint32_t sel = _density.selected[c];
             if (!sel) continue;
-            // On a coloured disc the sector sits INSIDE a ring of the cell's
-            // colour: a selected cell still says what it is, and an orange
-            // cell is not mistaken for a selected one.
-            const float rs = tinted && r > px(3.0f) ? r * 0.72f : r;
-            const bool outline = rs < r;
             if (sel >= all) {
-                dl->AddCircleFilled(at, rs, orange, 16);
-                if (outline) dl->AddCircle(at, rs, edge, 16, px(1.0f));
+                dl->AddCircleFilled(at, r, ink(orange), kSegments);
             } else {
-                const float sweep = 6.2831853f * (float)sel / (float)all;
-                for (int pass = 0; pass < (outline ? 2 : 1); pass++) {
-                    dl->PathLineTo(at);
-                    dl->PathArcTo(at, rs, -1.5707963f, -1.5707963f + sweep, 16);
-                    if (pass == 0) dl->PathFillConvex(orange);
-                    else dl->PathStroke(edge, ImDrawFlags_Closed, px(1.0f));
-                }
+                // The same polygon the disc is, as far round as the share goes.
+                const float share = (float)sel / (float)all;
+                dl->PathLineTo(at);
+                dl->PathArcTo(at, r, -1.5707963f, -1.5707963f + 6.2831853f * share,
+                              std::max(2, (int)std::ceil(kSegments * share)));
+                dl->PathFillConvex(ink(orange));
             }
         }
+    const ImU32 seam = IM_COL32(255, 255, 255, 70);
+    for (int k = 0; k < 2 && ex > 0; k++) {
+        const float x = p0.x + (float)(ex + k * nx) * cw;
+        dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y), seam);
+    }
+    for (int k = 0; k < 2 && ey > 0; k++) {
+        const float y = p1.y - (float)(ey + k * ny) * ch;
+        dl->AddLine(ImVec2(p0.x, y), ImVec2(p1.x, y), seam);
+    }
 
     _plot_size[0] = w;
     _plot_size[1] = h;
@@ -520,8 +607,13 @@ void EditSession::draw_density_plot(float full) {
     dl->PopClipRect();
 
     if (hovered && !_plot_tool.in_progress()) {
-        const double fx = std::clamp((double)(in.x / w), 0.0, 1.0);
-        const double fy = std::clamp(1.0 - (double)(in.y / h), 0.0, 1.0);
+        // Through the repeats back onto the axis itself.
+        auto on_axis = [](double t, int total, int extra, int cells) {
+            const double u = (std::clamp(t, 0.0, 1.0) * total - extra) / cells;
+            return extra > 0 ? u - std::floor(u) : std::clamp(u, 0.0, 1.0);
+        };
+        const double fx = on_axis(in.x / w, tx, ex, nx);
+        const double fy = on_axis(1.0 - in.y / h, ty, ey, ny);
         const int cx = std::min((int)(fx * nx), nx - 1), cy = std::min((int)(fy * ny), ny - 1);
         ui::SetTooltipRaw(number(ax.hist.value_at(fx)) + ", " + number(ay.hist.value_at(fy)) +
                           "   [" + std::to_string(_density.all[(size_t)cy * nx + cx]) + "]");
@@ -530,13 +622,22 @@ void EditSession::draw_density_plot(float full) {
     // The ends of both axes: x under the plot, y beside the name of the tool
     // that is drawing.
     ImGui::SetCursorScreenPos(ImVec2(origin.x, p1.y + px(2.0f)));
-    ui::TextDisabledRaw(number(ax.hist.end_label(false)));
     const std::string right = number(ax.hist.end_label(true));
-    ImGui::SameLine(full - ImGui::CalcTextSize(right.c_str()).x);
+    const float seam0 = (float)ex * cw, seam1 = (float)(ex + nx) * cw;
+    if (ex > 0) {
+        ImGui::Dummy(ImVec2(0, 0));
+        ImGui::SameLine(seam0 + px(2.0f));
+    }
+    ui::TextDisabledRaw(number(ax.hist.end_label(false)));
+    ImGui::SameLine(seam1 - ImGui::CalcTextSize(right.c_str()).x - (ex > 0 ? px(2.0f) : 0.0f));
     ui::TextDisabledRaw(right);
     ui::TextDisabled(msg::plot_y_range, {number(ay.hist.end_label(false)),
                                          number(ay.hist.end_label(true))});
     ui::TextDisabledWrapped(msg::plot_hint, {tool_label(want).get()});
+    for (const AttrAxis* a : {&ax, &ay})
+        if (a->hist.periodic)
+            ui::TextDisabledWrapped(msg::periodic_hint,
+                                    {attr_info(_attrs[(size_t)a->index]).name->get()});
     ui::Checkbox(msg::log_counts, &_hist_log_counts);
     ui::help_on_hover(msg::log_counts_help);
 }
@@ -550,18 +651,27 @@ void EditSession::apply_plot_stroke(const ShapeStroke& s, float w, float h) {
     rasterize_shape(s, W, H, st);
     const int64_t n = _doc->count();
     const uint8_t* alive = _doc->alive();
+    const double wx = _plot_wrap[0], wy = _plot_wrap[1];
     std::vector<uint8_t> hit((size_t)n, 0);
 #pragma omp parallel for schedule(static)
     for (int64_t i = 0; i < n; i++) {
         if (!alive[i]) continue;
         const float vx = ax.values[(size_t)i], vy = ay.values[(size_t)i];
         if (std::isnan(vx) || std::isnan(vy)) continue;
-        // Exactly where the density plot put it, ends of the axes included.
+        // Exactly where the density plot put it, ends of the axes included --
+        // and at each repeat of it, so a stroke across a seam takes both sides.
         const double fx = std::clamp(ax.hist.frac_of(vx), 0.0, 1.0);
         const double fy = std::clamp(ay.hist.frac_of(vy), 0.0, 1.0);
-        const int x = std::min((int)(fx * W), W - 1);
-        const int y = std::min((int)((1.0 - fy) * H), H - 1);
-        if (st.at(x, y)) hit[(size_t)i] = 255;
+        bool in = false;
+        for (int ky = wy > 0 ? -1 : 0; ky <= (wy > 0 ? 1 : 0) && !in; ky++)
+            for (int kx = wx > 0 ? -1 : 0; kx <= (wx > 0 ? 1 : 0) && !in; kx++) {
+                const double ux = fx + kx, uy = fy + ky;
+                if (ux < -wx || ux > 1.0 + wx || uy < -wy || uy > 1.0 + wy) continue;
+                const int x = std::min((int)((ux + wx) / (1.0 + 2.0 * wx) * W), W - 1);
+                const int y = std::min((int)((1.0 - (uy + wy) / (1.0 + 2.0 * wy)) * H), H - 1);
+                in = st.at(x, y);
+            }
+        if (in) hit[(size_t)i] = 255;
     }
     const ImGuiIO& io = ImGui::GetIO();
     Selection next;
@@ -580,8 +690,12 @@ void EditSession::apply_plot_stroke(const ShapeStroke& s, float w, float h) {
 void EditSession::select_plot_cluster(float x, float y, float w, float h) {
     const int nx = _density.nx, ny = _density.ny;
     if (nx <= 0 || _density_cell.size() != (size_t)_doc->count()) return;
-    const int cx = std::clamp((int)(x / w * nx), 0, nx - 1);
-    const int cy = std::clamp((int)((1.0f - y / h) * ny), 0, ny - 1);
+    const int ex = (int)std::lround(_plot_wrap[0] * nx), ey = (int)std::lround(_plot_wrap[1] * ny);
+    auto cell = [](float t, int cells, int extra) {
+        const int d = (int)std::floor(std::clamp(t, 0.0f, 0.9999f) * (cells + 2 * extra)) - extra;
+        return ((d % cells) + cells) % cells;
+    };
+    const int cx = cell(x / w, nx, ex), cy = cell(1.0f - y / h, ny, ey);
     const uint32_t floor_count = std::max<uint32_t>(1, _density.peak / 100);
     std::vector<uint8_t> in_blob((size_t)nx * ny, 0);
     std::vector<int> stack;
@@ -594,7 +708,10 @@ void EditSession::select_plot_cluster(float x, float y, float w, float h) {
         stack.pop_back();
         for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++) {
-                const int ux = c % nx + dx, uy = c / nx + dy;
+                int ux = c % nx + dx, uy = c / nx + dy;
+                // A blob of reds is one blob, on both sides of the seam.
+                if (ex > 0) ux = (ux + nx) % nx;
+                if (ey > 0) uy = (uy + ny) % ny;
                 if (ux < 0 || uy < 0 || ux >= nx || uy >= ny) continue;
                 const size_t u = (size_t)uy * nx + ux;
                 if (in_blob[u] || _density.all[u] < floor_count) continue;

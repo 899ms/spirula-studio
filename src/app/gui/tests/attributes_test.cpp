@@ -165,6 +165,28 @@ void test_histogram() {
     check(picked == 1 && out[2], "a whole bin selects its value only");
 }
 
+void test_periodic() {
+    const gui::AttrInfo& hue = gui::attr_info(gui::Attr::Hue);
+    const std::vector<float> v = {350, 10, 100, 200, std::nanf("")};
+    const std::vector<uint8_t> alive(v.size(), 1);
+    gui::AttrHistogram h;
+    h.build(v, alive.data(), nullptr, hue);
+    check(h.periodic && h.lo == 0 && h.hi == 360, "a hue axis is a circle of 360");
+
+    auto picked = [&](double from, double to, bool outside) {
+        std::vector<uint8_t> out;
+        gui::select_by_range(v, h, from / 360.0, to / 360.0, outside, alive.data(), out);
+        std::string s;
+        for (uint8_t o : out) s += o ? '1' : '0';
+        return s;
+    };
+    check(picked(340, 380, false) == "11000", "a range through the seam takes both sides");
+    check(picked(-20, 20, false) == "11000", "and is the same range a turn earlier");
+    check(picked(340, 380, true) == "00110", "outside is the rest of the circle");
+    check(picked(90, 110, false) == "00100", "a range clear of the seam is an ordinary one");
+    check(picked(30, 390, false) == "11110", "once round is everything that has a hue");
+}
+
 void test_density() {
     const gui::AttrInfo& plain = gui::attr_info(gui::Attr::OriginDistance);
     std::vector<float> x, y;
@@ -259,6 +281,20 @@ void test_pair_colour() {
         check((u & 255) > 230 && ((u >> 8) & 255) < 40, "a narrow axis still ends vivid");
     }
 
+    // Saturation has no hue of its own to be shown in: red stands in.
+    {
+        const gui::AttrHistogram hsat = axis(Attr::Saturation, 0.0, 1.0);
+        const gui::AttrHistogram hsize = axis(Attr::ScaleMean, 0.0, 1.0);
+        const unsigned vivid = gui::attr_pair_colour(gui::attr_info(Attr::Saturation), hsat, 1.0f,
+                                                     gui::attr_info(Attr::ScaleMean), hsize, 0.5f);
+        const unsigned none = gui::attr_pair_colour(gui::attr_info(Attr::Saturation), hsat, 0.0f,
+                                                    gui::attr_info(Attr::ScaleMean), hsize, 0.5f);
+        check((vivid & 255) > 200 && ((vivid >> 8) & 255) < 30, "full saturation alone is red");
+        check((none & 255) == ((none >> 8) & 255), "none is grey");
+    }
+    c = pair(Attr::Saturation, 1.0, Attr::Luma, 0.6);
+    check(c.r > 0.5 && c.g < 0.05, "saturation at a luma is that much red");
+
     const gui::AttrInfo& hue = gui::attr_info(Attr::Hue);
     const gui::AttrInfo& size = gui::attr_info(Attr::ScaleMean);
     const gui::AttrHistogram hh = range(Attr::Hue), hs = axis(Attr::ScaleMean, 0.0, 1.0);
@@ -278,6 +314,7 @@ int main() {
     test_seam();
     test_spacing();
     test_histogram();
+    test_periodic();
     test_density();
     std::printf("%s\n", g_failures ? "FAILED" : "all passed");
     return g_failures ? 1 : 0;

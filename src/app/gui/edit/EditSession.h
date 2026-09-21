@@ -290,6 +290,9 @@ private:
     int _density_key[4] = {-1, -1, 0, 0};
     EditTool _plot_tool;
     float _plot_size[2] = {1, 1};     // as last drawn, for a stroke closed by a key
+    // The repeated part of each plot axis, as a fraction of the axis; 0 for an
+    // axis that is not periodic.
+    float _plot_wrap[2] = {0, 0};
     bool _hist_log_counts = true;
     bool _range_outside = false;
     double _range[2] = {0.25, 0.75};  // fractions of the histogram's axis

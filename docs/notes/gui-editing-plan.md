@@ -233,9 +233,20 @@ the two kernels never had to exist. What shipped:
   difference says, and GREY where the pair contradicts itself (a yellow hue
   cannot lean blue -- and such cells are empty anyway). Colour differences are
   stretched to the axis, because a real scene spans a fraction of the range and
-  unstretched the whole plot is pastel. On a coloured disc the orange sector
-  sits inside a ring of the cell's colour, so a selected cell still says what
-  it is and an orange cell is not mistaken for a selected one.
+  unstretched the whole plot is pastel. Saturation has no hue to be shown in,
+  so red stands in for one, here and in its own histogram. The orange sector
+  is the disc's own polygon as far round as the share goes -- same radius, no
+  outline (an inset, outlined sector was tried and read as a different size).
+- PERIODIC attributes (hue, a camera's heading and roll; `AttrInfo::periodic`)
+  are drawn with a dimmed repeat of the far end past each seam -- 12% of the
+  period in 1D, the same in whole cells in 2D -- with a line at the seam and the
+  axis labels standing there. The data is then visibly continuous across the
+  seam and every tool works across it with no gesture of its own: a range is
+  dragged over it, an edge can be taken hold of at any of its repeats, a box or
+  lasso on the plot takes an element if ANY repeat of it is inside, and a
+  clicked cluster floods round the seam. Typed ends given the other way round
+  (350 to 20) mean the range through the seam. "Outside" still works and is no
+  longer the only way to select the reds.
 - The viewport's tool draws on the plot: box, ellipse, lasso, polygon and
   brush rasterize at plot resolution through the same `rasterize_shape`,
   "piece" takes the cluster of populated cells under the click, anything else

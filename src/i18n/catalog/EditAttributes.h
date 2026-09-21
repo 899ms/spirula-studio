@@ -1643,6 +1643,22 @@ SS_MSG(a_points_seen_help,
     RU("Сколько особенностей снимка стали точками реконструкции. Снимок, у которого их совсем мало, едва связан с остальными."),
     TR("Görüntünün özelliklerinden kaçının yeniden yapılandırmanın noktası olduğu. Çok azına sahip bir görüntü geri kalanına zar zor bağlıdır."));
 
+// Under a plot with a periodic axis ({0} = the attribute's name)
+SS_MSG(periodic_hint,
+    EN("{0} runs in a circle: the dimmed ends repeat the other side, so a selection can be dragged straight across the line where it starts over."),
+    JA("{0} は一周して元に戻ります。薄く表示された両端は反対側の繰り返しなので、値が折り返す線をまたいでそのまま選択できます。"),
+    ZH_HANS("{0} 是首尾相接的：两端变暗的部分重复了另一侧，因此可以直接拖过数值重新开始的那条线进行选择。"),
+    ZH_HANT("{0} 是首尾相接的：兩端變暗的部分重複了另一側，因此可以直接拖過數值重新開始的那條線進行選取。"),
+    KO("{0}은(는) 한 바퀴 돌아 처음으로 이어집니다. 흐리게 표시된 양 끝은 반대쪽을 반복한 것이므로, 값이 다시 시작되는 선을 가로질러 그대로 선택할 수 있습니다."),
+    DE("{0} läuft im Kreis: Die abgedunkelten Enden wiederholen die andere Seite, sodass sich eine Auswahl direkt über die Linie ziehen lässt, an der es von vorn beginnt."),
+    FR("{0} forme une boucle : les extrémités estompées répètent l'autre côté, de sorte qu'une sélection peut franchir directement la ligne où les valeurs recommencent."),
+    ES("{0} da la vuelta en círculo: los extremos atenuados repiten el otro lado, así que una selección puede arrastrarse directamente a través de la línea donde vuelve a empezar."),
+    PT("{0} dá a volta em círculo: as pontas esmaecidas repetem o outro lado, então uma seleção pode ser arrastada direto através da linha onde recomeça."),
+    IT("{0} gira in cerchio: le estremità attenuate ripetono l'altro lato, quindi una selezione può essere trascinata direttamente attraverso la linea dove ricomincia."),
+    NL("{0} loopt in een cirkel: de gedimde uiteinden herhalen de andere kant, zodat je een selectie zo over de lijn kunt slepen waar het opnieuw begint."),
+    RU("{0} идёт по кругу: затемнённые края повторяют противоположную сторону, поэтому выделение можно протянуть прямо через линию, где отсчёт начинается заново."),
+    TR("{0} bir daire çizer: soluk uçlar karşı tarafı yineler, böylece bir seçim değerin yeniden başladığı çizginin üzerinden doğrudan sürüklenebilir."));
+
 }  // namespace attr
 }  // namespace msg
 }  // namespace i18n

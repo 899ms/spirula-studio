@@ -47,7 +47,7 @@ enum class Attr : int {
 };
 
 // How the histogram bars are coloured, where that says something.
-enum class AttrTint { None, Red, Green, Blue, Gray, Hue, BlueYellow, RedCyan };
+enum class AttrTint { None, Red, Green, Blue, Gray, Hue, Saturation, BlueYellow, RedCyan };
 
 struct AttrInfo {
     Attr id;
@@ -60,6 +60,8 @@ struct AttrInfo {
     double lo = 0.0, hi = 0.0;
     // Whole numbers: one bin each, or the plot is a comb.
     bool integer = false;
+    // The top of the range IS the bottom again (a hue, a compass heading).
+    bool periodic = false;
 };
 const AttrInfo& attr_info(Attr a);
 // Worth a worker thread: a neighbour search, a pass over every camera per
@@ -89,6 +91,7 @@ struct AttrHistogram {
     static constexpr int kBins = 256;
     int bins = kBins;                   // fewer for a whole-number attribute
     bool whole = false;                 // one bin per whole number
+    bool periodic = false;              // fraction 1 is fraction 0 again
     bool log = false;
     double lo = 0.0, hi = 1.0;          // bin-axis range (log10 when `log`)
     std::vector<uint32_t> all, selected;
@@ -114,8 +117,8 @@ unsigned attr_pair_colour(const AttrInfo& a, const AttrHistogram& ha, float fa,
                           const AttrInfo& b, const AttrHistogram& hb, float fb);
 
 // Live elements within the fractions [f0, f1] of `h`'s axis. An end at 0 or
-// 1 is open: that is where the out-of-range values were binned. `outside` is
-// the complement, which is also how a hue range runs through red.
+// 1 is open: that is where the out-of-range values were binned. On a periodic
+// axis the range runs UP from f0 to f1 through the seam (f1 may pass 1).
 void select_by_range(const std::vector<float>& v, const AttrHistogram& h,
                      double f0, double f1, bool outside, const uint8_t* alive,
                      std::vector<uint8_t>& out);

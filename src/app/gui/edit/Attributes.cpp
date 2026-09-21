@@ -48,8 +48,9 @@ const AttrInfo kTable[(int)Attr::Count] = {
     {Attr::Luma, &msg::a_luma, &msg::a_luma_help, false, AttrTint::Gray},
     {Attr::ChromaU, &msg::a_chroma_u, &msg::a_chroma_help, false, AttrTint::BlueYellow},
     {Attr::ChromaV, &msg::a_chroma_v, &msg::a_chroma_help, false, AttrTint::RedCyan},
-    {Attr::Hue, &msg::a_hue, &msg::a_hue_help, false, AttrTint::Hue, 0.0, 360.0},
-    {Attr::Saturation, &msg::a_saturation, &msg::a_saturation_help, false, AttrTint::None},
+    {Attr::Hue, &msg::a_hue, &msg::a_hue_help, false, AttrTint::Hue, 0.0, 360.0, false, true},
+    {Attr::Saturation, &msg::a_saturation, &msg::a_saturation_help, false,
+     AttrTint::Saturation},
     {Attr::CameraDistance, &msg::a_camera_distance, &msg::a_camera_distance_help, true,
      AttrTint::None},
     {Attr::OriginDistance, &msg::a_origin_distance, &msg::a_origin_distance_help, false, AttrTint::None},
@@ -72,8 +73,10 @@ const AttrInfo kTable[(int)Attr::Count] = {
     {Attr::FocalLength, &msg::a_focal, &msg::a_focal_help, false, AttrTint::None},
     {Attr::FieldOfView, &msg::a_fov, &msg::a_fov_help, false, AttrTint::None},
     {Attr::Elevation, &msg::a_elevation, &msg::a_elevation_help, false, AttrTint::None, -90.0, 90.0},
-    {Attr::Roll, &msg::a_roll, &msg::a_roll_help, false, AttrTint::None, -180.0, 180.0},
-    {Attr::Heading, &msg::a_heading, &msg::a_heading_help, false, AttrTint::None, 0.0, 360.0},
+    {Attr::Roll, &msg::a_roll, &msg::a_roll_help, false, AttrTint::None, -180.0, 180.0,
+     false, true},
+    {Attr::Heading, &msg::a_heading, &msg::a_heading_help, false, AttrTint::None, 0.0, 360.0,
+     false, true},
     {Attr::LookAway, &msg::a_look_away, &msg::a_look_away_help, false, AttrTint::None, 0.0, 180.0},
     {Attr::NeighbourDistance, &msg::a_cam_neighbour, &msg::a_cam_neighbour_help, true, AttrTint::None},
     {Attr::PointsSeen, &msg::a_points_seen, &msg::a_points_seen_help, false, AttrTint::None, 0.0, 0.0, true},
@@ -573,6 +576,11 @@ unsigned attr_tint_colour(AttrTint tint, double v, float frac) {
             const int i = std::clamp((int)h, 0, 5);
             return rgb(0.2 + 0.7 * c[i][0], 0.2 + 0.7 * c[i][1], 0.2 + 0.7 * c[i][2]);
         }
+        case AttrTint::Saturation: {
+            // No hue to show it in, so red stands in for one.
+            const double s = std::clamp(v, 0.0, 1.0);
+            return rgb(0.9, 0.9 * (1.0 - s), 0.9 * (1.0 - s));
+        }
         case AttrTint::BlueYellow: {
             const double yellow[3] = {0.95, 0.85, 0.15}, blue[3] = {0.2, 0.4, 1.0};
             return opponent(yellow, blue);
@@ -692,14 +700,14 @@ bool pair_rgb(Attr a, double va, Attr b, double vb, double out[3]) {
     }
     if (!la || b != Attr::Saturation) return false;
     // Saturation with no hue beside it: a colour difference still says which
-    // way the colour leans, a channel is its own hue, and luma has none.
+    // way the colour leans, a channel is its own hue, and luma borrows red.
     const double s = std::clamp(vb, 0.0, 1.0);
     const double white = ra[0] + ra[1] + ra[2];
     if (std::fabs(white) < 1e-6)
         hsv_rgb(hue_toward(ra, va < 0 ? -1.0 : 1.0),
                 s * std::min(std::fabs(va) / 0.02, 1.0), 0.95, out);
     else if (a == Attr::Luma)
-        out[0] = out[1] = out[2] = std::clamp(va, 0.0, 1.0);
+        hsv_rgb(0.0, s, std::clamp(va, 0.0, 1.0), out);   // the stand-in red
     else
         hsv_rgb(hue_toward(ra, 1.0), s, std::clamp(va, 0.0, 1.0), out);
     return true;
@@ -938,6 +946,7 @@ void AttrHistogram::build(const std::vector<float>& v, const uint8_t* alive,
     log = info.log;
     bins = kBins;
     whole = false;
+    periodic = info.periodic && info.hi > info.lo;
     all.assign(kBins, 0);
     selected.assign(kBins, 0);
     peak = 0;
@@ -1047,6 +1056,20 @@ void select_by_range(const std::vector<float>& v, const AttrHistogram& h,
     const int64_t n = (int64_t)v.size();
     out.assign((size_t)n, 0);
     if (f0 > f1) std::swap(f0, f1);
+    if (h.periodic) {
+        // How far UP the circle from f0, against how far the range goes.
+        const double width = f1 - f0, span = h.hi - h.lo;
+#pragma omp parallel for schedule(static)
+        for (int64_t i = 0; i < n; i++) {
+            if (alive && !alive[i]) continue;
+            const float x = v[(size_t)i];
+            if (std::isnan(x)) continue;
+            double g = ((double)x - h.lo) / span - f0;
+            g -= std::floor(g);
+            if ((width >= 1.0 || g <= width) != outside) out[(size_t)i] = 255;
+        }
+        return;
+    }
     const double inf = std::numeric_limits<double>::infinity();
     // An end dragged to the edge of the plot means "and everything past it".
     const double a0 = f0 <= 0.0 ? -inf : h.lo + (h.hi - h.lo) * f0;
