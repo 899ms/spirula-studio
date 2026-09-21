@@ -652,12 +652,14 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         _dirty = true;
     }
 
-    // Keyboard (viewer.html listens on the window; here: while the pointer
-    // is over the viewport or dragging, and no text field wants input).
-    if ((hovered || _dragging) && !io.WantTextInput) {
+    // Keyboard: while the pointer is over the viewport or dragging, no text
+    // field wants input, and no modifier is down -- Ctrl+D is "deselect", and
+    // a viewport that also reads the D moves unasked.
+    const bool plain = !io.KeyCtrl && !io.KeyAlt && !io.KeyShift && !io.KeySuper;
+    if ((hovered || _dragging) && !io.WantTextInput && plain) {
         // A tool owns the letter keys -- they are its grammar -- so with one
         // active the camera keeps only what nothing competes for.
-        const bool letters = !(_interactor && _interactor->owns_left_button());
+        const bool letters = !(_interactor && _interactor->blocks_fly_keys());
         NavCamera::Keys k;
         k.w = letters && ImGui::IsKeyDown(ImGuiKey_W);
         k.a = letters && ImGui::IsKeyDown(ImGuiKey_A);
@@ -802,6 +804,11 @@ void ViewportPanel::draw_controls(bool engine) {
                 if (ui::SelectableRaw(center_label(i), i == _center_mode) &&
                     i != _center_mode) {
                     _center_mode = i;
+                    // What is live now, not what the file held.
+                    if (_center_provider) {
+                        dsparse::CenterTable live;
+                        if (_center_provider(live)) _centers = live;
+                    }
                     // The model stays where it is; the pivot moves to the new
                     // centre, and so does the pose Reset view returns to.
                     float c[3];

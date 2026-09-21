@@ -43,6 +43,9 @@ public:
     // A polygon is closed by Enter or a right click; Esc drops the stroke.
     bool commit_pending(ShapeStroke& out);
     void cancel();
+    // Take the last corner back, which is what Ctrl+Z means while a polygon
+    // is still being drawn.
+    bool pop_point();
 
     void draw_overlay(ImDrawList* dl, const ImVec2& origin) const;
 

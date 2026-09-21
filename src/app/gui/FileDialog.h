@@ -15,9 +15,9 @@ namespace gui {
 
 class FileDialog {
 public:
-    // FileOrFolder: a model is a file and a reconstruction is a directory.
-    // The desktop's own picker returns only one of the two, so there it is a
-    // file picker and a reconstruction is named by a file inside it.
+    // FileOrFolder: a model is a file, a reconstruction a directory. Only
+    // macOS's panel returns either; elsewhere the desktop picker takes a FILE
+    // and a reconstruction is named by one of its own (a transforms.json).
     enum class Mode { Folder, File, Save, FileOrFolder };
 
     // Whether to prefer the desktop's picker. Persisted by GuiApp; the

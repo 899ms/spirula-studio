@@ -58,15 +58,17 @@ void FileDialog::open(const std::string& title, Mode mode,
     _selected.clear();
     _result.clear();
     _results.clear();
+    const NativeDialog::Mode nm = mode == Mode::Folder
+                                      ? NativeDialog::Mode::Folder
+                                  : mode == Mode::Save
+                                      ? NativeDialog::Mode::Save
+                                  : mode == Mode::FileOrFolder
+                                      ? NativeDialog::Mode::FileOrFolder
+                                      : NativeDialog::Mode::File;
     if (_use_native && NativeDialog::available()) {
         // A second request while one is up is a repeated click, not a reason
         // to put the fallback browser on top of the system picker.
         if (_native.busy()) return;
-        const NativeDialog::Mode nm = mode == Mode::Folder
-                                          ? NativeDialog::Mode::Folder
-                                      : mode == Mode::Save
-                                          ? NativeDialog::Mode::Save
-                                          : NativeDialog::Mode::File;
         if (_native.open(title, nm, extensions, _cwd, _multi, _save_name))
             return;
     }

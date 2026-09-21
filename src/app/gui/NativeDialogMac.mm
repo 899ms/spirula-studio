@@ -9,13 +9,14 @@
 namespace gui {
 
 std::vector<std::string> mac_pick(const std::string& title, bool folder,
+                                  bool also_folders,
                                   const std::vector<std::string>& extensions,
                                   const std::string& start_dir, bool multi) {
     std::vector<std::string> out;
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         panel.canChooseFiles = !folder;
-        panel.canChooseDirectories = folder;
+        panel.canChooseDirectories = folder || also_folders;
         panel.canCreateDirectories = folder;
         panel.allowsMultipleSelection = multi && !folder;
         if (!title.empty())

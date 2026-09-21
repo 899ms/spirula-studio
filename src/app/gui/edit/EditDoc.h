@@ -12,9 +12,12 @@
 // and its cameras -- and every tool works on the one that is current.
 
 #include "app/gui/edit/Selection.h"
+#include "data/SceneCenter.h"
 #include "i18n/Message.h"
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,14 +26,23 @@ namespace gui {
 
 class EditDoc;
 
+// What produced a selection, carried along with the step that recorded it so
+// that changing a setting after walking the history re-runs the right thing.
+// Opaque here: the editing session is what knows the shape of one.
+struct SelectRecipe;
+
 // The only thing allowed to change a document.
 struct EditOp {
     virtual ~EditOp() = default;
     virtual void apply(EditDoc& doc) = 0;
     virtual void undo(EditDoc& doc) = 0;
-    // As it appears in the history list.
-    virtual const spirula::i18n::Msg& name() const = 0;
+    // As it appears in the history list. Already translated and already
+    // formatted, because a step naming a setting and its new value is a
+    // sentence with a {0} in it rather than one fixed string.
+    virtual std::string label() const = 0;
     virtual size_t bytes() const = 0;
+    // Set on the steps that are a selection, null on the rest.
+    virtual std::shared_ptr<const SelectRecipe> recipe() const { return {}; }
 };
 
 // What "Save a copy" can write this document as. `ext` is the extension a
@@ -78,6 +90,11 @@ public:
     // A neighbour distance that suits this cloud, from its density.
     float suggested_radius() const { return at(_cur).radius_hint; }
 
+    // Where the LIVE elements are, for the viewport's centring menu: it
+    // follows the edit rather than the file. False when there is nothing to
+    // centre on.
+    virtual bool live_centers(dsparse::CenterTable& out) const;
+
     // The element under a pixel, where the document can answer exactly -- a
     // mesh intersects its own faces. -1 leaves it to the nearest projection.
     virtual int64_t pick(const struct ViewProjection&, float, float) const {
@@ -111,8 +128,11 @@ public:
     // Walk to a point in the history, which is what the list in the panel is
     // for: reaching a state ten steps back without ten keystrokes.
     void goto_step(int head);
-    const spirula::i18n::Msg* undo_name() const;
-    const spirula::i18n::Msg* redo_name() const;
+    std::string undo_name() const;
+    std::string redo_name() const;
+    // The recipe of the step the history currently stands on, which is what a
+    // setting changed here should re-run. Null when that step is not one.
+    std::shared_ptr<const SelectRecipe> current_recipe() const;
     size_t history_bytes() const { return _bytes; }
     const std::vector<std::unique_ptr<EditOp>>& history() const { return _ops; }
     int history_head() const { return _head; }
@@ -136,8 +156,16 @@ public:
 
     // ---- saving ----
     virtual std::vector<SaveTarget> save_targets() const = 0;
-    // Writes the live elements only. Throws std::runtime_error.
-    virtual void save(int target, const std::string& path) = 0;
+    // Writes the live elements only, off the GUI thread, bumping `progress`
+    // once per file it finishes. Throws std::runtime_error.
+    virtual void save(int target, const std::string& path,
+                      std::atomic<int>* progress = nullptr) = 0;
+    // How many files that would be, for the bar.
+    virtual int save_steps(int target) const { (void)target; return 1; }
+    // How many OTHER files a save would also rewrite, and the switch that
+    // says whether to; 0 when the document has no siblings.
+    virtual int linked_count() const { return 0; }
+    virtual void set_linked(bool on) { (void)on; }
     // What "Save" (as opposed to "Save a copy") would overwrite, "" when the
     // document has no home to write back to.
     virtual std::string default_save_path(int target) const { (void)target; return {}; }
@@ -197,6 +225,14 @@ std::unique_ptr<EditOp> make_reveal_op(EditDoc& doc);
 // A selection change, so that a mis-aimed lasso is one Ctrl+Z away like
 // everything else. Both sides are run-length encoded.
 std::unique_ptr<EditOp> make_select_op(EditDoc& doc, std::vector<uint8_t> next,
-                                       const spirula::i18n::Msg& name);
+                                       std::string label,
+                                       std::shared_ptr<const SelectRecipe> recipe);
+
+// An op that is not about the elements at all: a setting the tools read,
+// recorded so that changing one is as undoable as anything else. `apply`
+// takes true to set the new value and false to put the old one back.
+std::unique_ptr<EditOp> make_setting_op(std::function<void(bool)> apply,
+                                        std::string label,
+                                        std::shared_ptr<const SelectRecipe> recipe);
 
 }  // namespace gui

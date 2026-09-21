@@ -52,6 +52,13 @@ const ActRow kActs[] = {
     {Act::Add,       "2",      ImGuiKey_2,     false, false, false, false},
     {Act::Subtract,  "3",      ImGuiKey_3,     false, false, false, false},
     {Act::Intersect, "4",      ImGuiKey_4,     false, false, false, false},
+    // Aliases: what someone arriving from another editor reaches for. Later
+    // than the primaries, so the key printed on a button is still the first.
+    {Act::All,       "Ctrl+A", ImGuiKey_A,     false, true,  false, false},
+    {Act::None,      "Ctrl+D", ImGuiKey_D,     false, true,  false, false},
+    {Act::Invert,    "Ctrl+I", ImGuiKey_I,     false, true,  false, false},
+    {Act::Delete,    "Del",    ImGuiKey_Delete,false, false, false, false},
+    {Act::Redo,      "Ctrl+Shift+Z", ImGuiKey_Z, true, true, false, false},
 };
 constexpr int kNumActs = (int)(sizeof kActs / sizeof kActs[0]);
 
@@ -99,6 +106,56 @@ bool act_button(Act a, const Msg& m, float w) {
     return key_button(m, w, act_row(a).key);
 }
 
+// A checkbox whose change goes through the history. The widget writes a
+// scratch copy so the setting itself only moves inside the op.
+void option_box(EditSession& s, const Msg& m, bool* slot) {
+    bool v = *slot;
+    if (ui::Checkbox(m, &v)) s.set_option(slot, v, m);
+}
+
+// A slider the same way, committed ONCE when the drag ends -- one history
+// entry per gesture rather than one per frame. The value it started from is
+// what undo goes back to.
+void option_slider(EditSession& s, const Msg& m, float* slot, float lo,
+                   float hi, const char* fmt, float w) {
+    static const void* active = nullptr;
+    static float started_at = 0.0f;
+    float v = *slot;
+    ImGui::SetNextItemWidth(w);
+    ui::SliderFloat(m, &v, lo, hi, fmt);
+    if (ImGui::IsItemActivated()) {
+        active = slot;
+        started_at = *slot;
+    }
+    if (v != *slot) *slot = v;              // live, so the preview follows
+    if (ImGui::IsItemDeactivatedAfterEdit() && active == slot) {
+        const float now = *slot;
+        *slot = started_at;
+        s.set_number(slot, now, m);
+        active = nullptr;
+    }
+}
+
+void option_slider_int(EditSession& s, const Msg& m, int* slot, int lo, int hi,
+                       float w) {
+    static const void* active = nullptr;
+    static int started_at = 0;
+    int v = *slot;
+    ImGui::SetNextItemWidth(w);
+    ui::SliderInt(m, &v, lo, hi);
+    if (ImGui::IsItemActivated()) {
+        active = slot;
+        started_at = *slot;
+    }
+    if (v != *slot) *slot = v;
+    if (ImGui::IsItemDeactivatedAfterEdit() && active == slot) {
+        const int now = *slot;
+        *slot = started_at;
+        s.set_number(slot, now, m);
+        active = nullptr;
+    }
+}
+
 }  // namespace
 
 
@@ -116,8 +173,12 @@ void EditSession::handle_keys() {
         const ToolRow& row = tool_table()[i];
         if (row.fly_key && fly) continue;
         if (!io.KeyCtrl && !io.KeyAlt && !io.KeyShift &&
-            ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false))
+            ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false)) {
             _tool.set_id(row.id);
+            // The key is still down this frame; the camera must not also read
+            // it on the way into Navigate.
+            if (row.fly_key) _fly_block_key = row.imgui_key;
+        }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) _tool.cancel();
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
@@ -133,6 +194,13 @@ void EditSession::handle_keys() {
     if (ImGui::IsKeyPressed(ImGuiKey_RightBracket, true))
         _tool.set_brush_radius(std::min(400.0f, _tool.brush_radius() * 1.18f));
 
+    // While a polygon is still being drawn, Ctrl+Z belongs to the polygon:
+    // taking the last corner back is what it obviously means there.
+    if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
+        _tool.id() == ToolId::Polygon && _tool.in_progress() &&
+        _tool.pop_point())
+        return;
+
     for (const ActRow& r : kActs) {
         if (!act_pressed(r, fly)) continue;
         switch (r.act) {
@@ -143,28 +211,19 @@ void EditSession::handle_keys() {
             case Act::Shrink:    grow_shrink(false); break;
             case Act::Floaters:  keep_largest_components(); break;
             case Act::Delete:
-                if (!_doc->sel().empty()) {
-                    _doc->run(make_hide_op(*_doc, false));
-                    _last = LastAction{};
-                }
+                if (!_doc->sel().empty()) _doc->run(make_hide_op(*_doc, false));
                 break;
             case Act::Isolate:
-                if (!_doc->sel().empty()) {
-                    _doc->run(make_hide_op(*_doc, true));
-                    _last = LastAction{};
-                }
+                if (!_doc->sel().empty()) _doc->run(make_hide_op(*_doc, true));
                 break;
             case Act::Restore:
                 _doc->run(make_reveal_op(*_doc));
-                _last = LastAction{};
                 break;
             case Act::Undo:
                 _doc->undo();
-                _last = LastAction{};
                 break;
             case Act::Redo:
                 _doc->redo();
-                _last = LastAction{};
                 break;
             case Act::Replace:   _combine = (int)Combine::Replace; break;
             case Act::Add:       _combine = (int)Combine::Add; break;
@@ -173,17 +232,16 @@ void EditSession::handle_keys() {
         }
         break;
     }
-    // Ctrl+Shift+Z is the other spelling of redo everywhere else.
-    if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        _doc->redo();
-        _last = LastAction{};
-    }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) _ask_overwrite = true;
 }
 
 
 void EditSession::draw_status() {
     if (!_doc) return;
+    if (busy()) {
+        ui::Text(msg::working);
+        return;
+    }
     ui::TextDisabled(_tool.hint());
     if (_tool.owns_pointer()) {
         ImGui::SameLine();
@@ -210,6 +268,16 @@ void EditSession::draw_panel() {
         label_w = std::max(label_w, ImGui::CalcTextSize(m->get()).x);
     const float slider_w =
         std::max(full - label_w - st.ItemInnerSpacing.x, full * 0.3f);
+
+    // The body scrolls; the strip under it does not, and its height is
+    // reserved whether or not anything is in it. A banner that appears at the
+    // top of a panel moves every control out from under the cursor.
+    const float strip = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("##editbody", ImVec2(0, -strip));
+
+    // A long walk over the elements is in flight and every action below
+    // depends on what it finds.
+    ImGui::BeginDisabled(busy());
 
     // ---- what a tool works on ----
     if (d.layer_count() > 1) {
@@ -261,32 +329,41 @@ void EditSession::draw_panel() {
                                           &msg::combine_intersect};
         const Act acts[kNumCombine] = {Act::Replace, Act::Add, Act::Subtract,
                                        Act::Intersect};
+        // Packed greedily: four of these do not fit on one line in a narrow
+        // panel, and the fourth going off the edge is how it used to look.
+        float x = 0.0f;
         for (int i = 0; i < kNumCombine; i++) {
-            if (i) ImGui::SameLine();
+            const char* key = act_row(acts[i]).key;
+            const float w = ImGui::GetFrameHeight() + st.ItemInnerSpacing.x +
+                            ImGui::CalcTextSize(labels[i]->get()).x +
+                            st.ItemInnerSpacing.x +
+                            ImGui::CalcTextSize(key).x;
+            if (i && x + st.ItemSpacing.x + w <= full) {
+                ImGui::SameLine();
+                x += st.ItemSpacing.x + w;
+            } else {
+                x = w;
+            }
             if (ui::RadioButton(*labels[i], _combine == i)) _combine = i;
             ImGui::SameLine(0.0f, st.ItemInnerSpacing.x);
-            ui::TextDisabledRaw(act_row(acts[i]).key);
+            ui::TextDisabledRaw(key);
         }
         ui::help_on_hover(msg::combine_help);
     }
 
-    if (ui::Checkbox(msg::opt_front_only, &_opt.front_only)) reapply_last();
+    option_box(*this, msg::opt_front_only, &_opt.front_only);
     ui::help_on_hover(msg::opt_front_only_help);
     if (d.kind() == EditDoc::Kind::Splats) {
-        if (ui::Checkbox(msg::opt_by_extent, &_opt.by_extent)) reapply_last();
+        option_box(*this, msg::opt_by_extent, &_opt.by_extent);
         ui::help_on_hover(msg::opt_by_extent_help);
     }
-    if (ui::Checkbox(msg::opt_depth_limit, &_opt.depth_limit)) reapply_last();
+    option_box(*this, msg::opt_depth_limit, &_opt.depth_limit);
     ui::help_on_hover(msg::opt_depth_limit_help);
     if (_opt.depth_limit) {
-        ImGui::SetNextItemWidth(slider_w);
-        if (ui::SliderFloat(msg::opt_depth_near, &_opt.near_frac, 0.0f, 1.0f,
-                            "%.2f"))
-            reapply_last();
-        ImGui::SetNextItemWidth(slider_w);
-        if (ui::SliderFloat(msg::opt_depth_far, &_opt.far_frac, 0.0f, 1.0f,
-                            "%.2f"))
-            reapply_last();
+        option_slider(*this, msg::opt_depth_near, &_opt.near_frac, 0.0f, 1.0f,
+                      "%.2f", slider_w);
+        option_slider(*this, msg::opt_depth_far, &_opt.far_frac, 0.0f, 1.0f,
+                      "%.2f", slider_w);
     }
 
     if (act_button(Act::Grow, msg::act_grow, half)) grow_shrink(true);
@@ -297,24 +374,17 @@ void EditSession::draw_panel() {
     ui::help_on_hover(msg::act_floaters_help);
 
     if (ui::CollapsingHeader(msg::sec_advanced)) {
-        ImGui::SetNextItemWidth(slider_w);
-        if (ui::SliderFloat(msg::act_reach, &_radius_mul, 0.25f, 12.0f, "%.2f"))
-            reapply_last();
+        option_slider(*this, msg::act_reach, &_radius_mul, 0.0f, 6.0f, "%.2f",
+                      slider_w);
         ui::help_on_hover(msg::act_reach_help);
-        ImGui::SetNextItemWidth(slider_w);
-        if (ui::SliderInt(msg::act_pieces_kept, &_keep_components, 1, 32))
-            reapply_last();
-        ImGui::SetNextItemWidth(slider_w);
-        if (ui::SliderFloat(msg::opt_front_tol, &_opt.front_tol, 0.0f, 0.5f,
-                            "%.3f"))
-            reapply_last();
+        option_slider_int(*this, msg::act_pieces_kept, &_keep_components, 1, 32,
+                          slider_w);
+        option_slider(*this, msg::opt_front_tol, &_opt.front_tol, 0.0f, 0.5f,
+                      "%.3f", slider_w);
         ui::help_on_hover(msg::opt_front_tol_help);
-        if (d.kind() == EditDoc::Kind::Splats) {
-            ImGui::SetNextItemWidth(slider_w);
-            if (ui::SliderFloat(msg::opt_extent_scale, &_opt.extent_scale,
-                                0.25f, 4.0f, "%.2f"))
-                reapply_last();
-        }
+        if (d.kind() == EditDoc::Kind::Splats)
+            option_slider(*this, msg::opt_extent_scale, &_opt.extent_scale,
+                          0.25f, 4.0f, "%.2f", slider_w);
     }
 
     // ---- what is done with it ----
@@ -322,14 +392,12 @@ void EditSession::draw_panel() {
     ImGui::BeginDisabled(d.sel().empty());
     if (act_button(Act::Delete, msg::act_delete, half)) {
         d.run(make_hide_op(d, false));
-        _last = LastAction{};
     }
     ui::help_on_hover_disabled(d.sel().empty() ? msg::stat_nothing_selected
                                                : msg::act_delete_help);
     ImGui::SameLine();
     if (act_button(Act::Isolate, msg::act_isolate, half)) {
         d.run(make_hide_op(d, true));
-        _last = LastAction{};
     }
     ui::help_on_hover_disabled(d.sel().empty() ? msg::stat_nothing_selected
                                                : msg::act_isolate_help);
@@ -338,7 +406,6 @@ void EditSession::draw_panel() {
     ImGui::BeginDisabled(hidden == 0);
     if (act_button(Act::Restore, msg::act_restore, full)) {
         d.run(make_reveal_op(d));
-        _last = LastAction{};
     }
     ImGui::EndDisabled();
     ui::Text(msg::stat_kept, {(long long)d.alive_count(), (long long)d.count()});
@@ -349,17 +416,17 @@ void EditSession::draw_panel() {
     ImGui::BeginDisabled(!d.can_undo());
     if (act_button(Act::Undo, msg::hist_undo, half)) {
         d.undo();
-        _last = LastAction{};
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(!d.can_redo());
     if (act_button(Act::Redo, msg::hist_redo, half)) {
         d.redo();
-        _last = LastAction{};
     }
     ImGui::EndDisabled();
-    {
+    // Folded by default: at the default window width the save buttons are
+    // below it, and the list is the part you go looking for.
+    if (ui::CollapsingHeader(msg::sec_history)) {
         // Every step, so going back ten of them is one click rather than ten.
         const int n = (int)d.history().size();
         const float rows = (float)std::clamp(n + 1, 3, 8);
@@ -374,9 +441,10 @@ void EditSession::draw_panel() {
             const bool ahead = i > d.history_head();
             if (ahead) ImGui::PushStyleColor(ImGuiCol_Text,
                                              ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-            const bool hit = i == 0 ? ui::Selectable(msg::hist_original, here)
-                                    : ui::Selectable(d.history()[(size_t)i - 1]->name(),
-                                                     here);
+            const bool hit =
+                i == 0 ? ui::Selectable(msg::hist_original, here)
+                       : ui::SelectableRaw(d.history()[(size_t)i - 1]->label(),
+                                           here);
             if (ahead) ImGui::PopStyleColor();
             if (hit) go_to = i;
             ImGui::PopID();
@@ -385,7 +453,6 @@ void EditSession::draw_panel() {
         ImGui::EndChild();
         if (go_to >= 0) {
             d.goto_step(go_to);
-            _last = LastAction{};
         }
     }
 
@@ -427,13 +494,54 @@ void EditSession::draw_panel() {
                              ImGuiCond_Appearing);
     if (ui::BeginPopupModal(msg::save_confirm_title)) {
         ui::TextWrapped(msg::save_confirm_body, {home});
-        if (ui::Button(msg::save_over)) {
+        const int linked = d.linked_count();
+        if (linked > 0) {
+            // The other outputs of one run are the same surface; whether the
+            // edit reaches them is the question this dialog is really for.
+            ui::TextDisabledWrapped(msg::mesh_link_edits_help);
+            if (ui::Button(msg::save_this_only)) {
+                d.set_linked(false);
+                save_in_place();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ui::Button(msg::save_all_files, {(long long)(linked + 1)})) {
+                d.set_linked(true);
+                save_in_place();
+                ImGui::CloseCurrentPopup();
+            }
+        } else if (ui::Button(msg::save_over)) {
             save_in_place();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ui::Button(msg::discard_no)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
+    }
+
+    ImGui::EndDisabled();
+    ImGui::EndChild();
+
+    if (busy()) {
+        const int total = work_total(), done = work_done();
+        // Only the search is cancellable: a half-written file is worse than
+        // a wait for one that is finishing.
+        const bool can_stop = !_save_busy.load();
+        const float bw = can_stop
+            ? ImGui::CalcTextSize(msg::cancel_job.get()).x +
+                  2.0f * st.FramePadding.x + st.ItemSpacing.x
+            : 0.0f;
+        if (total > 1)
+            ui::ProgressBar((float)done / (float)total, ImVec2(-bw, 0),
+                            msg::saving_progress,
+                            {(long long)done, (long long)total});
+        else
+            ui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(-bw, 0),
+                            msg::working);
+        if (can_stop) {
+            ImGui::SameLine();
+            if (ui::Button(msg::cancel_job)) cancel_work();
+        }
     }
 }
 

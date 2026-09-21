@@ -24,7 +24,12 @@ void EditSession::open(std::unique_ptr<EditDoc> doc, ViewportPanel* panel) {
     close();
     _doc = std::move(doc);
     _panel = panel;
-    if (_panel) _panel->set_interactor(this);
+    if (_panel) {
+        _panel->set_interactor(this);
+        _panel->set_center_provider([this](dsparse::CenterTable& t) {
+            return _doc && !busy() && _doc->live_centers(t);
+        });
+    }
     _opt = SelectOptions{};
     _opt.by_extent = _doc && _doc->kind() == EditDoc::Kind::Splats;
     // Opening in Navigate: the first thing anyone does with a model they have
@@ -34,7 +39,19 @@ void EditSession::open(std::unique_ptr<EditDoc> doc, ViewportPanel* panel) {
 }
 
 void EditSession::close() {
-    if (_panel) _panel->set_interactor(nullptr);
+    _cancel = true;
+    if (_comp_worker.joinable()) _comp_worker.join();
+    if (_save_worker.joinable()) _save_worker.join();
+    _cancel = false;
+    _comp_busy = false;
+    _save_busy = false;
+    _comp = Components{};
+    _pending.reset();
+    _fly_block_key = 0;
+    if (_panel) {
+        _panel->set_interactor(nullptr);
+        _panel->set_center_provider(nullptr);
+    }
     if (_doc) _doc->revert_display();
     if (_panel) _panel->invalidate();
     _panel = nullptr;
@@ -42,7 +59,6 @@ void EditSession::close() {
     _grid.clear();
     _spacing = 0.0f;
     _occ.clear();
-    _last = LastAction{};
     _tool.set_id(ToolId::Navigate);
     _status.clear();
     _ask_overwrite = false;
@@ -88,7 +104,8 @@ void EditSession::set_layer(int i) {
     _grid.clear();
     _spacing = 0.0f;
     _occ_dirty = true;
-    _last = LastAction{};
+    _comp = Components{};
+    _pending.reset();
     _doc->mark_display_dirty();
 }
 
@@ -98,16 +115,15 @@ void EditSession::set_layer(int i) {
 // ---------------------------------------------------------------------------
 
 bool EditSession::on_viewport_input(const ViewportInput& in) {
-    if (!_doc) return false;
+    if (!_doc || busy()) return false;
     ShapeStroke s;
     bool consumed = false;
     if (_tool.update(in, s, consumed)) {
-        if (_tool.id() == ToolId::Piece) {
-            _last.combine = combine_now(in.shift, in.ctrl);
-            select_component_under(s.pts[0], s.pts[1]);
-        } else {
+        if (_tool.id() == ToolId::Piece)
+            select_component_under(s.pts[0], s.pts[1],
+                                   combine_now(in.shift, in.ctrl));
+        else
             apply_stroke(s, in);
-        }
     }
     return consumed;
 }
@@ -120,79 +136,108 @@ void EditSession::draw_viewport_overlay(const ViewportOverlay& v) {
 void EditSession::apply_stroke(const ShapeStroke& s, const ViewportInput& in) {
     ViewProjection vp;
     if (!view(vp)) return;
-    _last = LastAction{};
-    _last.kind = LastAction::Stencil;
-    _last.layer = _doc->layer();
-    _last.before = _doc->sel().weights();
-    _last.combine = combine_now(in.shift, in.ctrl);
-    _last.shape = s;
-    _last.view = vp;
-    run_last(/*fresh=*/true);
+    auto r = std::make_shared<SelectRecipe>();
+    r->kind = SelectRecipe::Stencil;
+    r->layer = _doc->layer();
+    r->before = _doc->sel().weights();
+    r->combine = combine_now(in.shift, in.ctrl);
+    r->shape = s;
+    r->view = vp;
+    start_recipe(std::move(r));
 }
 
-void EditSession::reapply_last() {
-    if (!_doc || _last.kind == LastAction::None) return;
-    if (_last.layer != _doc->layer()) return;
-    // The last selection is replaced rather than stacked: dragging a slider
-    // must not leave a hundred entries in the history.
-    if (_doc->can_undo()) _doc->undo();
-    run_last(/*fresh=*/false);
+namespace {
+
+const spirula::i18n::Msg& shape_op_name(ShapeKind k) {
+    switch (k) {
+        case ShapeKind::Ellipse: return msg::op_select_ellipse;
+        case ShapeKind::Lasso:   return msg::op_select_lasso;
+        case ShapeKind::Polygon: return msg::op_select_polygon;
+        case ShapeKind::Brush:   return msg::op_select_brush;
+        default:                 return msg::op_select_box;
+    }
 }
 
-void EditSession::run_last(bool fresh) {
-    (void)fresh;
-    if (!_doc || _last.kind == LastAction::None) return;
+}  // namespace
+
+// Off it goes, or onto the worker's queue when it needs components it has
+// not got yet.
+void EditSession::start_recipe(std::shared_ptr<SelectRecipe> r) {
+    const bool needs_components =
+        r->kind == SelectRecipe::Piece || r->kind == SelectRecipe::Floaters;
+    if (needs_components && !components_ready()) {
+        _pending = std::move(r);
+        _pending_push = true;
+        return;
+    }
+    run_recipe(r, /*push=*/true);
+}
+
+void EditSession::run_recipe(const std::shared_ptr<const SelectRecipe>& rp,
+                             bool push) {
+    if (!_doc || !rp) return;
+    const SelectRecipe& r = *rp;
+    if (r.layer != _doc->layer()) return;
     std::vector<uint8_t> w((size_t)_doc->count(), 0);
     const spirula::i18n::Msg* name = &msg::op_select;
 
-    switch (_last.kind) {
-        case LastAction::Stencil: {
+    switch (r.kind) {
+        case SelectRecipe::Stencil: {
             Stencil st;
-            rasterize_shape(_last.shape, _last.view.W, _last.view.H, st);
+            rasterize_shape(r.shape, r.view.W, r.view.H, st);
             if (_opt.front_only) {
                 if (_occ_dirty ||
-                    std::memcmp(_occ_pose, _last.view.w2c, sizeof _occ_pose) != 0) {
-                    _occ.build(*_doc, _last.view);
-                    std::memcpy(_occ_pose, _last.view.w2c, sizeof _occ_pose);
+                    std::memcmp(_occ_pose, r.view.w2c, sizeof _occ_pose) != 0) {
+                    _occ.build(*_doc, r.view);
+                    std::memcpy(_occ_pose, r.view.w2c, sizeof _occ_pose);
                     _occ_alive = _doc->alive_count();
                     _occ_dirty = false;
                 }
             }
-            _last_result = select_by_stencil(*_doc, _last.view, st, _opt,
+            _last_result = select_by_stencil(*_doc, r.view, st, _opt,
                                              _opt.front_only ? &_occ : nullptr, w);
+            name = &shape_op_name(r.shape.kind);
             break;
         }
-        case LastAction::Grow:
-        case LastAction::Shrink: {
-            const float r = reach();
+        case SelectRecipe::Grow:
+        case SelectRecipe::Shrink: {
             ensure_grid();
-            w = _last.before;
-            if (_last.kind == LastAction::Grow)
-                _grid.grow(w, r, _doc->alive(), _doc->count());
+            w = r.before;
+            if (r.kind == SelectRecipe::Grow)
+                _grid.grow(w, _doc->alive(), _doc->count());
             else
-                _grid.shrink(w, r, _doc->alive(), _doc->count());
-            name = _last.kind == LastAction::Grow ? &msg::op_grow : &msg::op_shrink;
+                _grid.shrink(w, _doc->alive(), _doc->count());
+            name = r.kind == SelectRecipe::Grow ? &msg::op_grow : &msg::op_shrink;
             // Grow and shrink are their own combine: they start from what is
             // already selected rather than meeting it.
-            _doc->run(make_select_op(*_doc, std::move(w), *name));
+            if (push) _doc->run(make_select_op(*_doc, std::move(w), name->get(), rp));
+            else {
+                _doc->set_selection(w);
+                _doc->mark_display_dirty();
+            }
             return;
         }
-        case LastAction::Piece: {
-            if (_last.seed < 0) break;
-            std::vector<int32_t> label;
-            std::vector<int64_t> sizes;
-            components(label, sizes);
-            const int32_t want = label[(size_t)_last.seed];
+        case SelectRecipe::Piece: {
+            if (r.seed < 0) return;
+            if (!components_ready()) {
+                _pending = std::make_shared<SelectRecipe>(r);
+                _pending_push = push;
+                return;
+            }
+            const int32_t want = _comp.label[(size_t)r.seed];
             if (want >= 0)
                 for (int64_t i = 0; i < _doc->count(); i++)
-                    if (label[(size_t)i] == want) w[(size_t)i] = 255;
+                    if (_comp.label[(size_t)i] == want) w[(size_t)i] = 255;
             name = &msg::op_select_piece;
             break;
         }
-        case LastAction::Floaters: {
-            std::vector<int32_t> label;
-            std::vector<int64_t> sizes;
-            components(label, sizes);
+        case SelectRecipe::Floaters: {
+            if (!components_ready()) {
+                _pending = std::make_shared<SelectRecipe>(r);
+                _pending_push = push;
+                return;
+            }
+            const std::vector<int64_t>& sizes = _comp.sizes;
             std::vector<int32_t> order((size_t)sizes.size());
             std::iota(order.begin(), order.end(), 0);
             std::sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
@@ -203,27 +248,72 @@ void EditSession::run_last(bool fresh) {
                             i < (int)order.size(); i++)
                 big[(size_t)order[(size_t)i]] = 1;
             for (int64_t i = 0; i < _doc->count(); i++) {
-                const int32_t l = label[(size_t)i];
+                const int32_t l = _comp.label[(size_t)i];
                 if (l >= 0 && !big[(size_t)l]) w[(size_t)i] = 255;
             }
             name = &msg::op_select_floaters;
             break;
         }
-        default:
-            return;
     }
 
     Selection tmp;
-    tmp.assign(_last.before);
-    tmp.combine(w.data(), _last.combine, _doc->alive());
-    _doc->run(make_select_op(*_doc, tmp.weights(), *name));
+    tmp.assign(r.before);
+    tmp.combine(w.data(), r.combine, _doc->alive());
+    if (push) _doc->run(make_select_op(*_doc, tmp.weights(), name->get(), rp));
+    else {
+        _doc->set_selection(tmp.weights());
+        _doc->mark_display_dirty();
+    }
 }
 
-void EditSession::run_select(std::vector<uint8_t> w,
-                             const spirula::i18n::Msg& name) {
+void EditSession::run_select(std::vector<uint8_t> w, std::string label) {
     if (!_doc) return;
-    _last = LastAction{};
-    _doc->run(make_select_op(*_doc, std::move(w), name));
+    _pending.reset();
+    _doc->run(make_select_op(*_doc, std::move(w), std::move(label), {}));
+}
+
+
+// A setting is a history step of its own, and the selection it produced
+// follows it back. The recipe comes from where the history STANDS, so walking
+// back to a selection and ticking a box re-runs that selection.
+void EditSession::run_setting(std::function<void(bool)> write,
+                              std::string label) {
+    std::shared_ptr<const SelectRecipe> recipe = _doc->current_recipe();
+    _doc->run(make_setting_op(
+        [this, write = std::move(write), recipe](bool redo) {
+            write(redo);
+            run_recipe(recipe, /*push=*/false);
+        },
+        std::move(label), recipe));
+}
+
+void EditSession::set_option(bool* slot, bool value,
+                             const spirula::i18n::Msg& name) {
+    if (!_doc || *slot == value) return;
+    const bool old = *slot;
+    run_setting([slot, value, old](bool redo) { *slot = redo ? value : old; },
+                spirula::i18n::format(
+                    value ? msg::op_option_on : msg::op_option_off, {name.get()}));
+}
+
+void EditSession::set_number(float* slot, float value,
+                             const spirula::i18n::Msg& name) {
+    if (!_doc || *slot == value) return;
+    const float old = *slot;
+    run_setting([slot, value, old](bool redo) { *slot = redo ? value : old; },
+                spirula::i18n::format(
+                    value > old ? msg::op_value_up : msg::op_value_down,
+                    {name.get()}));
+}
+
+void EditSession::set_number(int* slot, int value,
+                             const spirula::i18n::Msg& name) {
+    if (!_doc || *slot == value) return;
+    const int old = *slot;
+    run_setting([slot, value, old](bool redo) { *slot = redo ? value : old; },
+                spirula::i18n::format(
+                    value > old ? msg::op_value_up : msg::op_value_down,
+                    {name.get()}));
 }
 
 
@@ -234,7 +324,9 @@ void EditSession::run_select(std::vector<uint8_t> w,
 float EditSession::reach() {
     if (!_doc) return 0.0f;
     if (!(_spacing > 0.0f)) _spacing = _grid.measure_spacing(*_doc);
-    return _spacing * _radius_mul;
+    // A reach of zero still needs cells to sort the elements into; there it
+    // means "only what shares a cell", which is the smallest honest answer.
+    return _spacing * std::max(_radius_mul, 0.05f);
 }
 
 void EditSession::ensure_grid() {
@@ -245,48 +337,61 @@ void EditSession::ensure_grid() {
     _grid.build(*_doc, r);
 }
 
-// A mesh says what is joined to what; a cloud has to be asked by distance,
+// A mesh says what is joined to what; a cloud has to be asked by proximity,
 // and a Gaussian's own extent is part of that answer.
-void EditSession::components(std::vector<int32_t>& label,
-                             std::vector<int64_t>& sizes) {
+void EditSession::compute_components() {
     int64_t pairs = 0;
     if (const int32_t* topo = _doc->topology(pairs)) {
-        components_from_pairs(topo, pairs, _doc->alive(), _doc->count(), label,
-                              sizes);
+        components_from_pairs(topo, pairs, _doc->alive(), _doc->count(),
+                              _comp.label, _comp.sizes);
         return;
     }
     // Gaussians overlap by construction, so "these two touch" has to mean
-    // they interpenetrate: at 1.0 a trained scene is one piece. What it buys
-    // is the big sky splat, whose neighbours are as far off as they are large.
+    // they interpenetrate: at 1.0 a trained scene is one piece.
     constexpr float kOverlap = 0.5f;
-    const float r = reach();
     ensure_grid();
-    _grid.components(r, _doc->alive(), _doc->count(), label, sizes,
-                     _doc->radii(), kOverlap);
+    if (!_grid.components(_doc->alive(), _doc->count(), _comp.label,
+                          _comp.sizes, _doc->radii(), kOverlap, &_cancel))
+        _comp = Components{};
+}
+
+bool EditSession::components_ready() {
+    const float r = reach();
+    if (_comp.layer == _doc->layer() && _comp.alive == _doc->alive_count() &&
+        _comp.radius == r && _comp.label.size() == (size_t)_doc->count())
+        return true;
+    if (_comp_busy.load()) return false;
+    if (_comp_worker.joinable()) _comp_worker.join();
+    _comp = Components{};
+    _comp.layer = _doc->layer();
+    _comp.alive = _doc->alive_count();
+    _comp.radius = r;
+    _cancel = false;
+    _comp_busy = true;
+    // Off the GUI thread, and cancellable: every edit is refused until it
+    // lands, but the window keeps drawing and the user keeps the camera.
+    _comp_worker = std::thread([this] {
+        compute_components();
+        _comp_busy = false;
+    });
+    return false;
+}
+
+void EditSession::cancel_work() {
+    _cancel = true;
+    _pending.reset();
 }
 
 void EditSession::grow_shrink(bool grow) {
     if (!_doc) return;
-    _last = LastAction{};
-    _last.kind = grow ? LastAction::Grow : LastAction::Shrink;
-    _last.layer = _doc->layer();
-    _last.before = _doc->sel().weights();
-    run_last(/*fresh=*/true);
+    auto r = std::make_shared<SelectRecipe>();
+    r->kind = grow ? SelectRecipe::Grow : SelectRecipe::Shrink;
+    r->layer = _doc->layer();
+    r->before = _doc->sel().weights();
+    start_recipe(std::move(r));
 }
 
-void EditSession::select_seed(int64_t seed) {
-    if (!_doc) return;
-    const Combine c = _last.combine;
-    _last = LastAction{};
-    _last.kind = LastAction::Piece;
-    _last.layer = _doc->layer();
-    _last.before = _doc->sel().weights();
-    _last.combine = c;
-    _last.seed = seed;
-    run_last(/*fresh=*/true);
-}
-
-void EditSession::select_component_under(float px, float py) {
+void EditSession::select_component_under(float px, float py, Combine how) {
     if (!_doc) return;
     ViewProjection vp;
     if (!view(vp)) return;
@@ -294,21 +399,26 @@ void EditSession::select_component_under(float px, float py) {
     if (hit < 0) {
         // Clicking nothing in Replace means nothing is selected, which is
         // what every other selection tool on earth does.
-        if (_last.combine == Combine::Replace && !_doc->sel().empty())
-            select_all(false);
+        if (how == Combine::Replace && !_doc->sel().empty()) select_all(false);
         return;
     }
-    select_seed(hit);
+    auto r = std::make_shared<SelectRecipe>();
+    r->kind = SelectRecipe::Piece;
+    r->layer = _doc->layer();
+    r->before = _doc->sel().weights();
+    r->combine = how;
+    r->seed = hit;
+    start_recipe(std::move(r));
 }
 
 void EditSession::keep_largest_components() {
     if (!_doc) return;
-    _last = LastAction{};
-    _last.kind = LastAction::Floaters;
-    _last.layer = _doc->layer();
-    _last.before = _doc->sel().weights();
-    _last.combine = Combine::Replace;
-    run_last(/*fresh=*/true);
+    auto r = std::make_shared<SelectRecipe>();
+    r->kind = SelectRecipe::Floaters;
+    r->layer = _doc->layer();
+    r->before = _doc->sel().weights();
+    r->combine = Combine::Replace;
+    start_recipe(std::move(r));
 }
 
 void EditSession::select_all(bool on) {
@@ -317,7 +427,8 @@ void EditSession::select_all(bool on) {
     if (on)
         for (int64_t i = 0; i < _doc->count(); i++)
             if (_doc->alive()[i]) w[(size_t)i] = 255;
-    run_select(std::move(w), on ? msg::op_select_all : msg::op_select_none);
+    run_select(std::move(w),
+               (on ? msg::op_select_all : msg::op_select_none).get());
 }
 
 void EditSession::invert_selection() {
@@ -325,7 +436,7 @@ void EditSession::invert_selection() {
     std::vector<uint8_t> w = _doc->sel().weights();
     for (int64_t i = 0; i < _doc->count(); i++)
         w[(size_t)i] = _doc->alive()[i] ? (uint8_t)(255 - w[(size_t)i]) : 0;
-    run_select(std::move(w), msg::op_select_invert);
+    run_select(std::move(w), msg::op_select_invert.get());
 }
 
 
@@ -335,6 +446,34 @@ void EditSession::invert_selection() {
 
 void EditSession::poll() {
     if (!_doc) return;
+    if (_fly_block_key && !ImGui::IsKeyDown((ImGuiKey)_fly_block_key))
+        _fly_block_key = 0;
+    if (!_comp_busy.load() && _comp_worker.joinable()) {
+        _comp_worker.join();
+        // A finished components run is the pending recipe's cue.
+        if (_pending) {
+            std::shared_ptr<SelectRecipe> r;
+            r.swap(_pending);
+            if (!_comp.label.empty()) run_recipe(r, _pending_push);
+        }
+    }
+    if (!_save_busy.load() && _save_worker.joinable()) {
+        _save_worker.join();
+        if (_save_error.empty()) {
+            _doc->mark_saved();
+            _status = spirula::i18n::format(msg::saved_to,
+                                            {_doc->default_save_path(_save_target)});
+            _status_err = false;
+        } else {
+            _status = spirula::i18n::format(msg::save_failed, {_save_error});
+            _status_err = true;
+        }
+        note(_status);
+    }
+    if (busy()) {
+        if (_panel) _panel->invalidate();
+        return;
+    }
     handle_keys();
     // The occlusion buffer belongs to one camera and one live set; either
     // moving invalidates it, and rebuilding is the next selection's business
@@ -383,19 +522,24 @@ void EditSession::ask_save_copy() {
                stem + "_edited" + target.ext);
 }
 
+// On a worker, because one linked mesh is several hundred-megabyte files and
+// a window that stops answering is one the desktop offers to kill.
 void EditSession::save_to(int target, const std::string& path) {
-    if (!_doc || path.empty()) return;
-    try {
-        _doc->save(target, path);
-        _doc->mark_saved();
-        _status = spirula::i18n::format(msg::saved_to, {path});
-        _status_err = false;
-        note(_status);
-    } catch (const std::exception& e) {
-        _status = spirula::i18n::format(msg::save_failed, {std::string(e.what())});
-        _status_err = true;
-        note(_status);
-    }
+    if (!_doc || path.empty() || busy()) return;
+    if (_save_worker.joinable()) _save_worker.join();
+    _save_error.clear();
+    _save_done = 0;
+    _save_total = std::max(1, _doc->save_steps(target));
+    _save_busy = true;
+    EditDoc* doc = _doc.get();
+    _save_worker = std::thread([this, doc, target, path] {
+        try {
+            doc->save(target, path, &_save_done);
+        } catch (const std::exception& e) {
+            _save_error = e.what();
+        }
+        _save_busy = false;
+    });
 }
 
 }  // namespace gui

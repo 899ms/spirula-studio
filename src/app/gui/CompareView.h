@@ -11,6 +11,7 @@
 #include "app/gui/SplatViewer.h"
 #include "app/gui/ViewportPanel.h"
 #include "app/gui/edit/EditSession.h"
+#include "app/gui/edit/MeshDoc.h"
 #include "i18n/Message.h"
 
 #include <atomic>
@@ -45,12 +46,25 @@ public:
     // last model being closed does not hand the engine back.
     bool holds_engine() const { return _engine_taken; }
     int count() const { return (int)_models.size(); }
+    // Which pane holds `path`, or -1. What a screen that offers a list of
+    // models to show needs, since the panes are the list.
+    int index_of(const std::string& path) const;
+    // Show or hide one, leaving the others alone. The removal is deferred to
+    // the next poll(), like every other one.
+    void set_shown(const std::string& path, bool on,
+                   const spirula::i18n::Msg* title = nullptr);
     bool full() const { return count() >= kMaxModels; }
     // Recent paths offered by the "add" menu, refreshed by the owner each
     // frame -- this object has no settings of its own.
     void set_recents(const std::vector<std::string>& r) { _recents = r; }
     // Called when the user asks for a file picker (the owner owns the dialog).
     void set_pick_file(std::function<void()> f) { _pick_file = std::move(f); }
+    // The other files written beside `path` by whatever produced it, so an
+    // edit can reach them too. The owner knows; this does not.
+    void set_siblings_of(
+        std::function<std::vector<std::string>(const std::string&)> f) {
+        _siblings_of = std::move(f);
+    }
 
     // ---- editing (docs/notes/gui-editing-plan.md) ----
     // Open the pane's model for editing, or give it back. One pane at a time:
@@ -81,6 +95,9 @@ public:
 
 private:
     struct Model {
+        // What was asked for, which is how a caller names a pane again. The
+        // viewer's own path() is cleared when it closes.
+        std::string path;
         SplatViewer src;
         ViewportPanel panel;
         const spirula::i18n::Msg* title = nullptr;
@@ -133,6 +150,8 @@ private:
     // Reading a model a second time is what editing costs: the viewer keeps
     // nothing host-side, and a hundred-megabyte PLY must not block a frame.
     void finish_edit_load();
+    // Apply one mesh edit's deletions to every OTHER mesh pane.
+    void show_sibling_meshes(int except, const FaceCut& cut);
 
     EditSession _edit;
     int _edit_index = -1;
@@ -146,6 +165,7 @@ private:
 
     std::vector<std::string> _recents;
     std::function<void()> _pick_file;
+    std::function<std::vector<std::string>(const std::string&)> _siblings_of;
 };
 
 }  // namespace gui

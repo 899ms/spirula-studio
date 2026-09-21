@@ -45,6 +45,9 @@ public:
     std::string error();
     // The mesh file written, valid once state() == Done.
     std::string output_path();
+    // Every file the run left on disk. One extraction can be asked for
+    // several formats and colors, and they are all the same surface.
+    std::vector<std::string> output_paths();
     // Vertices / faces reported by the child's final line, 0 until then.
     int64_t num_verts() const { return _verts.load(); }
     int64_t num_faces() const { return _faces.load(); }
@@ -72,6 +75,7 @@ private:
     std::atomic<int64_t> _verts{0}, _faces{0};
     std::mutex _mu;
     std::string _stage, _error, _output;
+    std::vector<std::string> _outputs;
     std::vector<std::string> _log;
 };
 

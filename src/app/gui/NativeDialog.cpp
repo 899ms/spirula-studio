@@ -23,6 +23,7 @@ namespace gui {
 #ifdef __APPLE__
 // NativeDialogMac.mm -- the one piece that has to be Objective-C.
 std::vector<std::string> mac_pick(const std::string& title, bool folder,
+                                  bool also_folders,
                                   const std::vector<std::string>& extensions,
                                   const std::string& start_dir, bool multi);
 std::vector<std::string> mac_save(const std::string& title,
@@ -169,7 +170,8 @@ bool platform_available() { return true; }
 std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     if (r.mode == NativeDialog::Mode::Save)
         return mac_save(r.title, r.extensions, r.start_dir, r.suggested);
-    return mac_pick(r.title, r.mode == NativeDialog::Mode::Folder, r.extensions,
+    return mac_pick(r.title, r.mode == NativeDialog::Mode::Folder,
+                    r.mode == NativeDialog::Mode::FileOrFolder, r.extensions,
                     r.start_dir, r.multi);
 }
 

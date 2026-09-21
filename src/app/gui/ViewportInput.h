@@ -36,6 +36,10 @@ struct ViewportInteractor {
     // Whether the active tool claims the left button at all. False means the
     // panel navigates exactly as it does with no tool installed.
     virtual bool owns_left_button() const = 0;
+    // Whether the camera's LETTER keys (WASDQE) are the tool's for now. Not
+    // the same question: the key that switches back to navigation is one of
+    // them, and it is still down on the frame the switch happens.
+    virtual bool blocks_fly_keys() const { return owns_left_button(); }
     // True when the tool took this frame's left button.
     virtual bool on_viewport_input(const ViewportInput& in) = 0;
     virtual void draw_viewport_overlay(const ViewportOverlay& v) = 0;

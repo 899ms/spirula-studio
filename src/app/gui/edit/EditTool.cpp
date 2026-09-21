@@ -82,6 +82,13 @@ void EditTool::cancel() {
     _pts.clear();
 }
 
+bool EditTool::pop_point() {
+    if (!_active || _pts.size() < 2) return false;
+    _pts.resize(_pts.size() - 2);
+    if (_pts.empty()) _active = false;
+    return true;
+}
+
 bool EditTool::update(const ViewportInput& in, ShapeStroke& out, bool& consumed) {
     consumed = false;
     if (_id == ToolId::Navigate) return false;
@@ -203,8 +210,15 @@ void EditTool::draw_overlay(ImDrawList* dl, const ImVec2& o) const {
     for (size_t i = 0; i < n; i++) dl->PathLineTo(at(i));
     if (_id == ToolId::Polygon) dl->PathLineTo(ImVec2(o.x + _cur[0], o.y + _cur[1]));
     dl->PathStroke(line, ImDrawFlags_Closed, 1.5f);
-    if (_id == ToolId::Polygon)
-        for (size_t i = 0; i < n; i++) dl->AddCircleFilled(at(i), 3.0f, line);
+    if (_id != ToolId::Polygon) return;
+    for (size_t i = 1; i < n; i++) dl->AddCircleFilled(at(i), 3.0f, line);
+    // The first corner is the one that closes the loop, so it says so: bigger
+    // than the rest, and lit when the cursor is near enough to hit it.
+    const float dx = _cur[0] - _pts[0], dy = _cur[1] - _pts[1];
+    const bool near = n >= 3 && dx * dx + dy * dy <= kCloseRadius * kCloseRadius;
+    dl->AddCircleFilled(at(0), near ? 8.0f : 5.0f,
+                        near ? IM_COL32(120, 255, 140, 255) : line);
+    if (near) dl->AddCircle(at(0), 12.0f, IM_COL32(120, 255, 140, 200), 0, 2.0f);
 }
 
 const spirula::i18n::Msg& EditTool::label() const { return tool_label(_id); }

@@ -19,6 +19,7 @@
 #include "i18n/catalog/Brand.h"
 #include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/Geometry.h"
+#include "data/SparseEdit.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
 #include "i18n/catalog/Train.h"
@@ -195,6 +196,12 @@ GuiApp::GuiApp() {
         open_pick(PickAction::AddSplatFile, msg::viewer_pick_file.get(),
                   FileDialog::Mode::FileOrFolder, kOpenableExtensions);
     });
+    _compare.set_siblings_of([this](const std::string& path) {
+        std::vector<std::string> outs = _mesh.output_paths();
+        for (const std::string& o : outs)
+            if (o == path) return outs;
+        return std::vector<std::string>{};
+    });
     _compare.edit().set_pick_save(
         [this](int target, const std::string& ext, bool folder,
                const std::string& suggested) {
@@ -307,6 +314,7 @@ void GuiApp::load_settings() {
                                                              0.0f, 3.0f));
         else if (k == "panel_w") _panel_w = (float)atof(v.c_str());
         else if (k == "ds_panel_w") _ds_panel_w = (float)atof(v.c_str());
+        else if (k == "edit_panel_w") _edit_panel_w = (float)atof(v.c_str());
         else if (k == "log_h") _log_h = (float)atof(v.c_str());
         else if (k == "show_log") _show_log = v != "0";
         else if (k == "log_details") _log_details = v != "0";
@@ -328,6 +336,7 @@ void GuiApp::load_settings() {
     _log_h = std::clamp(_log_h, 60.0f, 800.0f);
     _preview_h = std::clamp(_preview_h, 60.0f, 800.0f);
     _ds_panel_w = std::clamp(_ds_panel_w, 320.0f, 1200.0f);
+    _edit_panel_w = std::clamp(_edit_panel_w, 220.0f, 900.0f);
 
     // The settings file is the third step of the chain and loses to both
     // --lang and SS_LANG, so the whole chain is re-run rather than the stored
@@ -353,6 +362,7 @@ void GuiApp::save_settings() {
     std::fprintf(f, "ui_scale=%.3f\n", _scale.user());
     std::fprintf(f, "panel_w=%.1f\n", _panel_w);
     std::fprintf(f, "ds_panel_w=%.1f\n", _ds_panel_w);
+    std::fprintf(f, "edit_panel_w=%.1f\n", _edit_panel_w);
     std::fprintf(f, "log_h=%.1f\n", _log_h);
     std::fprintf(f, "show_log=%d\n", _show_log ? 1 : 0);
     std::fprintf(f, "log_details=%d\n", _log_details ? 1 : 0);
@@ -1831,6 +1841,15 @@ void GuiApp::handle_drop(const std::vector<std::string>& paths) {
         request_open_splat(paths[0]);
         return;
     }
+    // A reconstruction that is not a trainable dataset -- a bare `sparse/`,
+    // one of its models, or a folder holding one without the images -- is
+    // something to look at and clean up, not something to train on.
+    if (paths.size() == 1 && fs::is_directory(paths[0], ec) &&
+        !folder_looks_like_dataset(paths[0]) &&
+        !spirula::resolve_sparse_dir(paths[0]).empty()) {
+        request_open_splat(paths[0]);
+        return;
+    }
     // ... except on the dataset screen, where a finished dataset is an input
     // like any other: that is how one gets masks, depth and normals added to
     // it without its cameras being solved a second time.
@@ -1860,7 +1879,14 @@ void GuiApp::handle_drop(const std::vector<std::string>& paths) {
         }
         if (p.filename() == "transforms.json" || ext == ".db" ||
             ext == ".bin" || ext == ".txt" || ext == ".xml") {
-            request_open_dataset(p.parent_path().string());
+            const std::string dir = p.parent_path().string();
+            // A file from a COLMAP model folder names a reconstruction, not a
+            // dataset: `sparse/0` has no images beside it to train from.
+            if (!folder_looks_like_dataset(dir) &&
+                !spirula::resolve_sparse_dir(paths[0]).empty())
+                request_open_splat(paths[0]);
+            else
+                request_open_dataset(dir);
             return;
         }
     }
@@ -2555,6 +2581,7 @@ void GuiApp::draw_menu_bar() {
             _layout_dirty = true;
         if (ui::MenuItem(msg::menu_reset_layout)) {
             _panel_w = kDefaultPanelW;
+            _edit_panel_w = kEditPanelW;
             _log_h = kDefaultLogH;
             _show_log = _show_settings = true;
             _layout_dirty = true;
@@ -6141,11 +6168,18 @@ void GuiApp::draw_viewer() {
 
 void GuiApp::draw_compare_panes() {
     if (_compare.editing() >= 0 && _compare.edit().active()) {
-        ImGui::BeginChild("##editpanel", ImVec2(px(kEditPanelW), 0),
-                          ImGuiChildFlags_Borders);
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const float h = ImGui::GetContentRegionAvail().y;
+        const float w = std::clamp(_edit_panel_w * ui_scale(), px(220.0f),
+                                   std::max(px(220.0f), avail * 0.6f));
+        ImGui::BeginChild("##editpanel", ImVec2(w, 0), ImGuiChildFlags_Borders);
         _compare.edit().draw_panel();
         ImGui::EndChild();
-        ImGui::SameLine();
+        float dragged = w;
+        if (splitter_v("##editpanelsplit", &dragged, px(220.0f), avail * 0.7f, h)) {
+            _edit_panel_w = dragged / ui_scale();
+            _layout_dirty = true;
+        }
         ImGui::BeginChild("##editpanes", ImVec2(0, 0));
         _compare.draw(0.0f);
         ImGui::EndChild();
@@ -6456,6 +6490,24 @@ void GuiApp::draw_mesh() {
         ImGui::PushID("again");
         if (ui::Button(msg::mesh_start)) close_mesh_preview();
         ImGui::PopID();
+        // Which of them is on screen. One run writes several formats of one
+        // surface, and four panes of the same mesh is not a comparison.
+        ui::TextDisabled(emsg::mesh_shown);
+        if (!training_busy() && !_mesh_job.checkpoint.empty()) {
+            ImGui::SameLine();
+            bool on = _compare.index_of(_mesh_job.checkpoint) >= 0;
+            if (ui::Checkbox(emsg::mesh_side_splats_pane, &on))
+                _compare.set_shown(_mesh_job.checkpoint, on,
+                                   &msg::mesh_side_splats);
+        }
+        for (const std::string& out : _mesh.output_paths()) {
+            ImGui::SameLine();
+            ImGui::PushID(out.c_str());
+            bool on = _compare.index_of(out) >= 0;
+            if (ui::CheckboxRaw(fs::path(out).filename().string().c_str(), &on))
+                _compare.set_shown(out, on, &msg::mesh_side_mesh);
+            ImGui::PopID();
+        }
         _compare.set_recents(_model_recents);
         _compare.draw_toolbar();
         draw_compare_panes();

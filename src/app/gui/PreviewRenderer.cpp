@@ -579,7 +579,9 @@ bool PreviewRenderer::build(const spirula::TrainerSession& session) {
 bool PreviewRenderer::build(const meshing::MeshData& mesh,
                             const float to_normalized[12]) {
     destroy_gl();
-    if (!ensure_mesh_program()) return false;
+    // Both programs: the mesh has its own, but the grid and the axes draw
+    // with the line program like everything else.
+    if (!ensure_mesh_program() || !ensure_program()) return false;
     if (mesh.V.empty() || mesh.F.empty()) return false;
 
     // The similarity into the navigated frame, or identity. Same 3x4

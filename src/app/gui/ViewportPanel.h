@@ -109,6 +109,12 @@ public:
     void image_rect(float& x, float& y, float& w, float& h) const;
     // A render is due: what a tool calls after changing what is drawn.
     void invalidate() { _dirty = true; }
+    // Where the centring menu's points come from when the user PICKS one, so
+    // an edited model centres on what is left of it. Asked only on the pick:
+    // a median per frame is a hiccup, and a centre is where you asked for it.
+    void set_center_provider(std::function<bool(dsparse::CenterTable&)> f) {
+        _center_provider = std::move(f);
+    }
 
     // Where this panel's model sits in the SHARED frame the camera navigates
     // (row-major 3x4 similarity, scale*R | t; identity by default). Applied to
@@ -251,6 +257,7 @@ private:
     float grid_cell() const;
     void draw_grid_overlay(float x, float y, int line) const;
     ViewportInteractor* _interactor = nullptr;
+    std::function<bool(dsparse::CenterTable&)> _center_provider;
     // The image rectangle of the last draw, which is the frame a tool's
     // pointer coordinates and its overlay are both in.
     float _img_x = 0, _img_y = 0, _img_w = 0, _img_h = 0;

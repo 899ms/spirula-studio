@@ -160,6 +160,39 @@ void PointsDoc::publish_impl(bool geometry) {
           _cam_highlight.empty() ? nullptr : _cam_highlight.data());
 }
 
+// Points AND cameras, both filtered to what is live and both taken from the
+// parsed dataset, which is the one frame they are already in together.
+bool PointsDoc::live_centers(dsparse::CenterTable& out) const {
+    const std::vector<uint8_t>& pk = alive_of(kPoints);
+    std::vector<double> pts;
+    for (size_t i = 0; i < pk.size(); i++) {
+        if (!pk[i]) continue;
+        pts.insert(pts.end(), _ds.points.xyz.begin() + (ptrdiff_t)(i * 3),
+                   _ds.points.xyz.begin() + (ptrdiff_t)(i * 3 + 3));
+    }
+    std::vector<double> c2w;
+    if (layer_count() > kCameras) {
+        const std::vector<uint8_t>& ck = alive_of(kCameras);
+        for (size_t i = 0; i < ck.size(); i++) {
+            if (!ck[i]) continue;
+            c2w.insert(c2w.end(), _ds.c2w.begin() + (ptrdiff_t)(i * 12),
+                       _ds.c2w.begin() + (ptrdiff_t)(i * 12 + 12));
+        }
+    }
+    if (pts.empty() && c2w.empty()) return false;
+    double A[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    if (_ds.train_frame_scale != 1.0f) {
+        double T[16];
+        for (int i = 0; i < 16; i++) T[i] = _ds.train_to_normalized[i];
+        dsparse::invert_affine4x4(T, A);
+    }
+    out = dsparse::scene_centers(c2w.empty() ? nullptr : c2w.data(),
+                                 (int64_t)c2w.size() / 12,
+                                 pts.empty() ? nullptr : pts.data(),
+                                 (int64_t)pts.size() / 3, 3, A);
+    return true;
+}
+
 void PointsDoc::revert_display() {
     if (_show) _show(_ds, _post, nullptr);
 }
@@ -192,7 +225,8 @@ std::string PointsDoc::default_save_path(int target) const {
     return t[(size_t)target].folder ? _dataset_dir : source_path();
 }
 
-void PointsDoc::save(int target, const std::string& path) {
+void PointsDoc::save(int target, const std::string& path,
+                     std::atomic<int>* progress) {
     const std::vector<SaveTarget> t = save_targets();
     if (target < 0 || target >= (int)t.size()) return;
     if (t[(size_t)target].folder) {
@@ -203,12 +237,14 @@ void PointsDoc::save(int target, const std::string& path) {
             if (!ck[i] && i < _ds.image_filenames.size())
                 keep.drop_images.push_back(_ds.image_filenames[i]);
         spirula::sparse_write_filtered(path, keep);
+        if (progress) (*progress)++;
         return;
     }
     spirula::write_ply_points(
         path, _ds.points.xyz.data(),
         _ds.points.rgb.empty() ? nullptr : _ds.points.rgb.data(),
         _ds.points.num(), alive_of(kPoints).data());
+    if (progress) (*progress)++;
 }
 
 }  // namespace gui

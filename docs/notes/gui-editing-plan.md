@@ -105,9 +105,26 @@ drag orbit or lasso?" from being a question each feature answers for itself.
 
 ### `Op` — the only thing allowed to change a document
 
-`apply`, `undo`, a name (a `Msg`, because it appears in the undo menu) and a
-serialized form. Nothing else writes to the document. An op script is then a
-file, which is what makes the whole thing testable without a window.
+`apply`, `undo`, a label (already translated and already formatted, because
+"Depth slack: increased" is a sentence with a `{0}` in it) and a serialized
+form. Nothing else writes to the document. An op script is then a file, which
+is what makes the whole thing testable without a window.
+
+A SETTING is an op too. The alternative -- re-running the last selection in
+place and quietly replacing its history entry -- looks right until the user
+reaches for Ctrl+Z and the checkbox they just ticked does not come back with
+it. So a setting change is its own entry, and re-deriving the selection it
+produced is what its `apply` and `undo` both do. A slider commits once, when
+the drag ends, from the value it started at: one entry per gesture.
+
+Which selection it re-derives cannot be a variable the session keeps, or the
+answer is wrong the moment the user walks the history: after an undo the
+session's idea of "the last selection" is a step that is no longer applied.
+So the RECIPE that produced a selection is stored ON the step, a setting step
+carries the recipe it re-ran, and `current_recipe()` -- the recipe of the step
+the history stands on -- is what a new setting change picks up. Standing on a
+delete there is no recipe, and a setting then changes nothing but itself,
+which is the right answer too.
 
 ## Making a set
 
@@ -435,6 +452,28 @@ widening it.
   surface are a long way from where the cursor is. A mesh intersects its own
   faces; a cloud searches outward from the cursor rather than at a fixed
   radius, or a coarse surface picks nothing at all.
+- **A texture atlas splits vertices.** So the face graph alone reports one
+  surface as one piece per chart, and a click on a textured mesh selects the
+  chart rather than the object. Seam copies share a position exactly, so the
+  topology welds by position before the union-find sees it.
+- **One run's outputs match by INDEX, not by position.** They are the same
+  triangles in the same order in every format, and that is the only thing
+  that survives an OBJ -- which writes positions as decimal text, so the
+  float bits that come back are near the ones that went out and never equal.
+  A position match is the fallback for a face list of another length, and it
+  has to carry a tolerance to be worth anything at all.
+- **A component pass is a second, not a frame.** Cache it against the layer,
+  the live count and the radius it was computed from -- the click after the
+  first is then free -- and run it off the GUI thread, refusing edits until
+  it lands rather than freezing the window. Give it a cancel: the user chose
+  a reach, and finding out it was too big should cost a click.
+- **Neighbours are found by CELL, not by pair.** A pairwise test inside a
+  cell costs the square of what the cell holds, and a reach of six times the
+  spacing puts thousands in one -- which is how "select the piece" became a
+  minute. Two touching cells are one piece, one shell of cells is a grow, and
+  all of it is linear in the occupied cell count whatever the reach. The cell
+  size IS the reach, so the answer is approximate at its own scale; for this
+  feature that is the right trade, and it is the one the interface promises.
 - **A fly key is not a tool key.** The viewport navigates on WASDQE, and two
   of those are also tool shortcuts. Settled: while Navigate is the active
   tool the camera keeps all six and the colliding shortcuts are not read;

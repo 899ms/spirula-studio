@@ -93,10 +93,25 @@ void CompareView::add(const std::string& path,
     if (path.empty() || full()) return;
     take_engine();
     auto m = std::make_unique<Model>();
+    m->path = path;
     m->title = title;
     m->slot = claim_slot();
     m->src.open(path, m->slot, &_engine_mutex);
     _models.push_back(std::move(m));
+}
+
+int CompareView::index_of(const std::string& path) const {
+    for (int i = 0; i < count(); i++)
+        if (_models[(size_t)i]->path == path) return i;
+    return -1;
+}
+
+void CompareView::set_shown(const std::string& path, bool on,
+                            const spirula::i18n::Msg* title) {
+    const int at = index_of(path);
+    if (on == (at >= 0)) return;
+    if (on) add(path, title);
+    else _pending_remove = at;
 }
 
 void CompareView::remove(int index) {
@@ -314,6 +329,8 @@ void CompareView::confirm_discard_edits(std::function<void()> then) {
 
 void CompareView::end_edit() {
     _edit_when_ready = false;
+    // Whatever the edit did to the other panes goes back with it.
+    if (_edit_index >= 0) show_sibling_meshes(_edit_index, FaceCut{});
     if (_edit_worker.joinable()) _edit_worker.join();
     _edit_loading = false;
     _edit_pending.reset();
@@ -354,13 +371,19 @@ void CompareView::begin_edit(int index) {
             for (int i = 0; i < 12; i++) t2n[i] = m.src.mesh_to_normalized()[i];
             ViewportPanel* panel = &m.panel;
             const std::string key = m.src.scene_key();
-            _edit.open(std::make_unique<MeshDoc>(
-                           std::move(mesh), m.src.file(), t2n,
-                           [panel, key](const meshing::MeshData& d,
-                                        const float* a) {
-                               panel->attach_preview_mesh(d, a, key);
-                           }),
-                       panel);
+            const std::string file = m.src.file();
+            auto doc = std::make_unique<MeshDoc>(
+                std::move(mesh), file, t2n,
+                [panel, key](const meshing::MeshData& d, const float* a) {
+                    panel->attach_preview_mesh(d, a, key);
+                });
+            if (_siblings_of) doc->set_siblings(_siblings_of(file));
+            // The panes showing the other outputs of the same run follow the
+            // deletions, so one edit is one preview across all of them.
+            doc->set_sibling_preview([this, index](const FaceCut& cut) {
+                show_sibling_meshes(index, cut);
+            });
+            _edit.open(std::move(doc), panel);
             break;
         }
         default: {
@@ -388,6 +411,25 @@ void CompareView::begin_edit(int index) {
     }
 }
 
+// Every other mesh pane, filtered by the same face set. They keep their own
+// colours: what they share with the edited one is the surface, not the tint.
+void CompareView::show_sibling_meshes(int except, const FaceCut& cut) {
+    meshing::MeshData tmp;
+    for (int i = 0; i < count(); i++) {
+        if (i == except) continue;
+        Model& m = *_models[(size_t)i];
+        if (!m.attached || m.src.kind() != SplatViewer::Kind::Mesh) continue;
+        if (cut.empty())
+            m.panel.attach_preview_mesh(m.src.mesh(), m.src.mesh_to_normalized(),
+                                        m.src.scene_key());
+        else {
+            mesh_drop_faces(m.src.mesh(), cut, tmp);
+            m.panel.attach_preview_mesh(tmp, m.src.mesh_to_normalized(),
+                                        m.src.scene_key());
+        }
+    }
+}
+
 void CompareView::finish_edit_load() {
     if (_edit_loading.load() || !_edit_worker.joinable()) return;
     _edit_worker.join();
@@ -408,18 +450,53 @@ void CompareView::draw_toolbar() {
         ui::OpenPopup(emsg::discard_title);
         _ask_discard = false;
     }
-    ImGui::SetNextWindowSize(ImVec2(px(420.0f), 0.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(px(540.0f), 0.0f), ImGuiCond_Appearing);
     if (ui::BeginPopupModal(emsg::discard_title)) {
         const std::string what =
             _edit.active() ? display_name(_edit.doc()->source_path()) : "";
         ui::TextWrapped(emsg::discard_body, {what});
-        if (ui::Button(emsg::discard_yes)) {
+        auto finish = [this] {
             std::function<void()> then;
             then.swap(_discard_then);
             end_edit();
             ImGui::CloseCurrentPopup();
             if (then) then();
+        };
+        // One meshing run wrote the same surface several times over; leaving
+        // the editor is the last chance to say how far the edit reaches.
+        EditDoc* d = _edit.doc();
+        const int linked = d ? d->linked_count() : 0;
+        if (linked > 0) ui::TextDisabledWrapped(emsg::mesh_link_edits_help);
+        ImGui::BeginDisabled(!_edit.can_save_in_place());
+        if (linked > 0) {
+            if (ui::Button(emsg::save_this_only)) {
+                d->set_linked(false);
+                _edit.save_in_place();
+                finish();
+            }
+            ImGui::SameLine();
+            if (ui::Button(emsg::save_all_files, {(long long)(linked + 1)})) {
+                d->set_linked(true);
+                _edit.save_in_place();
+                finish();
+            }
+        } else if (ui::Button(emsg::save_over)) {
+            _edit.save_in_place();
+            finish();
         }
+        ImGui::EndDisabled();
+        if (linked == 0) ImGui::SameLine();
+        ImGui::BeginDisabled(!_edit.can_save_copy());
+        if (ui::Button(emsg::save_copy)) {
+            // The picker outlives this popup, and the answer comes back to
+            // the still-open document; leaving is the user's next move.
+            _edit.ask_save_copy();
+            _discard_then = nullptr;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ui::Button(emsg::discard_yes)) finish();
         ImGui::SameLine();
         if (ui::Button(emsg::discard_no)) {
             _discard_then = nullptr;

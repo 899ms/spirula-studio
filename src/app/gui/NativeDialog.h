@@ -25,7 +25,7 @@ namespace gui {
 
 class NativeDialog {
 public:
-    enum class Mode { Folder, File, Save };
+    enum class Mode { Folder, File, Save, FileOrFolder };
 
     ~NativeDialog();
 

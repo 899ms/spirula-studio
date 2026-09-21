@@ -90,6 +90,7 @@ void MeshRunner::start(const MeshJob& job) {
         _error.clear();
         _stage.clear();
         _output.clear();
+        _outputs.clear();
         _log.clear();
     }
     _verts = 0;
@@ -117,6 +118,11 @@ std::string MeshRunner::error() {
 std::string MeshRunner::output_path() {
     std::lock_guard<std::mutex> lk(_mu);
     return _output;
+}
+
+std::vector<std::string> MeshRunner::output_paths() {
+    std::lock_guard<std::mutex> lk(_mu);
+    return _outputs;
 }
 
 void MeshRunner::log(const std::string& line) {
@@ -331,6 +337,9 @@ void MeshRunner::run(MeshJob job) {
             if (fs::is_regular_file(cand, ec)) { best = cand; break; }
         std::lock_guard<std::mutex> lk(_mu);
         _output = best;
+        _outputs.clear();
+        for (const std::string& cand : all)
+            if (fs::is_regular_file(cand, ec)) _outputs.push_back(cand);
     }
     _stage_lo = 1.0f;
     _stage_hi = 1.0f;

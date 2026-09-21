@@ -25,7 +25,8 @@ public:
 
     Kind kind() const override { return Kind::Splats; }
     std::vector<SaveTarget> save_targets() const override;
-    void save(int target, const std::string& path) override;
+    void save(int target, const std::string& path,
+              std::atomic<int>* progress) override;
     std::string default_save_path(int target) const override;
     void revert_display() override;
 

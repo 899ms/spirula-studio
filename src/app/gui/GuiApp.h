@@ -838,6 +838,8 @@ private:
     // The New Dataset screen's own column width; the trainer's _panel_w is a
     // different screen with a different sensible size.
     float _ds_panel_w = kDefaultDsPanelW;
+    // The editing panel's own width, dragged like the other two.
+    float _edit_panel_w = kEditPanelW;
     bool _show_settings = true;
     bool _layout_dirty = false;      // a splitter moved -> persist once idle
     // The New Dataset screen's run/status band, measured last frame: the form

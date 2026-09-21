@@ -5,7 +5,6 @@
 #include "app/gui/edit/EditDoc.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <memory>
 
@@ -15,9 +14,12 @@ namespace {
 
 // 21 bits per axis, biased to unsigned: a cell index further out than this is
 // an outlier that gets clamped, and clamping only ever merges cells that were
-// already empty of anything the distance test would accept.
+// already empty of anything a query would accept.
 constexpr int32_t kCoordBias = 1 << 20;
 constexpr int32_t kCoordMax = (1 << 21) - 1;
+// How far an element's own extent may reach, in cells. Without a cap one
+// enormous splat walks the whole grid.
+constexpr int kMaxExtentCells = 3;
 
 uint64_t pack(const int32_t c[3]) {
     uint64_t k = 0;
@@ -35,64 +37,37 @@ uint64_t mix(uint64_t x) {
     return x ^ (x >> 31);
 }
 
-// Lock-free union-find: path halving on reads and one compare-exchange per
-// link, always pointing the larger index at the smaller so the order two
-// threads reach a pair in cannot matter.
-class UnionFind {
-public:
-    explicit UnionFind(int64_t n)
-        : _p(std::make_unique<std::atomic<int32_t>[]>((size_t)n)) {
-        for (int64_t i = 0; i < n; i++)
-            _p[(size_t)i].store((int32_t)i, std::memory_order_relaxed);
-    }
-    int32_t find(int32_t x) const {
-        while (true) {
-            int32_t p = _p[(size_t)x].load(std::memory_order_relaxed);
-            if (p == x) return x;
-            const int32_t g = _p[(size_t)p].load(std::memory_order_relaxed);
-            _p[(size_t)x].compare_exchange_weak(p, g, std::memory_order_relaxed);
-            x = g;
-        }
-    }
-    void unite(int32_t a, int32_t b) {
-        while (true) {
-            a = find(a);
-            b = find(b);
-            if (a == b) return;
-            if (a > b) std::swap(a, b);
-            int32_t expect = b;
-            if (_p[(size_t)b].compare_exchange_weak(expect, a,
-                                                    std::memory_order_relaxed))
-                return;
-        }
-    }
-
-private:
-    std::unique_ptr<std::atomic<int32_t>[]> _p;
-};
-
-// Roots to dense labels, in first-seen order.
-void label_roots(const UnionFind& uf, const uint8_t* alive, int64_t n,
-                 std::vector<int32_t>& label, std::vector<int64_t>& sizes) {
-    std::vector<int32_t> remap((size_t)n, -1);
-    for (int64_t i = 0; i < n; i++) {
-        if (alive && !alive[i]) continue;
-        const int32_t root = uf.find((int32_t)i);
-        int32_t& l = remap[(size_t)root];
-        if (l < 0) {
-            l = (int32_t)sizes.size();
-            sizes.push_back(0);
-        }
-        label[(size_t)i] = l;
-        sizes[(size_t)l]++;
-    }
-}
-
 uint64_t table_size_for(int64_t n) {
     uint64_t m = 16;
     while (m < (uint64_t)std::max<int64_t>(n, 1) * 2) m <<= 1;
     return m;
 }
+
+// Union-find, path-halved and always linking the larger index under the
+// smaller so the order two merges arrive in cannot matter.
+class UnionFind {
+public:
+    explicit UnionFind(int64_t n) : _p((size_t)n) {
+        for (int64_t i = 0; i < n; i++) _p[(size_t)i] = (int32_t)i;
+    }
+    int32_t find(int32_t x) {
+        while (_p[(size_t)x] != x) {
+            _p[(size_t)x] = _p[(size_t)_p[(size_t)x]];
+            x = _p[(size_t)x];
+        }
+        return x;
+    }
+    void unite(int32_t a, int32_t b) {
+        a = find(a);
+        b = find(b);
+        if (a == b) return;
+        if (a > b) std::swap(a, b);
+        _p[(size_t)b] = a;
+    }
+
+private:
+    std::vector<int32_t> _p;
+};
 
 }  // namespace
 
@@ -103,6 +78,8 @@ void ElementGrid::clear() {
     _cell = 0.0f;
     _items.clear();
     _beg.clear();
+    _of_element.clear();
+    _coords.clear();
     _hkey.clear();
     _hval.clear();
     _hmask = 0;
@@ -143,8 +120,9 @@ void ElementGrid::build(const EditDoc& doc, float cell) {
 
     // One pass: intern each element's cell and count it, in first-seen order.
     std::vector<int32_t> count;
-    std::vector<int32_t> of_element((size_t)n);
+    _of_element.resize((size_t)n);
     count.reserve((size_t)n / 4 + 16);
+    _coords.reserve((size_t)n / 4 * 3 + 48);
     for (int64_t i = 0; i < n; i++) {
         int32_t c[3];
         coords_of(pos + i * 3, c);
@@ -156,9 +134,10 @@ void ElementGrid::build(const EditDoc& doc, float cell) {
             _hkey[(size_t)slot] = key;
             _hval[(size_t)slot] = (int32_t)count.size();
             count.push_back(0);
+            for (int d = 0; d < 3; d++) _coords.push_back(c[d]);
         }
         const int32_t k = _hval[(size_t)slot];
-        of_element[(size_t)i] = k;
+        _of_element[(size_t)i] = k;
         count[(size_t)k]++;
     }
 
@@ -167,7 +146,7 @@ void ElementGrid::build(const EditDoc& doc, float cell) {
     _items.resize((size_t)n);
     std::vector<int32_t> cursor(_beg.begin(), _beg.end() - 1);
     for (int64_t i = 0; i < n; i++)
-        _items[(size_t)cursor[(size_t)of_element[(size_t)i]]++] = (int32_t)i;
+        _items[(size_t)cursor[(size_t)_of_element[(size_t)i]]++] = (int32_t)i;
 }
 
 // Converges on a cell holding about four elements. Each pass is one O(n)
@@ -199,133 +178,125 @@ float ElementGrid::measure_spacing(const EditDoc& doc) {
 
 
 // ---------------------------------------------------------------------------
-// Neighbour walks
+// Neighbour walks. All of them are over CELLS: a pairwise test costs the
+// square of what a cell holds, and the cell size is the reach anyway.
 // ---------------------------------------------------------------------------
 
-void ElementGrid::grow(std::vector<uint8_t>& sel, float radius,
-                       const uint8_t* alive, int64_t n) const {
+void ElementGrid::grow(std::vector<uint8_t>& sel, const uint8_t* alive,
+                       int64_t n) const {
     if (!built() || n != _n) return;
-    const float r2 = radius * radius;
-    const int reach = std::max(1, (int)std::ceil(radius / _cell));
-    std::vector<uint8_t> next = sel;
-#pragma omp parallel for schedule(dynamic, 4096)
+    const int64_t cells = occupied();
+    // The strongest weight any cell holds, then one shell of that outward.
+    std::vector<uint8_t> hot((size_t)cells, 0);
+    for (int64_t i = 0; i < _n; i++)
+        if (sel[(size_t)i])
+            hot[(size_t)_of_element[(size_t)i]] =
+                std::max(hot[(size_t)_of_element[(size_t)i]], sel[(size_t)i]);
+    std::vector<uint8_t> next = hot;
+    for (int64_t k = 0; k < cells; k++) {
+        if (!hot[(size_t)k]) continue;
+        const int32_t* c = &_coords[(size_t)k * 3];
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
+            const int32_t j = find_cell(cc);
+            if (j >= 0) next[(size_t)j] = std::max(next[(size_t)j], hot[(size_t)k]);
+        }
+    }
     for (int64_t i = 0; i < _n; i++) {
         if (sel[(size_t)i] || (alive && !alive[i])) continue;
-        const float* p = _pos + i * 3;
-        int32_t c[3];
-        coords_of(p, c);
-        uint8_t best = 0;
-        for (int32_t dz = -reach; dz <= reach && !best; dz++)
-        for (int32_t dy = -reach; dy <= reach && !best; dy++)
-        for (int32_t dx = -reach; dx <= reach && !best; dx++) {
-            const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
-            const int32_t k = find_cell(cc);
-            if (k < 0) continue;
-            for (int32_t t = _beg[(size_t)k]; t < _beg[(size_t)k + 1]; t++) {
-                const int32_t j = _items[(size_t)t];
-                if (!sel[(size_t)j]) continue;
-                const float* q = _pos + (int64_t)j * 3;
-                const float ex = q[0] - p[0], ey = q[1] - p[1], ez = q[2] - p[2];
-                if (ex * ex + ey * ey + ez * ez <= r2) {
-                    best = sel[(size_t)j];
-                    break;
-                }
-            }
-        }
-        if (best) next[(size_t)i] = best;
+        sel[(size_t)i] = next[(size_t)_of_element[(size_t)i]];
     }
-    sel.swap(next);
 }
 
-void ElementGrid::shrink(std::vector<uint8_t>& sel, float radius,
-                         const uint8_t* alive, int64_t n) const {
+void ElementGrid::shrink(std::vector<uint8_t>& sel, const uint8_t* alive,
+                         int64_t n) const {
     if (!built() || n != _n) return;
-    const float r2 = radius * radius;
-    const int reach = std::max(1, (int)std::ceil(radius / _cell));
-    std::vector<uint8_t> next = sel;
-#pragma omp parallel for schedule(dynamic, 4096)
-    for (int64_t i = 0; i < _n; i++) {
-        if (!sel[(size_t)i]) continue;
-        const float* p = _pos + i * 3;
-        int32_t c[3];
-        coords_of(p, c);
-        bool edge = false;
-        for (int32_t dz = -reach; dz <= reach && !edge; dz++)
-        for (int32_t dy = -reach; dy <= reach && !edge; dy++)
-        for (int32_t dx = -reach; dx <= reach && !edge; dx++) {
+    const int64_t cells = occupied();
+    // A cell is "open" when it holds anything live that is not selected.
+    std::vector<uint8_t> open((size_t)cells, 0);
+    for (int64_t i = 0; i < _n; i++)
+        if (!sel[(size_t)i] && (!alive || alive[i]))
+            open[(size_t)_of_element[(size_t)i]] = 1;
+    std::vector<uint8_t> edge((size_t)cells, 0);
+    for (int64_t k = 0; k < cells; k++) {
+        if (!open[(size_t)k]) continue;
+        const int32_t* c = &_coords[(size_t)k * 3];
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
             const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
-            const int32_t k = find_cell(cc);
-            if (k < 0) continue;
-            for (int32_t t = _beg[(size_t)k]; t < _beg[(size_t)k + 1]; t++) {
-                const int32_t j = _items[(size_t)t];
-                if (sel[(size_t)j] || (alive && !alive[j])) continue;
-                const float* q = _pos + (int64_t)j * 3;
-                const float ex = q[0] - p[0], ey = q[1] - p[1], ez = q[2] - p[2];
-                if (ex * ex + ey * ey + ez * ez <= r2) {
-                    edge = true;
-                    break;
-                }
-            }
+            const int32_t j = find_cell(cc);
+            if (j >= 0) edge[(size_t)j] = 1;
         }
-        if (edge) next[(size_t)i] = 0;
     }
-    sel.swap(next);
+    for (int64_t i = 0; i < _n; i++)
+        if (sel[(size_t)i] && edge[(size_t)_of_element[(size_t)i]])
+            sel[(size_t)i] = 0;
 }
 
 
-void ElementGrid::components(float radius, const uint8_t* alive, int64_t n,
+bool ElementGrid::components(const uint8_t* alive, int64_t n,
                              std::vector<int32_t>& label,
                              std::vector<int64_t>& sizes, const float* radii,
-                             float scale) const {
+                             float scale,
+                             const std::atomic<bool>* cancel) const {
     label.assign((size_t)n, -1);
     sizes.clear();
-    if (!built() || n != _n) return;
+    if (!built() || n != _n) return true;
+    const int64_t cells = occupied();
+    UnionFind uf(cells);
 
-    const float r2 = radius * radius;
-    const int base_reach = std::max(1, (int)std::ceil(radius / _cell));
-    UnionFind uf(_n);
-
-    // With no per-element radius the pair test is symmetric, so half the
-    // neighbourhood covers every pair once. With one it is not: the large
-    // element has to reach the small one, and only its own walk can.
-    const int32_t back = radii ? -1 : 0;
-#pragma omp parallel for schedule(dynamic, 4096)
-    for (int64_t i = 0; i < _n; i++) {
-        if (alive && !alive[i]) continue;
-        const float* p = _pos + i * 3;
-        const float ri = radii ? radii[i] : 0.0f;
-        const int reach = radii
-            ? std::min(std::max(base_reach,
-                                (int)std::ceil(2.0f * scale * ri / _cell)), 8)
-            : base_reach;
-        int32_t c[3];
-        coords_of(p, c);
-        for (int32_t dz = back * reach; dz <= reach; dz++)
-        for (int32_t dy = (!radii && dz == 0 ? 0 : -reach); dy <= reach; dy++)
-        for (int32_t dx = (!radii && dz == 0 && dy == 0 ? 0 : -reach);
-             dx <= reach; dx++) {
+    // Every occupied cell, joined to the occupied cells it touches. Half the
+    // neighbourhood: an unordered pair only has to be found once.
+    for (int64_t k = 0; k < cells; k++) {
+        if (cancel && (k & 0xfff) == 0 && cancel->load()) return false;
+        const int32_t* c = &_coords[(size_t)k * 3];
+        for (int dz = 0; dz <= 1; dz++)
+        for (int dy = (dz == 0 ? 0 : -1); dy <= 1; dy++)
+        for (int dx = (dz == 0 && dy == 0 ? 1 : -1); dx <= 1; dx++) {
             const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
-            const int32_t k = find_cell(cc);
-            if (k < 0) continue;
-            const bool same = dx == 0 && dy == 0 && dz == 0;
-            for (int32_t t = _beg[(size_t)k]; t < _beg[(size_t)k + 1]; t++) {
-                const int32_t j = _items[(size_t)t];
-                if (j == (int32_t)i || (!radii && same && j < (int32_t)i)) continue;
-                if (alive && !alive[j]) continue;
-                const float* q = _pos + (int64_t)j * 3;
-                const float ex = q[0] - p[0], ey = q[1] - p[1], ez = q[2] - p[2];
-                const float d2 = ex * ex + ey * ey + ez * ez;
-                float lim2 = r2;
-                if (radii) {
-                    const float lim = scale * (ri + radii[j]);
-                    lim2 = std::max(r2, lim * lim);
-                }
-                if (d2 <= lim2) uf.unite((int32_t)i, j);
+            const int32_t j = find_cell(cc);
+            if (j >= 0) uf.unite((int32_t)k, j);
+        }
+    }
+
+    // An element wider than a cell reaches past its own: a big Gaussian in
+    // the sky belongs with the ones it overlaps, which are as far off as it
+    // is large.
+    if (radii) {
+        for (int64_t i = 0; i < _n; i++) {
+            if (alive && !alive[i]) continue;
+            const int m = std::min((int)std::floor(scale * radii[i] / _cell),
+                                   kMaxExtentCells);
+            if (m <= 0) continue;
+            if (cancel && (i & 0xffff) == 0 && cancel->load()) return false;
+            const int32_t home = _of_element[(size_t)i];
+            const int32_t* c = &_coords[(size_t)home * 3];
+            for (int dz = -m; dz <= m; dz++)
+            for (int dy = -m; dy <= m; dy++)
+            for (int dx = -m; dx <= m; dx++) {
+                const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
+                const int32_t j = find_cell(cc);
+                if (j >= 0) uf.unite(home, j);
             }
         }
     }
 
-    label_roots(uf, alive, _n, label, sizes);
+    std::vector<int32_t> remap((size_t)cells, -1);
+    for (int64_t i = 0; i < _n; i++) {
+        if (alive && !alive[i]) continue;
+        const int32_t root = uf.find(_of_element[(size_t)i]);
+        int32_t& l = remap[(size_t)root];
+        if (l < 0) {
+            l = (int32_t)sizes.size();
+            sizes.push_back(0);
+        }
+        label[(size_t)i] = l;
+        sizes[(size_t)l]++;
+    }
+    return true;
 }
 
 
@@ -343,7 +314,18 @@ void components_from_pairs(const int32_t* pairs, int64_t n_pairs,
         if (alive && (!alive[a] || !alive[b])) continue;
         uf.unite(a, b);
     }
-    label_roots(uf, alive, n, label, sizes);
+    std::vector<int32_t> remap((size_t)n, -1);
+    for (int64_t i = 0; i < n; i++) {
+        if (alive && !alive[i]) continue;
+        const int32_t root = uf.find((int32_t)i);
+        int32_t& l = remap[(size_t)root];
+        if (l < 0) {
+            l = (int32_t)sizes.size();
+            sizes.push_back(0);
+        }
+        label[(size_t)i] = l;
+        sizes[(size_t)l]++;
+    }
 }
 
 }  // namespace gui

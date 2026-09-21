@@ -133,12 +133,34 @@ void EditDoc::goto_step(int head) {
     while (_head < head) redo();
 }
 
-const spirula::i18n::Msg* EditDoc::undo_name() const {
-    return can_undo() ? &_ops[(size_t)_head - 1]->name() : nullptr;
+std::string EditDoc::undo_name() const {
+    return can_undo() ? _ops[(size_t)_head - 1]->label() : std::string();
 }
 
-const spirula::i18n::Msg* EditDoc::redo_name() const {
-    return can_redo() ? &_ops[(size_t)_head]->name() : nullptr;
+std::string EditDoc::redo_name() const {
+    return can_redo() ? _ops[(size_t)_head]->label() : std::string();
+}
+
+std::shared_ptr<const SelectRecipe> EditDoc::current_recipe() const {
+    return _head > 0 ? _ops[(size_t)_head - 1]->recipe()
+                     : std::shared_ptr<const SelectRecipe>();
+}
+
+// The current layer's live positions, which are already in the frame the
+// viewport navigates.
+bool EditDoc::live_centers(dsparse::CenterTable& out) const {
+    const Layer& L = at(_cur);
+    if (L.alive_count <= 0) return false;
+    std::vector<float> live;
+    live.reserve((size_t)L.alive_count * 3);
+    for (int64_t i = 0; i < L.count; i++) {
+        if (!L.alive[(size_t)i]) continue;
+        live.insert(live.end(), L.pos.begin() + (ptrdiff_t)(i * 3),
+                    L.pos.begin() + (ptrdiff_t)(i * 3 + 3));
+    }
+    out = dsparse::scene_centers(nullptr, 0, live.data(),
+                                 (int64_t)live.size() / 3, 3, nullptr);
+    return true;
 }
 
 bool EditDoc::publish() {
@@ -189,8 +211,8 @@ public:
         if (!_invert) doc.set_selection(w);
         doc.mark_geometry_dirty();
     }
-    const spirula::i18n::Msg& name() const override {
-        return _invert ? msg::op_isolate : msg::op_delete;
+    std::string label() const override {
+        return (_invert ? msg::op_isolate : msg::op_delete).get();
     }
     size_t bytes() const override {
         return _idx.size() * (sizeof(int32_t) + 1) + 32;
@@ -217,7 +239,7 @@ public:
         for (int32_t i : _idx) doc.set_alive(i, false);
         doc.mark_geometry_dirty();
     }
-    const spirula::i18n::Msg& name() const override { return msg::op_restore; }
+    std::string label() const override { return msg::op_restore.get(); }
     size_t bytes() const override { return _idx.size() * sizeof(int32_t) + 32; }
 
 private:
@@ -228,14 +250,18 @@ private:
 class SelectOp : public EditOp {
 public:
     SelectOp(int layer, std::vector<uint8_t> prev, std::vector<uint8_t> next,
-             const spirula::i18n::Msg& name)
+             std::string label, std::shared_ptr<const SelectRecipe> recipe)
         : _layer(layer), _prev(rle_encode(prev)), _next(rle_encode(next)),
-          _n(prev.size()), _name(&name) {}
+          _n(prev.size()), _label(std::move(label)),
+          _recipe(std::move(recipe)) {}
 
     void apply(EditDoc& doc) override { put(doc, _next); }
     void undo(EditDoc& doc) override { put(doc, _prev); }
-    const spirula::i18n::Msg& name() const override { return *_name; }
+    std::string label() const override { return _label; }
     size_t bytes() const override { return _prev.size() + _next.size() + 48; }
+    std::shared_ptr<const SelectRecipe> recipe() const override {
+        return _recipe;
+    }
 
 private:
     void put(EditDoc& doc, const std::vector<uint8_t>& rle) {
@@ -248,7 +274,8 @@ private:
     int _layer;
     std::vector<uint8_t> _prev, _next;
     size_t _n;
-    const spirula::i18n::Msg* _name;
+    std::string _label;
+    std::shared_ptr<const SelectRecipe> _recipe;
 };
 
 }  // namespace
@@ -277,10 +304,53 @@ std::unique_ptr<EditOp> make_reveal_op(EditDoc& doc) {
     return std::make_unique<RevealOp>(doc.layer(), std::move(idx));
 }
 
+namespace {
+
+// A setting change. It touches no element, so undo is the same call the other
+// way and the history costs nothing to carry it.
+class SettingOp : public EditOp {
+public:
+    SettingOp(std::function<void(bool)> apply, std::string label,
+              std::shared_ptr<const SelectRecipe> recipe)
+        : _apply(std::move(apply)), _label(std::move(label)),
+          _recipe(std::move(recipe)) {}
+    void apply(EditDoc& doc) override {
+        _apply(true);
+        doc.mark_display_dirty();
+    }
+    void undo(EditDoc& doc) override {
+        _apply(false);
+        doc.mark_display_dirty();
+    }
+    std::string label() const override { return _label; }
+    size_t bytes() const override { return _label.size() + 64; }
+    // The selection this step re-derives, so a second setting changed on top
+    // of it re-derives the same one.
+    std::shared_ptr<const SelectRecipe> recipe() const override {
+        return _recipe;
+    }
+
+private:
+    std::function<void(bool)> _apply;
+    std::string _label;
+    std::shared_ptr<const SelectRecipe> _recipe;
+};
+
+}  // namespace
+
+std::unique_ptr<EditOp> make_setting_op(std::function<void(bool)> apply,
+                                        std::string label,
+                                        std::shared_ptr<const SelectRecipe> recipe) {
+    return std::make_unique<SettingOp>(std::move(apply), std::move(label),
+                                       std::move(recipe));
+}
+
 std::unique_ptr<EditOp> make_select_op(EditDoc& doc, std::vector<uint8_t> next,
-                                       const spirula::i18n::Msg& name) {
+                                       std::string label,
+                                       std::shared_ptr<const SelectRecipe> recipe) {
     return std::make_unique<SelectOp>(doc.layer(), doc.sel().weights(),
-                                      std::move(next), name);
+                                      std::move(next), std::move(label),
+                                      std::move(recipe));
 }
 
 }  // namespace gui

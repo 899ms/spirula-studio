@@ -4,8 +4,16 @@
 
 #include "i18n/catalog/Edit.h"
 
+#include "mesh/MeshImport.h"
+
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <memory>
+#include <unordered_map>
+#include <stdexcept>
 
 namespace msg = spirula::i18n::msg::edit;
 
@@ -14,6 +22,128 @@ namespace gui {
 namespace {
 
 constexpr unsigned char kTint[3] = {255, 108, 13};
+
+std::array<float, 3> centroid_of(const std::array<float, 3>* V,
+                                 const std::array<int, 3>& f) {
+    std::array<float, 3> c{};
+    for (int k = 0; k < 3; k++)
+        c[k] = (V[f[0]][k] + V[f[1]][k] + V[f[2]][k]) / 3.0f;
+    return c;
+}
+
+// The dropped faces in a hash grid of cells one tolerance across, so a
+// centroid that came back through decimal text still finds its face.
+class CentroidSet {
+public:
+    CentroidSet(const std::vector<std::array<float, 3>>& pts, float eps)
+        : _pts(pts), _eps(std::max(eps, 1e-12f)) {
+        for (size_t i = 0; i < pts.size(); i++) _cells.emplace(key(pts[i]), i);
+    }
+    bool holds(const std::array<float, 3>& q) const {
+        const float e2 = _eps * _eps;
+        int32_t c[3];
+        cell(q, c);
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
+            auto range = _cells.equal_range(pack_cell(cc));
+            for (auto it = range.first; it != range.second; ++it) {
+                const std::array<float, 3>& p = _pts[it->second];
+                float d = 0.0f;
+                for (int k = 0; k < 3; k++) {
+                    const float t = p[k] - q[k];
+                    d += t * t;
+                }
+                if (d <= e2) return true;
+            }
+        }
+        return false;
+    }
+
+private:
+    void cell(const std::array<float, 3>& p, int32_t c[3]) const {
+        for (int k = 0; k < 3; k++) c[k] = (int32_t)std::floor(p[k] / _eps);
+    }
+    static uint64_t pack_cell(const int32_t c[3]) {
+        uint64_t h = 0xcbf29ce484222325ull;
+        for (int k = 0; k < 3; k++)
+            h = (h ^ (uint64_t)(uint32_t)c[k]) * 0x100000001b3ull;
+        return h;
+    }
+    uint64_t key(const std::array<float, 3>& p) const {
+        int32_t c[3];
+        cell(p, c);
+        return pack_cell(c);
+    }
+    const std::vector<std::array<float, 3>>& _pts;
+    float _eps;
+    std::unordered_multimap<uint64_t, size_t> _cells;
+};
+
+}  // namespace
+
+void mesh_drop_faces(const meshing::MeshData& m, const FaceCut& cut,
+                     meshing::MeshData& out) {
+    out = meshing::MeshData();
+    // Same length means the same triangles in the same order, which is what
+    // one meshing run writes into every format it was asked for.
+    const bool by_index = cut.drop.size() == m.F.size();
+    std::unique_ptr<CentroidSet> near;
+    if (!by_index && !cut.centroids.empty())
+        near = std::make_unique<CentroidSet>(cut.centroids, cut.tolerance);
+    std::vector<int> remap(m.V.size(), -1);
+    out.F.reserve(m.F.size());
+    for (size_t fi = 0; fi < m.F.size(); fi++) {
+        const auto& f = m.F[fi];
+        const bool drop = by_index
+            ? cut.drop[fi] != 0
+            : (near && near->holds(centroid_of(m.V.data(), f)));
+        if (drop) continue;
+        std::array<int, 3> g{};
+        for (int k = 0; k < 3; k++) {
+            int& r = remap[(size_t)f[k]];
+            if (r < 0) {
+                r = (int)out.V.size();
+                out.V.push_back(m.V[(size_t)f[k]]);
+                if (m.N.size() == m.V.size()) out.N.push_back(m.N[(size_t)f[k]]);
+                if (m.C.size() == m.V.size()) out.C.push_back(m.C[(size_t)f[k]]);
+                if (m.UV.size() == m.V.size()) out.UV.push_back(m.UV[(size_t)f[k]]);
+            }
+            g[k] = r;
+        }
+        out.F.push_back(g);
+    }
+    out.tex_width = m.tex_width;
+    out.tex_height = m.tex_height;
+    out.texture = m.texture;
+}
+
+namespace {
+
+// Rewrite one of them, dropping the faces `dropped` names. Its own colours,
+// UVs and texture ride along untouched.
+void filter_sibling(const std::string& path, const FaceCut& cut) {
+    meshing::MeshData m;
+    std::string err;
+    if (!meshing::read_mesh(path, m, err)) throw std::runtime_error(err);
+    meshing::MeshData out;
+    mesh_drop_faces(m, cut, out);
+    meshing::MeshColorMode mode = meshing::MeshColorMode::None;
+    if (!out.UV.empty() && !out.texture.empty())
+        mode = meshing::MeshColorMode::Texture;
+    else if (!out.C.empty())
+        mode = meshing::MeshColorMode::Vertex;
+    std::string ext = std::filesystem::path(path).extension().string();
+    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    const meshing::MeshFormatSpec spec = meshing::parse_one_mesh_format(ext);
+    if (!meshing::check_export_support(spec, mode).empty())
+        mode = out.C.empty() ? meshing::MeshColorMode::None
+                             : meshing::MeshColorMode::Vertex;
+    meshing::write_mesh(out, mode, spec, meshing::mesh_output_strip_ext(path),
+                        false);
+}
 
 bool textured(const meshing::MeshData& m) {
     return m.UV.size() == m.V.size() && m.tex_width > 0 && m.tex_height > 0 &&
@@ -46,12 +176,28 @@ MeshDoc::MeshDoc(meshing::MeshData mesh, const std::string& source,
                                      _t2n[r*4+2]*p[2] + _t2n[r*4+3];
     }
     _live_faces = (int64_t)_m.F.size();
-    _edges.reserve(_m.F.size() * 6);
+    _edges.reserve(_m.F.size() * 6 + (size_t)n * 2);
     for (const auto& f : _m.F)
         for (int k = 0; k < 3; k++) {
             _edges.push_back(f[k]);
             _edges.push_back(f[(k + 1) % 3]);
         }
+    // A texture atlas SPLITS vertices along its seams, so the face graph
+    // alone reports one surface as one piece per chart. Seam copies share a
+    // position exactly, so welding by position puts the surface back.
+    {
+        std::vector<int32_t> order((size_t)n);
+        for (int64_t i = 0; i < n; i++) order[(size_t)i] = (int32_t)i;
+        const auto& V = _m.V;
+        std::sort(order.begin(), order.end(), [&V](int32_t a, int32_t b) {
+            return V[(size_t)a] < V[(size_t)b];
+        });
+        for (size_t i = 1; i < order.size(); i++)
+            if (V[(size_t)order[i]] == V[(size_t)order[i - 1]]) {
+                _edges.push_back(order[i - 1]);
+                _edges.push_back(order[i]);
+            }
+    }
 
     _display.V = _m.V;
     _display.N = _m.N;
@@ -129,8 +275,27 @@ void MeshDoc::publish_impl(bool geometry) {
         for (const auto& f : _m.F)
             if (alive[f[0]] && alive[f[1]] && alive[f[2]]) _display.F.push_back(f);
         _live_faces = (int64_t)_display.F.size();
+        // The panes showing the other outputs follow the deletions but not
+        // the selection tint: they are the same surface, not the same edit.
+        if (_preview_siblings) _preview_siblings(dropped_faces());
     }
     _show(_display, _t2n);
+}
+
+FaceCut MeshDoc::dropped_faces() const {
+    const uint8_t* live = alive();
+    FaceCut cut;
+    cut.drop.assign(_m.F.size(), 0);
+    for (size_t i = 0; i < _m.F.size(); i++) {
+        const auto& f = _m.F[i];
+        if (live[f[0]] && live[f[1]] && live[f[2]]) continue;
+        cut.drop[i] = 1;
+        cut.centroids.push_back(centroid_of(_m.V.data(), f));
+    }
+    // Loose enough to survive a decimal round trip, tight enough that no two
+    // triangles of one surface share a match.
+    cut.tolerance = extent() * 1e-4f;
+    return cut;
 }
 
 void MeshDoc::revert_display() {
@@ -146,7 +311,20 @@ std::vector<SaveTarget> MeshDoc::save_targets() const {
 
 std::string MeshDoc::default_save_path(int) const { return source_path(); }
 
-void MeshDoc::save(int target, const std::string& path) {
+void MeshDoc::set_siblings(std::vector<std::string> paths) {
+    _siblings.clear();
+    for (std::string& p : paths)
+        if (p != source_path()) _siblings.push_back(std::move(p));
+}
+
+
+
+int MeshDoc::save_steps(int) const {
+    return 1 + (_link ? (int)_siblings.size() : 0);
+}
+
+void MeshDoc::save(int target, const std::string& path,
+                   std::atomic<int>* progress) {
     static const char* kFmt[] = {"ply", "obj", "glb", "stl"};
     const int t = std::clamp(target, 0, 3);
     const std::vector<uint8_t>& keep = alive_of(0);
@@ -191,6 +369,17 @@ void MeshDoc::save(int target, const std::string& path) {
     }
     meshing::write_mesh(out, mode, spec,
                         meshing::mesh_output_strip_ext(path), false);
+    if (progress) (*progress)++;
+
+    // The run's other formats are the same surface, so what left this one
+    // leaves them too -- matched by position, since the atlas renumbers.
+    if (!_link || _siblings.empty()) return;
+    const FaceCut cut = dropped_faces();
+    if (cut.empty()) return;
+    for (const std::string& s : _siblings) {
+        filter_sibling(s, cut);
+        if (progress) (*progress)++;
+    }
 }
 
 }  // namespace gui

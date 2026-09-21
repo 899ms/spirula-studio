@@ -91,8 +91,9 @@ std::vector<SaveTarget> SplatDoc::save_targets() const {
 
 std::string SplatDoc::default_save_path(int) const { return source_path(); }
 
-void SplatDoc::save(int, const std::string& path) {
+void SplatDoc::save(int, const std::string& path, std::atomic<int>* progress) {
     spirula::write_splat_ply(_c, path, alive());
+    if (progress) (*progress)++;
 }
 
 }  // namespace gui
