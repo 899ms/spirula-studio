@@ -372,6 +372,14 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/edit/AlignFit.cpp)
     ss_configure_app(align_fit_test)
 
+    add_executable(attributes_test
+        ${SS_SRC}/app/gui/tests/attributes_test.cpp
+        ${SS_SRC}/app/gui/edit/Attributes.cpp
+        ${SS_SRC}/app/gui/edit/EditDoc.cpp
+        ${SS_SRC}/app/gui/edit/ElementGrid.cpp
+        ${SS_SRC}/app/gui/edit/Selection.cpp)
+    ss_configure_app(attributes_test)
+
     add_executable(preset_roundtrip_test
         ${SS_SRC}/app/gui/tests/preset_roundtrip_test.cpp
         ${SS_SRC}/app/gui/DatasetPreset.cpp

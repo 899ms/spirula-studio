@@ -403,9 +403,9 @@ void ViewportPanel::adopt_gauge(const ParsedDataset& ds, bool first) {
             }
     _gauge_metric = ds.gauge_metric;
     _scene_scale = ds.train_frame_scale > 0 ? ds.train_frame_scale : 1.0f;
-    // A model whose orientation was measured does not want the guess on top
-    // of it; one that has only the guess keeps it.
-    if (first) _level_cameras = !ds.gauge_oriented;
+    // A model whose orientation was measured, or placed by hand in the
+    // editor, does not want the guess on top of it.
+    if (first) _level_cameras = !ds.gauge_oriented && !ds.edited_in_place;
     rebuild_m2s();
     _dirty = true;
 }
@@ -788,11 +788,9 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         tool_owns_left = _interactor->on_viewport_input(in);
     }
 
-    // Pointer (mouse; single-touch and OS touch/trackpad gestures arrive as
-    // emulated mouse + wheel events -- one finger orbits, two-finger
-    // pan/pinch maps to the wheel). Drag mapping per viewer.html:
-    //   MMB / RMB / Shift+drag -> pan
-    //   LMB: orbit (turntable/trackball) or look (fps/fly)
+    // Pointer (touch and trackpad gestures arrive as mouse + wheel events):
+    //   LMB / MMB: orbit (turntable/trackball) or look (fps/fly)
+    //   RMB, Shift+MMB, Shift+LMB: pan
     if (hovered && !_dragging) {
         for (int b : {ImGuiMouseButton_Left, ImGuiMouseButton_Right,
                       ImGuiMouseButton_Middle}) {
@@ -813,14 +811,14 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         } else {
             float dx = io.MouseDelta.x, dy = io.MouseDelta.y;
             if (dx != 0 || dy != 0) {
-                // With a tool on the left button the middle one has to
-                // orbit, or the view cannot be turned without leaving the
-                // tool.
+                // The middle button orbits in every viewport: a hand that
+                // learned it in the editor drags with it everywhere. Shift is
+                // a tool's modifier while one owns the left button.
                 const bool modal = _interactor &&
                                    _interactor->owns_left_button();
                 bool is_pan = _drag_button == ImGuiMouseButton_Right ||
-                              (_drag_button == ImGuiMouseButton_Middle && !modal) ||
-                              (io.KeyShift && !modal);
+                              (io.KeyShift &&
+                               (_drag_button == ImGuiMouseButton_Middle || !modal));
                 if (spirula::env("NAV_DEBUG"))
                     std::fprintf(stderr,
                         "[nav] btn=%d pan=%d shift=%d d=(%.0f,%.0f) tgt=(%.3f,%.3f,%.3f) pos=(%.3f,%.3f,%.3f)\n",

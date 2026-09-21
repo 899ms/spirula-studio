@@ -225,6 +225,22 @@ bool PointsDoc::up_hint(float up[3]) const {
     return true;
 }
 
+const spirula::SparseStats* PointsDoc::sparse_stats() const {
+    if (!_stats_read) {
+        _stats_read = true;
+        try {
+            if (!_dataset_dir.empty()) _stats = spirula::read_sparse_stats(_dataset_dir);
+        } catch (const std::exception&) {
+            _stats = spirula::SparseStats{};
+        }
+        // A model edited and saved by an earlier session still lines up; one
+        // whose point count disagrees with what was parsed does not.
+        if ((int64_t)_stats.track_beg.size() != _ds.points.num() + 1)
+            _stats = spirula::SparseStats{};
+    }
+    return _stats.empty() ? nullptr : &_stats;
+}
+
 bool PointsDoc::colours(std::vector<float>& rgb) const {
     if (layer() != kPoints || _ds.points.rgb.empty()) return false;
     rgb.resize(_ds.points.rgb.size());

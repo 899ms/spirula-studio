@@ -9110,6 +9110,57 @@ SS_MSG(gizmo_to_perspective,
     TR("Perspektif görünüme geç (sayısal tuş takımı 5)."));
 
 
+
+// ===========================================================================
+// Saving under a name that gained its extension
+// ===========================================================================
+
+SS_MSG(fd_replace_title,
+    EN("Replace the file?"),
+    JA("ファイルを置き換えますか？"),
+    ZH_HANS("要替换文件吗？"),
+    ZH_HANT("要取代檔案嗎？"),
+    KO("파일을 바꿀까요?"),
+    DE("Datei ersetzen?"),
+    FR("Remplacer le fichier ?"),
+    ES("¿Reemplazar el archivo?"),
+    PT("Substituir o arquivo?"),
+    IT("Sostituire il file?"),
+    NL("Bestand vervangen?"),
+    RU("Заменить файл?"),
+    TR("Dosya değiştirilsin mi?"));
+
+SS_MSG(fd_replace_body,
+    EN("{0} already exists. Replace it?"),
+    JA("{0} は既に存在します。置き換えますか？"),
+    ZH_HANS("{0} 已经存在。要替换它吗？"),
+    ZH_HANT("{0} 已經存在。要取代它嗎？"),
+    KO("{0}이(가) 이미 있습니다. 바꿀까요?"),
+    DE("{0} existiert bereits. Ersetzen?"),
+    FR("{0} existe déjà. Le remplacer ?"),
+    ES("{0} ya existe. ¿Reemplazarlo?"),
+    PT("{0} já existe. Substituí-lo?"),
+    IT("{0} esiste già. Sostituirlo?"),
+    NL("{0} bestaat al. Vervangen?"),
+    RU("{0} уже существует. Заменить?"),
+    TR("{0} zaten var. Değiştirilsin mi?"));
+
+SS_MSG(fd_replace_yes,
+    EN("Replace"),
+    JA("置き換える"),
+    ZH_HANS("替换"),
+    ZH_HANT("取代"),
+    KO("바꾸기"),
+    DE("Ersetzen"),
+    FR("Remplacer"),
+    ES("Reemplazar"),
+    PT("Substituir"),
+    IT("Sostituisci"),
+    NL("Vervangen"),
+    RU("Заменить"),
+    TR("Değiştir"));
+
+
 }  // namespace gui
 }  // namespace msg
 }  // namespace i18n

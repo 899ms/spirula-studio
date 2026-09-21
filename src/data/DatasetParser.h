@@ -252,6 +252,10 @@ struct ParsedDataset {
     // such file, which is every dataset that did not come from this tool.
     bool                     gauge_oriented = false;   // +Z is up, measured
     bool                     gauge_metric = false;     // one unit is one metre
+
+    // An editor save left `<name>.orig` beside the files it replaced
+    // (data/SparseEdit.h): the frame is one somebody chose, not one to guess at.
+    bool                     edited_in_place = false;
 };
 
 ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,

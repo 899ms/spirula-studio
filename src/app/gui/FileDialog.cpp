@@ -41,6 +41,17 @@ std::string lower(std::string s) {
 
 }  // namespace
 
+// Appends the first extension when the name carries none of the accepted
+// ones. True when it changed the path.
+bool FileDialog::with_extension(std::string& path) const {
+    if (_extensions.empty() || path.empty()) return false;
+    const std::string have = lower(fs::path(path).extension().string());
+    for (const std::string& e : _extensions)
+        if (have == lower(e)) return false;
+    path += _extensions[0];
+    return true;
+}
+
 void FileDialog::open(const std::string& title, Mode mode,
                       const std::vector<std::string>& extensions,
                       const std::string& start_dir, bool multi_select,
@@ -123,6 +134,18 @@ bool FileDialog::draw() {
         if (!_native.poll()) return false;
         _results = _native.results();
         if (_results.empty()) return false;    // cancelled
+        // The system picker hands back the name as typed. "chair" and
+        // "chair.ply" mean the same thing to everyone but the file system --
+        // and the picker only asked about replacing the name it was given.
+        if (_mode == Mode::Save && with_extension(_results[0])) {
+            std::error_code exists_ec;
+            if (fs::exists(_results[0], exists_ec)) {
+                _replace_path = _results[0];
+                _results.clear();
+                _ask_replace = true;
+                return false;
+            }
+        }
         _result = _results[0];
         // Where the next pick starts from, so the two browsers share one
         // notion of "last used".
@@ -130,6 +153,31 @@ bool FileDialog::draw() {
         const fs::path p(_results[0]);
         _cwd = (fs::is_directory(p, ec) ? p : p.parent_path()).string();
         return true;
+    }
+    if (_ask_replace) {
+        ui::OpenPopup(msg::fd_replace_title);
+        _ask_replace = false;
+    }
+    const ImGuiViewport* replace_vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(replace_vp->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(px(460.0f), 0.0f), ImGuiCond_Always);
+    if (ui::BeginPopupModal(msg::fd_replace_title, nullptr,
+                            ImGuiWindowFlags_NoResize)) {
+        ui::TextWrapped(msg::fd_replace_body, {_replace_path});
+        bool yes = false;
+        if (ui::Button(msg::fd_replace_yes)) yes = true;
+        ImGui::SameLine();
+        const bool no = ui::Button(msg::cancel);
+        if (yes || no) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        if (yes) {
+            _results.assign(1, _replace_path);
+            _result = _replace_path;
+            _cwd = fs::path(_replace_path).parent_path().string();
+        }
+        if (yes || no) _replace_path.clear();
+        if (yes) return true;
     }
     if (_want_open) {
         ImGui::OpenPopup(_title.c_str());
@@ -238,9 +286,7 @@ bool FileDialog::draw() {
             // when one was not typed -- "chair" and "chair.ply" mean the same
             // thing to everyone but the file system.
             std::string name = _save_name;
-            if (!name.empty() && !_extensions.empty() &&
-                lower(fs::path(name).extension().string()) != _extensions[0])
-                name += _extensions[0];
+            if (!name.empty()) with_extension(name);
             const bool exists = !name.empty() &&
                                 fs::exists(fs::path(_cwd) / name, ec);
             ImGui::SetNextItemWidth(px(280.0f));

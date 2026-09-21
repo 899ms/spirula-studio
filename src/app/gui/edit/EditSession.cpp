@@ -50,7 +50,11 @@ void EditSession::open(std::unique_ptr<EditDoc> doc, ViewportPanel* panel) {
     _centres = Centres{};
     _attrs.clear();
     _attrs_layer = -1;
-    _hist_attr = -1;
+    _axis[0] = AttrAxis{};
+    _axis[1] = AttrAxis{};
+    _axis[1].index = -1;
+    _density_rev = 0;
+    _plot_tool.cancel();
     _range_set = false;
     _samples.clear();
     _colours.clear();
@@ -66,9 +70,12 @@ void EditSession::close() {
     _cancel = true;
     if (_comp_worker.joinable()) _comp_worker.join();
     if (_save_worker.joinable()) _save_worker.join();
+    if (_attr_worker.joinable()) _attr_worker.join();
     _cancel = false;
     _comp_busy = false;
     _save_busy = false;
+    _attr_busy = false;
+    _attr_job_axis = -1;
     _comp = Components{};
     _pending.reset();
     _fly_block_key = 0;
@@ -567,6 +574,20 @@ void EditSession::poll() {
             r.swap(_pending);
             if (!_comp.label.empty()) run_recipe(r, _pending_push);
         }
+    }
+    if (!_attr_busy.load() && _attr_worker.joinable()) {
+        _attr_worker.join();
+        if (_attr_job_axis >= 0) {
+            // Cancelled part way is not an answer; it is kept as a failure so
+            // the same search is not started again the next frame.
+            if (_cancel.load()) _attr_job.failed = true;
+            const int index = _axis[_attr_job_axis].index;
+            _axis[_attr_job_axis] = std::move(_attr_job);
+            _axis[_attr_job_axis].index = index;
+            _attr_job = AttrAxis{};
+        }
+        _attr_job_axis = -1;
+        _cancel = false;
     }
     if (!_save_busy.load() && _save_worker.joinable()) {
         _save_worker.join();

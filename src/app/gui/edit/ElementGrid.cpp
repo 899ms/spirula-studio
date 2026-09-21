@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 namespace gui {
@@ -297,6 +298,62 @@ bool ElementGrid::components(const uint8_t* alive, int64_t n,
         sizes[(size_t)l]++;
     }
     return true;
+}
+
+
+void ElementGrid::knn_median(int k, const uint8_t* alive, std::vector<float>& out,
+                             const std::atomic<bool>* cancel) const {
+    constexpr int kMaxRings = 4;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    out.assign((size_t)_n, nan);
+    if (!built() || k < 1) return;
+#pragma omp parallel
+    {
+        std::vector<float> d2;
+#pragma omp for schedule(dynamic, 1024)
+        for (int64_t i = 0; i < _n; i++) {
+            if (!alive[i] || (cancel && cancel->load(std::memory_order_relaxed)))
+                continue;
+            const float* p = _pos + i * 3;
+            int32_t c[3];
+            coords_of(p, c);
+            d2.clear();
+            for (int ring = 1; ring <= kMaxRings; ring++) {
+                // Only the new shell: the cells at Chebyshev distance `ring`
+                // (and, the first time round, everything inside it).
+                for (int dz = -ring; dz <= ring; dz++)
+                for (int dy = -ring; dy <= ring; dy++)
+                for (int dx = -ring; dx <= ring; dx++) {
+                    const int far = std::max({std::abs(dx), std::abs(dy), std::abs(dz)});
+                    if (ring > 1 && far != ring) continue;
+                    const int32_t cc[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
+                    const int32_t cell = find_cell(cc);
+                    if (cell < 0) continue;
+                    for (int32_t a = _beg[(size_t)cell]; a < _beg[(size_t)cell + 1]; a++) {
+                        const int32_t j = _items[(size_t)a];
+                        if (j == i || !alive[j]) continue;
+                        const float* q = _pos + (size_t)j * 3;
+                        const float x = q[0]-p[0], y = q[1]-p[1], z = q[2]-p[2];
+                        d2.push_back(x*x + y*y + z*z);
+                    }
+                }
+                if ((int)d2.size() < k) continue;
+                std::nth_element(d2.begin(), d2.begin() + (k - 1), d2.end());
+                // Everything within `ring` cells of the point has been seen,
+                // so a k-th neighbour nearer than that is the true one.
+                const float sure = (float)ring * _cell;
+                if (d2[(size_t)k - 1] <= sure * sure) break;
+            }
+            if (d2.empty()) {
+                out[(size_t)i] = (float)kMaxRings * _cell;
+                continue;
+            }
+            const size_t use = std::min(d2.size(), (size_t)k);
+            if (d2.size() > use) std::nth_element(d2.begin(), d2.begin() + (use - 1), d2.end());
+            std::nth_element(d2.begin(), d2.begin() + use / 2, d2.begin() + use);
+            out[(size_t)i] = std::sqrt(d2[use / 2]);
+        }
+    }
 }
 
 

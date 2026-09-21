@@ -23,7 +23,9 @@
 #include <string>
 #include <vector>
 
-namespace spirula { struct SplatCloud; }
+namespace spirula { struct SplatCloud; struct SparseStats; }
+namespace meshing { struct MeshData; }
+struct ParsedDataset;
 
 namespace gui {
 
@@ -129,7 +131,12 @@ public:
     // One similarity of the positions() frame for every layer: the scene is
     // rigid. The VIEWER applies it; nothing here moves until a save bakes it.
     const spirula::Sim3& placement() const { return _placement; }
-    void set_placement(const spirula::Sim3& p) { _placement = p; _rev++; }
+    void set_placement(const spirula::Sim3& p) {
+        _placement = p;
+        _rev++;
+        _placement_rev++;
+    }
+    uint64_t placement_revision() const { return _placement_rev; }
     // File coordinates into the frame positions() are in.
     virtual spirula::Sim3 view_frame() const = 0;
     // The placement as the file's own coordinates see it: what a save writes.
@@ -153,6 +160,13 @@ public:
     virtual bool colours_available() const { return false; }
     // The Gaussians themselves, when that is what the elements are.
     virtual const spirula::SplatCloud* splats() const { return nullptr; }
+    // The triangles, the parsed reconstruction and what its files say about
+    // its quality, for the documents that are those things.
+    virtual const meshing::MeshData* mesh() const { return nullptr; }
+    virtual const ParsedDataset* dataset() const { return nullptr; }
+    virtual const spirula::SparseStats* sparse_stats() const { return nullptr; }
+    // Whether that last one is worth asking for: the asking reads files.
+    virtual bool has_sparse_stats() const { return false; }
     // Camera centres in the positions() frame, [n, 3]; empty without cameras.
     virtual std::vector<float> camera_centres() const { return {}; }
 
@@ -265,6 +279,7 @@ private:
     bool _geom_dirty = true;
     bool _display_dirty = true;
     uint64_t _rev = 1;
+    uint64_t _placement_rev = 1;
 };
 
 

@@ -57,6 +57,23 @@ std::vector<std::string> sparse_write_filtered(const std::string& dataset_dir,
                                                const Sim3* moved = nullptr,
                                                SparseBaseline* base = nullptr);
 
+// What a COLMAP model knows about its own quality and the parser does not
+// keep: who saw each point, and how well. Points are in the file's order --
+// ParsedDataset::points' -- and images are NAMED, as in SparseKeep.
+struct SparseStats {
+    std::vector<float> error;              // mean reprojection error, pixels
+    // Track of point i: track_image[track_beg[i] .. track_beg[i+1]), indices
+    // into `image_names`.
+    std::vector<int64_t> track_beg;
+    std::vector<int32_t> track_image;
+    std::vector<std::string> image_names;
+    std::vector<int32_t> image_points;     // 2D features that became 3D points
+    bool empty() const { return track_beg.empty(); }
+};
+
+// Empty for anything that is not a COLMAP model.
+SparseStats read_sparse_stats(const std::string& dataset_dir);
+
 // A plain point cloud, for anything that has no reconstruction behind it.
 void write_ply_points(const std::string& path, const double* xyz,
                       const uint8_t* rgb, int64_t n, const uint8_t* keep,

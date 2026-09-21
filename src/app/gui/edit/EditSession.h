@@ -106,7 +106,9 @@ public:
     bool on_viewport_input(const ViewportInput& in) override;
     void draw_viewport_overlay(const ViewportOverlay& v) override;
     // A long job is in flight; editing waits for it.
-    bool busy() const { return _comp_busy.load() || _save_busy.load(); }
+    bool busy() const {
+        return _comp_busy.load() || _save_busy.load() || _attr_busy.load();
+    }
     // Give up on it. The worker checks between cells, so this is not instant.
     void cancel_work();
     // How far along, for the bar the panel draws.
@@ -254,13 +256,40 @@ private:
     bool _fields_active = false;
 
     // ---- attributes ----
+
+    // One axis of the plot: which attribute, its values, and what they were
+    // computed FOR -- a neighbour search is not repeated because a selection
+    // changed, only when what it depends on did.
+    struct AttrAxis {
+        int index = 0;                // into _attrs; -1 = no second axis
+        std::vector<float> values;
+        AttrHistogram hist;
+        int attr = -1, layer = -1;
+        int64_t alive = -1;
+        uint64_t placement = 0, hist_rev = 0;
+        bool failed = false;
+    };
+    bool axis_current(const AttrAxis& a) const;
+    bool axis_ready(const AttrAxis& a) const;
+    void draw_density_plot(float full);
+    void apply_plot_stroke(const ShapeStroke& s, float w, float h);
+    void select_plot_cluster(float x, float y, float w, float h);
     std::vector<Attr> _attrs;         // what the current layer offers
     int _attrs_layer = -1;
-    int _attr = 0;                    // index into _attrs
-    std::vector<float> _attr_values;
-    AttrHistogram _hist;
-    uint64_t _hist_rev = 0;
-    int _hist_attr = -1;
+    AttrAxis _axis[2];
+    // The slow ones are computed here; the job's answer is adopted by poll().
+    std::thread _attr_worker;
+    std::atomic<bool> _attr_busy{false};
+    int _attr_job_axis = -1;
+    AttrAxis _attr_job;
+    // Two attributes against each other, and the tool that draws on them: the
+    // same kind as the viewport's, with a stroke of its own in progress.
+    AttrDensity _density;
+    std::vector<int32_t> _density_cell;
+    uint64_t _density_rev = 0;
+    int _density_key[4] = {-1, -1, 0, 0};
+    EditTool _plot_tool;
+    float _plot_size[2] = {1, 1};     // as last drawn, for a stroke closed by a key
     bool _hist_log_counts = true;
     bool _range_outside = false;
     double _range[2] = {0.25, 0.75};  // fractions of the histogram's axis

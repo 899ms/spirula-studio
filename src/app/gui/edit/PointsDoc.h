@@ -42,6 +42,13 @@ public:
         return layer() == 0 && !_ds.points.rgb.empty();
     }
     std::vector<float> camera_centres() const override;
+    const ParsedDataset* dataset() const override { return &_ds; }
+    // Read from the model's own files the first time it is asked for, which
+    // is on the attribute worker: images.bin alone can be a hundred megabytes.
+    const spirula::SparseStats* sparse_stats() const override;
+    bool has_sparse_stats() const override {
+        return _fmt == spirula::SparseFormat::Colmap;
+    }
 
     spirula::SparseFormat format() const { return _fmt; }
 
@@ -65,6 +72,8 @@ private:
     spirula::SparseFormat _fmt = spirula::SparseFormat::None;
     // The files as this session found them; every save filters these again.
     spirula::SparseBaseline _baseline;
+    mutable spirula::SparseStats _stats;
+    mutable bool _stats_read = false;
     Show _show;
 };
 

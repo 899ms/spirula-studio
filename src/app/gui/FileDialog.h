@@ -43,7 +43,9 @@ public:
     // Armed or on screen. ImGui shows one modal at a time, so a caller that is
     // itself a modal has to step aside for this one and needs to know when it
     // is gone -- whether the user confirmed or cancelled.
-    bool is_open() const { return _is_open || _want_open || _native.busy(); }
+    bool is_open() const {
+        return _is_open || _want_open || _native.busy() || !_replace_path.empty();
+    }
 
     const std::string& result() const { return _result; }
     const std::vector<std::string>& results() const { return _results; }
@@ -52,6 +54,7 @@ private:
     void refresh();
     bool is_selected(const std::string& name) const;
     void toggle(const std::string& name);
+    bool with_extension(std::string& path) const;
 
     struct Entry { std::string name; bool is_dir = false; };
 
@@ -72,6 +75,10 @@ private:
     bool _is_open = false;
     NativeDialog _native;
     bool _use_native = true;
+    // A save whose name gained its extension here and turned out to exist:
+    // the system picker asked about a different file, so this asks again.
+    std::string _replace_path;
+    bool _ask_replace = false;
 };
 
 }  // namespace gui

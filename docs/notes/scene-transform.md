@@ -179,6 +179,15 @@ re-parses it and requires the parser's cameras and points to be the originals
 under the same similarity AND every point to land on the pixel it did before
 (measured: 5e-5 px).
 
+### Opening it again
+
+The dataset preview levels a reconstruction by a GUESS at its up axis
+(`ViewportPanel::adopt_gauge`). On a model somebody has placed by hand that
+guess is a second, unasked-for rotation on top of theirs, so the parsers report
+`ParsedDataset::edited_in_place` -- a `.orig` beside any file an edit replaces
+-- and the preview then starts with auto-level off, as it already did for a
+model whose `gauge.txt` says its orientation was measured.
+
 ### The session baseline
 
 A row filter indexes the rows of the file it reads, and a placement starts from

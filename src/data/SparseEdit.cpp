@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <stdexcept>
 
@@ -536,6 +537,130 @@ std::string resolve_sparse_dir(const std::string& path) {
     return p.string();
 }
 
+
+SparseStats read_sparse_stats(const std::string& dataset_dir) {
+    SparseStats out;
+    if (sparse_format_of(dataset_dir) != SparseFormat::Colmap) return out;
+    bool text = false;
+    const std::string model = find_colmap_model(dataset_dir, "", &text);
+    if (model.empty()) return out;
+    std::map<int32_t, int32_t> index_of_id;
+
+    if (!text) {
+        const std::string im = read_file(fs::path(model) / "images.bin");
+        const char* p = im.data();
+        const char* end = p + im.size();
+        if ((size_t)(end - p) < 8) return out;
+        const uint64_t n = read_le<uint64_t>(p);
+        for (uint64_t i = 0; i < n; i++) {
+            if (end - p < 4 + 8 * 7 + 4) return SparseStats{};
+            const int32_t id = read_le<int32_t>(p);
+            p += 8 * 7 + 4;
+            const char* name = p;
+            while (p < end && *p) p++;
+            if (p >= end) return SparseStats{};
+            index_of_id[id] = (int32_t)out.image_names.size();
+            out.image_names.emplace_back(name, (size_t)(p - name));
+            p++;
+            if ((size_t)(end - p) < 8) return SparseStats{};
+            const uint64_t pts = read_le<uint64_t>(p);
+            if ((size_t)(end - p) < pts * 24) return SparseStats{};
+            int32_t seen = 0;
+            for (uint64_t k = 0; k < pts; k++) {
+                int64_t point_id;
+                std::memcpy(&point_id, p + k * 24 + 16, 8);
+                seen += point_id >= 0 ? 1 : 0;
+            }
+            out.image_points.push_back(seen);
+            p += pts * 24;
+        }
+        const std::string pt = read_file(fs::path(model) / "points3D.bin");
+        p = pt.data();
+        end = p + pt.size();
+        if ((size_t)(end - p) < 8) return SparseStats{};
+        const uint64_t m = read_le<uint64_t>(p);
+        out.track_beg.push_back(0);
+        for (uint64_t i = 0; i < m; i++) {
+            if (end - p < 8 + 24 + 3 + 8 + 8) return SparseStats{};
+            p += 8 + 24 + 3;
+            out.error.push_back((float)read_le<double>(p));
+            const uint64_t track = read_le<uint64_t>(p);
+            if ((size_t)(end - p) < track * 8) return SparseStats{};
+            for (uint64_t t = 0; t < track; t++) {
+                int32_t image_id;
+                std::memcpy(&image_id, p + t * 8, 4);
+                const auto it = index_of_id.find(image_id);
+                if (it != index_of_id.end()) out.track_image.push_back(it->second);
+            }
+            p += track * 8;
+            out.track_beg.push_back((int64_t)out.track_image.size());
+        }
+        return out;
+    }
+
+    // The text model: images.txt is two lines a record, points3D.txt one.
+    {
+        std::ifstream f(fs::path(model) / "images.txt");
+        std::string line, obs;
+        while (std::getline(f, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            std::getline(f, obs);
+            int32_t id = 0, cam = 0;
+            double d[7];
+            char name[1024] = {0};
+            if (std::sscanf(line.c_str(), "%d %lf %lf %lf %lf %lf %lf %lf %d %1023s",
+                            &id, &d[0], &d[1], &d[2], &d[3], &d[4], &d[5], &d[6],
+                            &cam, name) != 10)
+                continue;
+            index_of_id[id] = (int32_t)out.image_names.size();
+            out.image_names.emplace_back(name);
+            // x y point3D_id triples; -1 marks a feature that matched nothing.
+            int32_t seen = 0;
+            const char* q = obs.c_str();
+            char* e = nullptr;
+            while (true) {
+                std::strtod(q, &e);
+                if (e == q) break;
+                q = e;
+                std::strtod(q, &e);
+                q = e;
+                const long long pid = std::strtoll(q, &e, 10);
+                if (e == q) break;
+                q = e;
+                seen += pid >= 0 ? 1 : 0;
+            }
+            out.image_points.push_back(seen);
+        }
+    }
+    std::ifstream f(fs::path(model) / "points3D.txt");
+    std::string line;
+    out.track_beg.push_back(0);
+    while (std::getline(f, line)) {
+        size_t b = 0;
+        while (b < line.size() && std::isspace((unsigned char)line[b])) b++;
+        if (b >= line.size() || line[b] == '#') continue;
+        const char* q = line.c_str() + b;
+        char* e = nullptr;
+        double field[8] = {0};
+        for (int k = 0; k < 8; k++) {
+            field[k] = std::strtod(q, &e);
+            q = e;
+        }
+        out.error.push_back((float)field[7]);
+        while (true) {
+            const long a = std::strtol(q, &e, 10);
+            if (e == q) break;
+            q = e;
+            std::strtol(q, &e, 10);
+            if (e == q) break;
+            q = e;
+            const auto it = index_of_id.find((int32_t)a);
+            if (it != index_of_id.end()) out.track_image.push_back(it->second);
+        }
+        out.track_beg.push_back((int64_t)out.track_image.size());
+    }
+    return out;
+}
 
 void write_ply_points(const std::string& path, const double* xyz,
                       const uint8_t* rgb, int64_t n, const uint8_t* keep,

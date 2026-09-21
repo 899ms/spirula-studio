@@ -185,6 +185,29 @@ the two kernels never had to exist. What shipped:
   UNCLAMPED, so an HDR model keeps its range; a sparse point's distance to the
   nearest camera; and position in SAVED coordinates, so that after aligning the
   ground "everything below z = 0" is one drag.
+- Where an element sits among the others: distance to the saved origin, and
+  SPACING -- the median distance to its 4, 16 or 64 nearest live neighbours
+  (`ElementGrid::knn_median`). Three k because they answer different
+  questions: 4 finds the lone floater, 64 finds the thin haze that is locally
+  as dense as a surface. The slow ones run on a worker and are cached per
+  axis, keyed on what they actually depend on (the live set, or the placement)
+  so a selection change never repeats a neighbour search.
+- A mesh vertex by its TOPOLOGY: sharpest and widest corner of the faces
+  around it, sharpest fold across its edges (winding-independent), faces
+  around it, faces on its barest and busiest edge (1 = on a hole, 3+ =
+  non-manifold), mean face area and edge length, size of its piece. All over
+  the WELDED vertex -- the atlas duplicates vertices along seams, and a seam
+  copy on its own looks like a boundary.
+- A reconstructed point by how it was seen: track length, reprojection error
+  and widest triangulation angle from the COLMAP model itself
+  (`read_sparse_stats`, so COLMAP only), and the number of cameras whose
+  picture it falls inside, which works for every dataset format.
+- A camera: focal length, field of view, looking up or down, tilted horizon
+  and compass heading in the saved frame, angle away from the middle of the
+  point cloud, distance to the nearest other camera, points it contributed.
+- Whole-number attributes get one bin per value, ranges that snap to whole
+  bins, and ends labelled by value; the bin count otherwise follows the
+  population, because two hundred cameras in 256 bins is a comb.
 - The histogram bins a ROBUST range (0.2th to 99.8th percentile) and the end
   bins hold what lies beyond, so dragging the range to the edge of the plot
   means "and everything past it". Three floaters a kilometre out do not squash
@@ -196,13 +219,33 @@ the two kernels never had to exist. What shipped:
 - A range dragged again straight after is an ADJUSTMENT: the step it made is
   taken back and replaced, so ten nudges of a threshold are one history entry
   and "intersect with this range" re-intersects the ORIGINAL selection rather
-  than the already-narrowed one.
-- Colour: an eyedropper (Shift+click adds samples -- a sky is a gradient, and
-  one click is one blue), editable swatches, a tolerance measured in OKLab so
-  equal steps look equally different, and a "match brightness" weight that at
-  0 compares hue and vividness only, so a surface matches in sun and in shade.
+  than the already-narrowed one. "The same control" means the same attribute
+  met the same way: the first version keyed on the control alone, so a range
+  on a SECOND attribute took the first one's step back before intersecting
+  with it, and "blue, and also large" came out empty.
+- Two attributes at once ("Against"): a grid of discs, area for how many
+  elements fall in the cell, an orange sector for the share of them selected.
+  The disc's COLOUR is the one the cell stands for (`attr_pair_colour`), so
+  hue against size is a rainbow of columns and hue against saturation is the
+  colour wheel unrolled. Two colour attributes are read together rather than
+  blended: two of R, G, B, luma, U, V give the colour nearest mid grey that has
+  both values; a hue with a colour difference is that hue as vivid as the
+  difference says, and GREY where the pair contradicts itself (a yellow hue
+  cannot lean blue -- and such cells are empty anyway). Colour differences are
+  stretched to the axis, because a real scene spans a fraction of the range and
+  unstretched the whole plot is pastel. On a coloured disc the orange sector
+  sits inside a ring of the cell's colour, so a selected cell still says what
+  it is and an orange cell is not mistaken for a selected one.
+- The viewport's tool draws on the plot: box, ellipse, lasso, polygon and
+  brush rasterize at plot resolution through the same `rasterize_shape`,
+  "piece" takes the cluster of populated cells under the click, anything else
+  is a box. Combine modes and undo are the selection's own.
+- The list is ordered by what people come for first, per document -- opacity
+  and visible size for splats, piece size and stretched edges for a mesh, how a
+  point was seen, where a camera looks -- with like kept beside like and a rule
+  between clusters (`attr_group`). The first entry is what the panel opens on.
 
-Not built: the 2D density plot, and **named groups**.
+Not built: **named groups**.
 
 **Connected components.** A union-find over whatever says what is joined to
 what. That is NOT one rule: a mesh has faces and they are exact, so a mesh
@@ -566,3 +609,7 @@ user meant — needs the real window, and that is what
 [gui-automation.md](gui-automation.md) is for: the harness drives the tools
 through the same input path a user does and hands back the framebuffer, so a
 tool can be exercised and eyeballed without a human at the keyboard.
+
+The attribute math sits between the two: `app/gui/tests/attributes_test.cpp`
+runs it over a stub document -- a tetrahedron beside an open, half-backwards
+square, a seam-split copy, a lattice -- where every number is known by hand.

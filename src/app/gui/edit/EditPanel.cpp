@@ -208,6 +208,19 @@ void EditSession::handle_keys() {
     // "delete", and a digit is a distance.
     if (_xform.active()) return;
 
+    // A polygon being drawn on the attribute plot owns the keys that finish
+    // one, exactly as one being drawn on the model does.
+    if (_plot_tool.in_progress()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) _plot_tool.cancel();
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
+            ShapeStroke s;
+            if (_plot_tool.commit_pending(s)) apply_plot_stroke(s, _plot_size[0], _plot_size[1]);
+        }
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) _plot_tool.pop_point();
+        return;
+    }
+
     // While Navigate is the active tool the camera owns WASDQE, so the keys
     // that collide with it are not read here. Every other key still is, which
     // is how a letter switches away from Navigate in the first place.
@@ -610,8 +623,10 @@ void EditSession::draw_panel() {
     if (_ask_overwrite) {
         _ask_overwrite = false;
         if (!home.empty()) ui::OpenPopup(msg::save_confirm_title);
+        // Nothing to write back to: Ctrl+S can only mean a copy.
+        else if (can_save_copy()) ask_save_copy();
     }
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 22.0f, 0.0f),
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 28.0f, 0.0f),
                              ImGuiCond_Appearing);
     if (ui::BeginPopupModal(msg::save_confirm_title)) {
         ui::TextWrapped(msg::save_confirm_body, {home});
@@ -634,6 +649,14 @@ void EditSession::draw_panel() {
         } else if (ui::Button(msg::save_over)) {
             save_in_place();
             ImGui::CloseCurrentPopup();
+        }
+        // The way out for somebody who pressed Ctrl+S and then read the path.
+        if (can_save_copy()) {
+            ImGui::SameLine();
+            if (ui::Button(msg::save_copy)) {
+                ImGui::CloseCurrentPopup();
+                ask_save_copy();
+            }
         }
         ImGui::SameLine();
         if (ui::Button(msg::discard_no)) ImGui::CloseCurrentPopup();

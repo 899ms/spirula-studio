@@ -270,7 +270,10 @@ int main() {
         const ParsedDataset before = parse(dir);
         spirula::SparseBaseline base;
         spirula::sparse_write_filtered(dir.string(), keep_all, &T, &base);
-        compare(before, parse(dir), T, all_cams, all_pts, tag);
+        const ParsedDataset after = parse(dir);
+        compare(before, after, T, all_cams, all_pts, tag);
+        check(!before.edited_in_place && after.edited_in_place,
+              tag + ": a saved edit is known for one when it is next opened");
 
         // A second save of the same session starts from the same baseline:
         // T2 of the original, not T2 of what the first save wrote -- and the
@@ -294,7 +297,10 @@ int main() {
         const ParsedDataset before = parse(dir);
         spirula::SparseBaseline base;
         spirula::sparse_write_filtered(dir.string(), keep_all, &T, &base);
-        compare(before, parse(dir), T, all_cams, all_pts, "Nerfstudio");
+        const ParsedDataset after = parse(dir);
+        compare(before, after, T, all_cams, all_pts, "Nerfstudio");
+        check(!before.edited_in_place && after.edited_in_place,
+              "Nerfstudio: a saved edit is known for one when it is next opened");
         spirula::sparse_write_filtered(dir.string(), keep_all, &T2, &base);
         compare(before, parse(dir), T2, all_cams, all_pts,
                 "Nerfstudio, second save");

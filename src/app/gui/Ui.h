@@ -107,6 +107,11 @@ inline void TextDisabledWrapped(const Msg& m) {
 inline void TextDisabled(const Msg& m, std::initializer_list<Arg> a) {
     ImGui::TextDisabled("%s", format(m, a).c_str());
 }
+inline void TextDisabledWrapped(const Msg& m, std::initializer_list<Arg> a) {
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled("%s", format(m, a).c_str());
+    ImGui::PopTextWrapPos();
+}
 
 inline void TextColored(const ImVec4& c, const Msg& m) {
     ImGui::TextColored(c, "%s", m.get());
@@ -326,8 +331,8 @@ inline bool ComboRaw(const char* id, int* cur, const std::vector<const Msg*>& it
     for (const Msg* m : its) v.push_back(m->get());
     return ImGui::Combo(id, cur, v.data(), (int)v.size());
 }
-inline bool BeginCombo(const Msg& m, const char* preview) {
-    return ImGui::BeginCombo(detail::label(m), preview);
+inline bool BeginCombo(const Msg& m, const char* preview, ImGuiComboFlags flags = 0) {
+    return ImGui::BeginCombo(detail::label(m), preview, flags);
 }
 inline bool BeginComboRaw(const char* id, const char* preview) {
     return ImGui::BeginCombo(id, preview);

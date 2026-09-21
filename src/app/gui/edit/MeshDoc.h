@@ -65,6 +65,7 @@ public:
     }
     bool normals(std::vector<float>& n, std::vector<float>& w) const override;
     bool colours(std::vector<float>& rgb) const override;
+    const meshing::MeshData* mesh() const override { return &_m; }
     bool colours_available() const override;
 
     // The other files one meshing run wrote: the same surface in another

@@ -412,7 +412,10 @@ ParsedDataset parse_nerfstudio_dataset(const std::string& dataset_dir,
         throw std::runtime_error("NerfstudioParser: " + transforms_path.string() +
                                  " does not exist");
     JsonValue meta = json_parse_file(transforms_path.string());
-    return parse_nerfstudio_meta(meta, dataset_dir, cfg);
+    ParsedDataset ds = parse_nerfstudio_meta(meta, dataset_dir, cfg);
+    std::error_code ec;
+    ds.edited_in_place = fs::exists(transforms_path.string() + ".orig", ec);
+    return ds;
 }
 
 // Shared back-end: consumes an already-built transforms.json-shaped meta.

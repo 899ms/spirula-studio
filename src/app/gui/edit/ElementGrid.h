@@ -47,6 +47,12 @@ public:
                     const float* radii = nullptr, float scale = 1.0f,
                     const std::atomic<bool>* cancel = nullptr) const;
 
+    // The median distance from each live element to its `k` nearest live
+    // neighbours, NaN for the dead. The search gives up four shells of cells
+    // out and takes the median of what it found: still "far from everything".
+    void knn_median(int k, const uint8_t* alive, std::vector<float>& out,
+                    const std::atomic<bool>* cancel = nullptr) const;
+
 private:
     void coords_of(const float* p, int32_t c[3]) const;
     // Cell index, or -1 when nothing is in that cell.

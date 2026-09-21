@@ -120,6 +120,16 @@ void read_gauge(const std::string& recon_dir, ParsedDataset& ds) {
     }
 }
 
+// Whether an editor save has replaced any of the model's files.
+static bool has_edit_originals(const std::string& recon_dir) {
+    std::error_code ec;
+    for (const char* name : {"images.bin", "images.txt", "points3D.bin",
+                             "points3D.txt", "frames.bin"})
+        if (fs::exists(fs::path(recon_dir) / (std::string(name) + ".orig"), ec))
+            return true;
+    return false;
+}
+
 std::map<int32_t, ColmapCamera> read_cameras_binary(const std::string& recon_dir) {
     BinReader r(recon_dir + "/cameras.bin");
     std::map<int32_t, ColmapCamera> cameras;
@@ -865,6 +875,7 @@ ParsedDataset parse_colmap_dataset(const std::string& dataset_dir,
     ds.center_mode = dsparse::kCenterModeNames[(int)center_mode];
     ds.points = std::move(points);
     read_gauge(recon_dir, ds);
+    ds.edited_in_place = has_edit_originals(recon_dir);
     ds.camera_models.reserve(N);
     ds.camera_distortions.reserve(N);
     ds.image_filenames.reserve(N);
