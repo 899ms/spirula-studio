@@ -47,6 +47,30 @@ inline double lens_mm(const Lens& l) { return 36.0 * l.focal; }
 // Pixels for an image `w` x `h`: fx, fy, cx, cy.
 void lens_intrinsics(const Lens& l, int w, int h, float out[4]);
 
+enum class PointStyle { Square = 0, Circle, Gaussian, Sphere };
+constexpr int kNumPointStyles = 4;
+
+// How one model is drawn. Each field means something for one kind only.
+struct SourceStyle {
+    PointStyle point_style = PointStyle::Circle;
+    float point_px = 3.0f;              // screen styles, pixels at 1080 lines
+    float sphere_radius = 0.004f;       // Sphere, fraction of the scene's size
+    bool cameras = false;               // a reconstruction's own cameras
+    bool shade = true, flat = false, colour = true;   // meshes
+    int sh_degree = -1;                 // splats; < 0 = all the file has
+    // Splats: a `--primitive` name, or empty for what the viewport shows.
+    std::string primitive;
+
+    bool operator==(const SourceStyle& o) const;
+    bool operator!=(const SourceStyle& o) const { return !(*this == o); }
+};
+
+// A model's look set at a keyframe (see Keyframe::looks).
+struct KeyLook {
+    int source = 0;
+    SourceStyle style;
+};
+
 struct Keyframe {
     double time = 0.0;                  // seconds
     double pos[3] = {0, 0, 0};
@@ -56,12 +80,15 @@ struct Keyframe {
     bool aim = false;
     double target[3] = {0, 0, 0};
     double roll = 0.0;                  // degrees about the view axis
-    // False: the lens of the key before carries on. The first key always
-    // has its own.
+    // False: the lens glides between the keys around it that have one of
+    // their own. The first key always has its own.
     bool own_lens = false;
     Lens lens;
     // The camera comes to rest here instead of passing through.
     bool hold = false;
+    // Models whose look this key sets; between such keys the two looks are
+    // mixed on screen.
+    std::vector<KeyLook> looks;
 };
 
 // How the picture passes from one shot to the next. Wipe, iris and sweep
@@ -79,21 +106,6 @@ struct Shot {
     int source = 0;
     Transition transition = Transition::Cut;
     double duration = 1.0;
-};
-
-enum class PointStyle { Square = 0, Circle, Gaussian, Sphere };
-constexpr int kNumPointStyles = 4;
-
-// How one model is drawn. Each field means something for one kind only.
-struct SourceStyle {
-    PointStyle point_style = PointStyle::Circle;
-    float point_px = 3.0f;              // screen styles, pixels at 1080 lines
-    float sphere_radius = 0.004f;       // Sphere, fraction of the scene's size
-    bool cameras = false;               // a reconstruction's own cameras
-    bool shade = true, flat = false, colour = true;   // meshes
-    int sh_degree = -1;                 // splats; < 0 = all the file has
-    // Splats: a `--primitive` name, or empty for what the viewport shows.
-    std::string primitive;
 };
 
 struct Source {
@@ -161,8 +173,14 @@ struct RenderProject {
 
     double duration() const;
     bool looped() const { return motion.loop && keys.size() >= 2; }
-    // The lens in force at key `i`: its own, or the last one before it.
-    const Lens& lens_at(int i) const;
+    // The lens at key `i`: its own, or glided in time between the keys
+    // around it that have one (held past the last, and across a change of
+    // projection).
+    Lens lens_at(int i) const;
+    // The look of `source` at time `t`, given when each key is passed: the
+    // looks of the keys around it and how far from one to the other.
+    void look_at(int source, double t, const std::vector<double>& key_times,
+                 SourceStyle& from, SourceStyle& to, float& mix) const;
     // Sorted by time. A key that becomes the first keeps the lens it was
     // seen through rather than taking a default one.
     void sort_keys();

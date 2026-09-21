@@ -24,11 +24,16 @@ struct CameraState {
 // Precomputed once per edit of the project, then evaluated per frame.
 class Trajectory {
 public:
-    explicit Trajectory(const RenderProject& p);
+    // `measure` false skips the path's length where the timing does not
+    // need it (length() is then 0).
+    explicit Trajectory(const RenderProject& p, bool measure = true);
     CameraState at(double t) const;
     // The path as `n` evenly spaced positions, for drawing it.
     std::vector<double> sample_path(int n) const;
     double length() const { return _length; }
+    // When the camera passes each key: its time, unless the speed is held
+    // constant, which moves every key but the ends.
+    const std::vector<double>& key_times() const { return _visit; }
 
 private:
     // Curve parameter of the frame at `t`.
@@ -46,8 +51,14 @@ private:
     std::vector<double> _pos, _rot, _tgt, _roll, _logf;
     std::vector<double> _dpos, _drot, _dtgt, _droll, _dfocal;
     std::vector<double> _cum_u, _cum_len;    // arc-length table
+    std::vector<double> _visit;
+    std::vector<Lens> _lens;             // per key
     double _length = 0.0;
 };
+
+// Keys deleted from `before`: move the rest of `p` (poses, not lenses) so the
+// camera passes where it did. A radian of turn weighs `unit` of distance.
+void refit_keys(RenderProject& p, const RenderProject& before, double unit);
 
 // The quaternion of `a` then `b`, and a rotation of a vector, (w, x, y, z).
 void quat_mul(const double a[4], const double b[4], double out[4]);

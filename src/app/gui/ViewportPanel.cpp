@@ -1567,6 +1567,7 @@ void ViewportPanel::draw(bool training, int step) {
     }
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (_image_w > 0.0f) avail.x = std::min(avail.x, _image_w);
     avail.x = std::max(avail.x, 64.0f);
     avail.y = std::max(avail.y, 64.0f);
 

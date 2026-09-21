@@ -55,27 +55,22 @@ void RenderSession::draw_timeline() {
     if (ui::ButtonRaw("|<##start")) jump(first);
     ui::help_on_hover(msg::tl_start);
     ImGui::SameLine();
+    const std::vector<double> visits = trajectory().key_times();
     if (ui::ButtonRaw("<##prevkey")) {
         double best = first;
-        for (const Keyframe& k : _project.keys) if (k.time < _time - 1e-6) best = k.time;
+        for (double t : visits) if (t < _time - 1e-6) best = t;
         jump(best);
     }
     ui::help_on_hover(msg::tl_prev_key);
     ImGui::SameLine();
-    if (ui::KeyButton(_playing ? msg::tl_pause : msg::tl_play, px(80.0f), nullptr, _playing)) {
-        _playing = !_playing;
-        if (_playing) {
-            if (_time >= T - 1e-6) _time = first;
-            _play_from = _time;
-            _play_clock = ImGui::GetTime();
-        }
-    }
+    if (ui::KeyButton(_playing ? msg::tl_pause : msg::tl_play, px(80.0f), nullptr, _playing))
+        set_playing(!_playing);
     ui::help_on_hover(msg::tl_play_help);
     ImGui::SameLine();
     if (ui::ButtonRaw(">##nextkey")) {
         double best = T;
-        for (const Keyframe& k : _project.keys)
-            if (k.time > _time + 1e-6) { best = k.time; break; }
+        for (double t : visits)
+            if (t > _time + 1e-6) { best = t; break; }
         jump(best);
     }
     ui::help_on_hover(msg::tl_next_key);
@@ -186,13 +181,13 @@ void RenderSession::draw_timeline() {
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     int hot = -1;
     for (int i = 0; i < (int)_project.keys.size(); i++) {
-        const float x = x_of(_project.keys[(size_t)i].time);
+        const float x = x_of(visits[(size_t)i]);
         if (hovered && std::fabs(mouse.x - x) < px(7.0f) && std::fabs(mouse.y - key_y) < px(9.0f))
             hot = i;
     }
     for (int i = 0; i < (int)_project.keys.size(); i++) {
         const Keyframe& k = _project.keys[(size_t)i];
-        const float x = x_of(k.time), r = px(6.0f);
+        const float x = x_of(visits[(size_t)i]), r = px(6.0f);
         const ImU32 col = selected(i) ? IM_COL32(255, 150, 40, 255)
                           : i == hot ? IM_COL32(255, 235, 90, 255) : IM_COL32(220, 220, 220, 255);
         const ImVec2 pts[4] = {ImVec2(x, key_y - r), ImVec2(x + r, key_y),
@@ -222,9 +217,12 @@ void RenderSession::draw_timeline() {
             const ImGuiIO& io = ImGui::GetIO();
             // A plain click on a selected key keeps the group, to drag it.
             if (io.KeyShift || io.KeyCtrl || !selected(hot)) click_select(hot, io.KeyCtrl, io.KeyShift);
-            _drag_key = hot;
+            // At constant speed only the ends have a time of their own.
+            const bool fixed = _project.motion.constant_speed && hot > 0 &&
+                               hot + 1 < (int)_project.keys.size();
+            _drag_key = fixed ? -1 : hot;
             _drag_key_from = _project.keys[(size_t)hot].time;
-            _time = _drag_key_from;
+            _time = visits[(size_t)hot];
         } else {
             _scrubbing = true;
             _playing = false;
@@ -242,14 +240,8 @@ void RenderSession::draw_timeline() {
                     _project.keys[(size_t)i].time = std::max(0.0, _project.keys[(size_t)i].time + shift);
             const double keep = _project.keys[(size_t)_drag_key].time;
             std::vector<uint8_t> sel = _sel;
-            std::vector<Lens> lenses;
             std::vector<int> order;
-            for (int i = 0; i < (int)_project.keys.size(); i++) {
-                lenses.push_back(_project.lens_at(i));
-                order.push_back(i);
-            }
-            // Passing another key changes which lens a "same" key copies:
-            // each keeps the one it had.
+            for (int i = 0; i < (int)_project.keys.size(); i++) order.push_back(i);
             const std::vector<Keyframe> was = _project.keys;
             std::stable_sort(order.begin(), order.end(), [&](int x, int y) {
                 return was[(size_t)x].time < was[(size_t)y].time;
@@ -262,7 +254,13 @@ void RenderSession::draw_timeline() {
                 if (order[i] == _drag_key) dragged = (int)i;
             }
             _drag_key = dragged;
-            keep_lenses(lenses, order);
+            // The first key always has a lens of its own: the one it showed.
+            if (!_project.keys[0].own_lens) {
+                RenderProject p = _project;
+                p.keys = was;
+                _project.keys[0].lens = p.lens_at(order[0]);
+                _project.keys[0].own_lens = true;
+            }
             _time = keep;
             project_changed();
         }
@@ -308,8 +306,10 @@ void RenderSession::draw_preview_pane() {
     float dw = avail.x, dh = (float)(avail.x / aspect);
     const float room = avail.y - ImGui::GetTextLineHeightWithSpacing();
     if (dh > room) { dh = room; dw = (float)(dh * aspect); }
+    // In the middle of what there is, the caption under it.
     const ImVec2 at = ImGui::GetCursorScreenPos();
-    ImGui::SetCursorScreenPos(ImVec2(at.x + (avail.x - dw) * 0.5f, at.y));
+    ImGui::SetCursorScreenPos(ImVec2(at.x + (avail.x - dw) * 0.5f,
+                                     at.y + std::max(0.0f, (room - dh) * 0.5f)));
     const ImVec2 a = ImGui::GetCursorScreenPos();
     ui::InvisibleButtonRaw("##camview", ImVec2(std::max(dw, 1.0f), std::max(dh, 1.0f)),
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
@@ -321,6 +321,7 @@ void RenderSession::draw_preview_pane() {
     dl->AddRect(a, b, IM_COL32(90, 220, 255, 160));
     const bool hovered = ImGui::IsItemHovered();
     const bool active = ImGui::IsItemActive();
+    ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ImGui::GetStyle().ItemSpacing.y));
     ui::TextDisabled(_preview_mode == PreviewMode::Through ? msg::pv_through_hint : msg::pv_caption,
                      {(long long)_project.output.width, (long long)_project.output.height});
     if (_preview_mode != PreviewMode::Through || _project.keys.empty()) return;
@@ -336,8 +337,9 @@ void RenderSession::draw_preview_pane() {
     // The key at the playhead, or a new one there holding what is seen now.
     const double frame = 1.0 / std::max(_project.output.fps, 1.0);
     int k = -1;
-    for (int i = 0; i < (int)_project.keys.size(); i++)
-        if (std::fabs(_project.keys[(size_t)i].time - _time) < 0.5 * frame) k = i;
+    const std::vector<double> visits = trajectory().key_times();
+    for (int i = 0; i < (int)visits.size(); i++)
+        if (std::fabs(visits[(size_t)i] - _time) < 0.5 * frame) k = i;
     if (k < 0) {
         const CameraState c = trajectory().at(_time);
         Keyframe nk;

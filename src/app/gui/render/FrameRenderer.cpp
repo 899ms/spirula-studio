@@ -7,6 +7,7 @@
 #include "engine/Engine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -117,6 +118,32 @@ void main() {
 }
 )";
 
+// One texture, or two mixed; into a target the right way up for GL.
+const char* kBlendFrag = R"(#version 150
+in vec2 v_uv;
+uniform sampler2D u_t0;
+uniform sampler2D u_t1;
+uniform int u_flip0;
+uniform int u_flip1;
+uniform int u_has1;
+uniform float u_w;
+out vec4 frag;
+vec4 fetch(sampler2D t, int flip, vec2 uv) {
+    if (flip == 1) uv.y = 1.0 - uv.y;
+    return texture(t, uv);
+}
+void main() {
+    vec4 a = fetch(u_t0, u_flip0, v_uv);
+    vec4 b = u_has1 == 1 ? fetch(u_t1, u_flip1, v_uv) : a;
+    frag = mix(a, b, u_w);
+}
+)";
+
+double now_s() {
+    return std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 GLuint compile_shader(GLenum type, const char* src) {
     GLuint sh = glx::CreateShader(type);
     glx::ShaderSource(sh, 1, &src, nullptr);
@@ -151,8 +178,6 @@ struct FrameRenderer::Slot {
     std::unique_ptr<RenderWorker> worker;
     std::unique_ptr<PreviewRenderer> gl;
     bool gl_failed = false;
-    unsigned tex = 0;
-    int tex_w = 0, tex_h = 0;
     std::shared_ptr<SplatHost> host;
     std::thread loader;
     std::atomic<int> load_state{0};     // 0 not asked, 1 reading, 2 ready, 3 failed
@@ -174,14 +199,13 @@ FrameRenderer::~FrameRenderer() {
 }
 
 void FrameRenderer::destroy_gl() {
-    for (auto& s : _slots) {
+    for (auto& s : _slots)
         if (s->gl) s->gl->destroy_gl();
-        if (s->tex) {
-            GLuint t = s->tex;
-            glDeleteTextures(1, &t);
-            s->tex = 0;
-        }
-    }
+    for (unsigned& t : _tex_pool)
+        if (t) { GLuint g = t; glDeleteTextures(1, &g); t = 0; }
+    _pool_w = _pool_h = 0;
+    if (_blend_fbo) { GLuint f = _blend_fbo; glx::DeleteFramebuffers(1, &f); _blend_fbo = 0; }
+    if (_blend_prog) { glx::DeleteProgram(_blend_prog); _blend_prog = 0; }
     if (_fbo) { GLuint f = _fbo; glx::DeleteFramebuffers(1, &f); _fbo = 0; }
     if (_out_tex) { GLuint t = _out_tex; glDeleteTextures(1, &t); _out_tex = 0; }
     if (_vao) { GLuint v = _vao; glx::DeleteVertexArrays(1, &v); _vao = 0; }
@@ -203,10 +227,9 @@ void FrameRenderer::set_sources(const std::vector<SourceView>& sources) {
         return;
     }
     _stage = Stage::Idle;
-    for (auto& s : _slots) {
+    _passes.clear();
+    for (auto& s : _slots)
         if (s->gl) s->gl->destroy_gl();
-        if (s->tex) { GLuint t = s->tex; glDeleteTextures(1, &t); }
-    }
     _slots.clear();
     for (const SourceView& v : sources) {
         auto s = std::make_unique<Slot>();
@@ -330,30 +353,33 @@ std::string FrameRenderer::take_error() {
 void FrameRenderer::request(const FrameSpec& f) {
     _spec = f;
     _stage = Stage::Rendering;
-    for (int i = 0; i < 2; i++) {
-        _pending[i] = 0;
-        _layer_ready[i] = false;
-        _layer_tex[i] = 0;
-        _layer_flip[i] = false;
+    _passes.clear();
+    for (int layer = 0; layer < 2; layer++) {
+        const LayerSpec& l = layer ? f.b : f.a;
+        _layer_tex[layer] = 0;
+        _layer_flip[layer] = false;
+        if (l.source < 0 || l.source >= (int)_slots.size()) continue;
+        for (int v = 0; v < std::clamp(l.variants, 1, 2); v++) {
+            Pass p;
+            p.layer = layer;
+            p.variant = v;
+            _passes.push_back(p);
+        }
     }
-    submit_layer(0, f.a);
-    submit_layer(1, f.b);
+    for (Pass& p : _passes) submit(p);
 }
 
-void FrameRenderer::submit_layer(int which, const LayerSpec& l) {
-    if (l.source < 0 || l.source >= (int)_slots.size()) {
-        _layer_ready[which] = true;
-        return;
-    }
+void FrameRenderer::submit(Pass& p) {
+    if (p.id || p.ready) return;
+    const LayerSpec& l = p.layer ? _spec.b : _spec.a;
     Slot& s = *_slots[(size_t)l.source];
-    if (s.view.kind != SourceView::Splats) {
-        _layer_ready[which] = true;      // drawn in composite(), on this thread
-        return;
+    if (s.view.kind != SourceView::Splats) return;       // drawn in poll()
+    if (!s.worker) { p.ready = true; return; }
+    for (const Pass& o : _passes) {
+        const LayerSpec& ol = o.layer ? _spec.b : _spec.a;
+        if (&o != &p && ol.source == l.source && o.id && !o.ready) return;   // its turn comes
     }
-    if (!s.worker) {
-        _layer_ready[which] = true;
-        return;
-    }
+    const SourceStyle& style = l.style[std::clamp(p.variant, 0, 1)];
     const CameraState& c = _spec.cam;
     ViewRequest q;
     camera_in(c, s.view.norm_to_world, q.c2w);
@@ -368,12 +394,8 @@ void FrameRenderer::submit_layer(int which, const LayerSpec& l) {
     q.distortion = kTierNames[tier];
     for (int k = 0; k < 8; k++) q.dist[k] = tier ? c.lens.dist[k] : 0.0f;
     q.raw = true;
-    q.primitive = s.view.primitive;
-    if (l.source < (int)_spec.styles.size()) {
-        const SourceStyle& st = _spec.styles[(size_t)l.source];
-        q.sh_degree = st.sh_degree;
-        if (!st.primitive.empty()) q.primitive = st.primitive;
-    }
+    q.primitive = style.primitive.empty() ? s.view.primitive : style.primitive;
+    q.sh_degree = style.sh_degree;
 
     const bool effect = l.grow != 1.0f || l.fade_in < 1.0f || l.clip != 0;
     if (effect && effects_ready(l.source) && s.host) {
@@ -424,10 +446,12 @@ void FrameRenderer::submit_layer(int which, const LayerSpec& l) {
             engine_scene_update(slot, "scales", tv(h->scales, {N, 3}));
         };
     }
-    _pending[which] = s.worker->submit(q);
+    p.id = s.worker->submit(q);
+    p.sent = now_s();
 }
 
-unsigned FrameRenderer::draw_gl_layer(Slot& s, const LayerSpec& l) {
+unsigned FrameRenderer::draw_gl_layer(Slot& s, const LayerSpec& l,
+                                      const SourceStyle& style) {
     if (s.gl_failed) return 0;
     if (!s.gl) {
         s.gl = std::make_unique<PreviewRenderer>();
@@ -459,9 +483,6 @@ unsigned FrameRenderer::draw_gl_layer(Slot& s, const LayerSpec& l) {
     float intr[4];
     lens_intrinsics(c.lens, W, H, intr);
 
-    SourceStyle style;
-    if (l.source < (int)_spec.styles.size())
-        style = _spec.styles[(size_t)l.source];
     PreviewStyle ps;
     ps.transparent = true;
     ps.point_shape = (int)style.point_style;
@@ -488,54 +509,141 @@ unsigned FrameRenderer::draw_gl_layer(Slot& s, const LayerSpec& l) {
                         style.cameras, 1.0f, false, 0.0f, &ps);
 }
 
+unsigned FrameRenderer::target(int index) {
+    const int W = _spec.width, H = _spec.height;
+    if (W != _pool_w || H != _pool_h) {
+        for (unsigned& t : _tex_pool)
+            if (t) { GLuint g = t; glDeleteTextures(1, &g); t = 0; }
+        _pool_w = W;
+        _pool_h = H;
+    }
+    unsigned& t = _tex_pool[std::clamp(index, 0, 5)];
+    if (!t) {
+        GLuint g = 0;
+        glGenTextures(1, &g);
+        t = g;
+        glBindTexture(GL_TEXTURE_2D, g);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    return t;
+}
+
 bool FrameRenderer::poll(double wait) {
     if (_stage != Stage::Rendering) return false;
-    for (int i = 0; i < 2; i++) {
-        if (_layer_ready[i]) continue;
-        const LayerSpec& l = i == 0 ? _spec.a : _spec.b;
+    // Splat passes: collect what came back, and send the next of each worker.
+    bool waiting = false;
+    for (size_t i = 0; i < _passes.size(); i++) {
+        Pass& p = _passes[i];
+        const LayerSpec& l = p.layer ? _spec.b : _spec.a;
         Slot& s = *_slots[(size_t)l.source];
+        if (s.view.kind != SourceView::Splats || p.ready) continue;
+        if (!p.id) submit(p);
+        if (p.ready) continue;
+        if (!p.id) { waiting = true; continue; }
         ViewResult res;
-        const bool got = wait > 0.0 ? s.worker->wait_result(_pending[i], res, wait)
-                                    : s.worker->try_get_result(_pending[i], res);
-        if (!got) continue;
-        _layer_ready[i] = true;
-        if (!res.error.empty() || res.rgba8.empty()) {
-            if (_error.empty()) _error = res.error;
+        const bool got = wait > 0.0 ? s.worker->wait_result(p.id, res, wait)
+                                    : s.worker->try_get_result(p.id, res);
+        if (!got) {
+            // A render that never comes back would hold the frame forever.
+            if (now_s() - p.sent > 60.0) {
+                if (_error.empty()) _error = "a splat render did not come back";
+                p.ready = true;
+            } else {
+                waiting = true;
+            }
             continue;
         }
-        if (!s.tex) {
-            GLuint t = 0;
-            glGenTextures(1, &t);
-            s.tex = t;
-            glBindTexture(GL_TEXTURE_2D, t);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        p.ready = true;
+        if (!res.error.empty() || res.rgba8.empty()) {
+            if (_error.empty()) _error = res.error;
+        } else {
+            p.tex = target((int)i);
+            glBindTexture(GL_TEXTURE_2D, p.tex);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, res.W, res.H, 0, GL_RGBA,
+                         GL_UNSIGNED_BYTE, res.rgba8.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+            p.flip = true;
         }
-        glBindTexture(GL_TEXTURE_2D, s.tex);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, res.W, res.H, 0, GL_RGBA,
-                     GL_UNSIGNED_BYTE, res.rgba8.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
-        s.tex_w = res.W;
-        s.tex_h = res.H;
-        _layer_tex[i] = s.tex;
-        _layer_flip[i] = true;
+        for (Pass& o : _passes)
+            if (!o.id && !o.ready) submit(o);
     }
-    if (!_layer_ready[0] || !_layer_ready[1]) return false;
-    for (int i = 0; i < 2; i++) {
-        const LayerSpec& l = i == 0 ? _spec.a : _spec.b;
-        if (l.source < 0 || l.source >= (int)_slots.size()) continue;
+    if (waiting) return false;
+    // Points and meshes, drawn now and kept, since the next draw of the same
+    // model reuses its renderer's target.
+    for (size_t i = 0; i < _passes.size(); i++) {
+        Pass& p = _passes[i];
+        const LayerSpec& l = p.layer ? _spec.b : _spec.a;
         Slot& s = *_slots[(size_t)l.source];
         if (s.view.kind == SourceView::Splats) continue;
-        _layer_tex[i] = draw_gl_layer(s, l);
-        _layer_flip[i] = false;
+        const unsigned t = draw_gl_layer(s, l, l.style[std::clamp(p.variant, 0, 1)]);
+        if (t) {
+            p.tex = target((int)i);
+            blend(t, false, 0, false, 0.0f, p.tex);
+            p.flip = false;
+        }
+        p.ready = true;
+    }
+    // Each layer: its one look, or its two mixed.
+    for (int layer = 0; layer < 2; layer++) {
+        const Pass* v[2] = {nullptr, nullptr};
+        for (const Pass& p : _passes)
+            if (p.layer == layer && p.tex) v[std::clamp(p.variant, 0, 1)] = &p;
+        const LayerSpec& l = layer ? _spec.b : _spec.a;
+        if (v[0] && v[1]) {
+            _layer_tex[layer] = target(4 + layer);
+            blend(v[0]->tex, v[0]->flip, v[1]->tex, v[1]->flip, l.style_mix, _layer_tex[layer]);
+            _layer_flip[layer] = false;
+        } else if (v[0] || v[1]) {
+            const Pass* one = v[0] ? v[0] : v[1];
+            _layer_tex[layer] = one->tex;
+            _layer_flip[layer] = one->flip;
+        }
     }
     composite();
     _stage = Stage::Idle;
+    _passes.clear();
     _done++;
     return true;
+}
+
+void FrameRenderer::blend(unsigned a, bool flip_a, unsigned b, bool flip_b, float w,
+                          unsigned dst) {
+    if (!ensure_compositor() || !_blend_prog) return;
+    if (!_blend_fbo) {
+        GLuint f = 0;
+        glx::GenFramebuffers(1, &f);
+        _blend_fbo = f;
+    }
+    glx::BindFramebuffer(GL_FRAMEBUFFER, _blend_fbo);
+    glx::FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dst, 0);
+    glViewport(0, 0, _spec.width, _spec.height);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glx::UseProgram(_blend_prog);
+    glx::ActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, a);
+    glx::ActiveTexture(GL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, b ? b : a);
+    glx::Uniform1i(_bu[0], 0);
+    glx::Uniform1i(_bu[1], 1);
+    glx::Uniform1i(_bu[2], flip_a ? 1 : 0);
+    glx::Uniform1i(_bu[3], flip_b ? 1 : 0);
+    glx::Uniform1i(_bu[4], b ? 1 : 0);
+    glx::Uniform1f(_bu[5], w);
+    glx::BindVertexArray(_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glx::BindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glx::ActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glx::UseProgram(0);
+    glx::BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 bool FrameRenderer::ensure_compositor() {
@@ -564,6 +672,20 @@ bool FrameRenderer::ensure_compositor() {
     GLuint vao = 0;
     glx::GenVertexArrays(1, &vao);
     _vao = vao;
+    GLuint bvs = compile_shader(GL_VERTEX_SHADER, kCompVert);
+    GLuint bfs = compile_shader(GL_FRAGMENT_SHADER, kBlendFrag);
+    if (bvs && bfs) {
+        _blend_prog = glx::CreateProgram();
+        glx::AttachShader(_blend_prog, bvs);
+        glx::AttachShader(_blend_prog, bfs);
+        glx::LinkProgram(_blend_prog);
+        glx::GetProgramiv(_blend_prog, GL_LINK_STATUS, &ok);
+        if (!ok) { glx::DeleteProgram(_blend_prog); _blend_prog = 0; }
+    }
+    if (bvs) glx::DeleteShader(bvs);
+    if (bfs) glx::DeleteShader(bfs);
+    const char* bnames[] = {"u_t0", "u_t1", "u_flip0", "u_flip1", "u_has1", "u_w"};
+    for (int i = 0; _blend_prog && i < 6; i++) _bu[i] = glx::GetUniformLocation(_blend_prog, bnames[i]);
     return true;
 }
 

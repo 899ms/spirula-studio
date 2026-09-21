@@ -131,6 +131,33 @@ Lens read_lens(const JsonValue& o) {
     return l;
 }
 
+void write_style(JsonWriter& w, const SourceStyle& y) {
+    w.object();
+    w.field("points", kPointStyleNames[(int)y.point_style]);
+    w.field("point_px", y.point_px);
+    w.field("sphere_radius", y.sphere_radius);
+    w.field("cameras", y.cameras);
+    w.field("shade", y.shade);
+    w.field("flat", y.flat);
+    w.field("colour", y.colour);
+    w.field("sh_degree", y.sh_degree);
+    if (!y.primitive.empty()) w.field("primitive", y.primitive);
+    w.end();
+}
+SourceStyle read_style(const JsonValue& o) {
+    SourceStyle y;
+    y.point_style = (PointStyle)name_index(kPointStyleNames, get_str(o, "points"), 1);
+    y.point_px = (float)std::clamp(get_num(o, "point_px", 3.0), 0.5, 64.0);
+    y.sphere_radius = (float)std::clamp(get_num(o, "sphere_radius", 0.004), 1e-6, 1.0);
+    y.cameras = get_bool(o, "cameras", false);
+    y.shade = get_bool(o, "shade", true);
+    y.flat = get_bool(o, "flat", false);
+    y.colour = get_bool(o, "colour", true);
+    y.sh_degree = std::clamp((int)get_num(o, "sh_degree", -1), -1, 3);
+    y.primitive = get_str(o, "primitive");
+    return y;
+}
+
 }  // namespace
 
 
@@ -193,13 +220,75 @@ double RenderProject::duration() const {
     return t + std::max(spacing, 0.1);
 }
 
-const Lens& RenderProject::lens_at(int i) const {
-    static const Lens kDefault;
-    if (keys.empty()) return kDefault;
-    i = std::clamp(i, 0, (int)keys.size() - 1);
-    for (int k = i; k > 0; k--)
-        if (keys[(size_t)k].own_lens) return keys[(size_t)k].lens;
-    return keys[0].lens;
+Lens RenderProject::lens_at(int i) const {
+    if (keys.empty()) return Lens();
+    const int n = (int)keys.size();
+    i = std::clamp(i, 0, n - 1);
+    int a = i;
+    while (a > 0 && !keys[(size_t)a].own_lens) a--;
+    const Lens& la = keys[(size_t)a].lens;
+    if (a == i) return la;
+    int b = i + 1;
+    while (b < n && !keys[(size_t)b].own_lens) b++;
+    // A loop glides back to the first key's lens.
+    double tb = 0.0;
+    if (b < n) tb = keys[(size_t)b].time;
+    else if (looped()) { b = 0; tb = duration(); }
+    else return la;
+    const Lens& lb = keys[(size_t)b].lens;
+    if (lb.projection != la.projection) return la;
+    const double ta = keys[(size_t)a].time, span = tb - ta;
+    const double w = span > 1e-9 ? std::clamp((keys[(size_t)i].time - ta) / span, 0.0, 1.0)
+                                 : 0.0;
+    Lens l = la;
+    const double fa = std::log(std::max(la.focal, 1e-6)), fb = std::log(std::max(lb.focal, 1e-6));
+    l.focal = std::exp(fa + (fb - fa) * w);
+    if (la.tier == lb.tier)
+        for (int d = 0; d < kLensCoeffs; d++)
+            l.dist[d] = (float)(la.dist[d] + (lb.dist[d] - la.dist[d]) * w);
+    return l;
+}
+
+bool SourceStyle::operator==(const SourceStyle& o) const {
+    return point_style == o.point_style && point_px == o.point_px &&
+           sphere_radius == o.sphere_radius && cameras == o.cameras && shade == o.shade &&
+           flat == o.flat && colour == o.colour && sh_degree == o.sh_degree &&
+           primitive == o.primitive;
+}
+
+void RenderProject::look_at(int source, double t, const std::vector<double>& key_times,
+                            SourceStyle& from, SourceStyle& to, float& mix) const {
+    mix = 0.0f;
+    if (source < 0 || source >= (int)sources.size()) { from = to = SourceStyle(); return; }
+    from = to = sources[(size_t)source].style;
+    const int n = std::min((int)keys.size(), (int)key_times.size());
+    if (n == 0) return;
+    auto look = [&](int k) -> const SourceStyle* {
+        for (const KeyLook& l : keys[(size_t)k].looks)
+            if (l.source == source) return &l.style;
+        return nullptr;
+    };
+    // The model's own style is the look at the first key unless it sets one.
+    double ta = key_times[0], tb = 0.0;
+    const SourceStyle* a = look(0) ? look(0) : &sources[(size_t)source].style;
+    const SourceStyle* b = nullptr;
+    for (int k = 1; k < n; k++) {
+        const SourceStyle* l = look(k);
+        if (!l) continue;
+        if (key_times[(size_t)k] <= t) { a = l; ta = key_times[(size_t)k]; }
+        else { b = l; tb = key_times[(size_t)k]; break; }
+    }
+    from = *a;
+    if (!b || t <= ta) { to = from; return; }
+    const double w = std::clamp((t - ta) / std::max(tb - ta, 1e-9), 0.0, 1.0);
+    // Sizes glide; what can only be one thing or the other is crossfaded.
+    from.point_px = (float)(a->point_px + (b->point_px - a->point_px) * w);
+    from.sphere_radius = (float)(a->sphere_radius + (b->sphere_radius - a->sphere_radius) * w);
+    to = *b;
+    to.point_px = from.point_px;
+    to.sphere_radius = from.sphere_radius;
+    if (to == from) return;
+    mix = (float)w;
 }
 
 void RenderProject::sort_keys() {
@@ -335,17 +424,8 @@ std::string project_to_json(const RenderProject& p) {
     for (const Source& s : p.sources) {
         w.object();
         w.field("path", s.path);
-        w.key("style").object();
-        w.field("points", kPointStyleNames[(int)s.style.point_style]);
-        w.field("point_px", s.style.point_px);
-        w.field("sphere_radius", s.style.sphere_radius);
-        w.field("cameras", s.style.cameras);
-        w.field("shade", s.style.shade);
-        w.field("flat", s.style.flat);
-        w.field("colour", s.style.colour);
-        w.field("sh_degree", s.style.sh_degree);
-        if (!s.style.primitive.empty()) w.field("primitive", s.style.primitive);
-        w.end();
+        w.key("style");
+        write_style(w, s.style);
         w.end();
     }
     w.end();
@@ -377,6 +457,17 @@ std::string project_to_json(const RenderProject& p) {
             write_lens(w, k.lens);
         }
         if (k.hold) w.field("hold", true);
+        if (!k.looks.empty()) {
+            w.key("looks").array();
+            for (const KeyLook& l : k.looks) {
+                w.object();
+                w.field("source", l.source);
+                w.key("style");
+                write_style(w, l.style);
+                w.end();
+            }
+            w.end();
+        }
         w.end();
     }
     w.end();
@@ -437,20 +528,8 @@ RenderProject project_from_json(const std::string& text) {
         for (const JsonValue& o : a->arr) {
             Source s;
             s.path = get_str(o, "path");
-            if (const JsonValue* st = o.find("style"); st && st->is_object()) {
-                SourceStyle& y = s.style;
-                y.point_style = (PointStyle)name_index(kPointStyleNames,
-                                                       get_str(*st, "points"), 1);
-                y.point_px = (float)std::clamp(get_num(*st, "point_px", 3.0), 0.5, 64.0);
-                y.sphere_radius = (float)std::clamp(get_num(*st, "sphere_radius", 0.004),
-                                                    1e-6, 1.0);
-                y.cameras = get_bool(*st, "cameras", false);
-                y.shade = get_bool(*st, "shade", true);
-                y.flat = get_bool(*st, "flat", false);
-                y.colour = get_bool(*st, "colour", true);
-                y.sh_degree = std::clamp((int)get_num(*st, "sh_degree", -1), -1, 3);
-                y.primitive = get_str(*st, "primitive");
-            }
+            if (const JsonValue* st = o.find("style"); st && st->is_object())
+                s.style = read_style(*st);
             p.sources.push_back(std::move(s));
         }
     }
@@ -485,6 +564,14 @@ RenderProject project_from_json(const std::string& text) {
                 k.lens = read_lens(*l);
             }
             k.hold = get_bool(o, "hold", false);
+            if (const JsonValue* ls = o.find("looks"); ls && ls->is_array()) {
+                for (const JsonValue& lo : ls->arr) {
+                    const JsonValue* st = lo.find("style");
+                    const int src = (int)get_num(lo, "source", -1);
+                    if (src < 0 || src >= (int)p.sources.size() || !st || !st->is_object()) continue;
+                    k.looks.push_back({src, read_style(*st)});
+                }
+            }
             update_aim(k, p.up);
             p.keys.push_back(k);
         }

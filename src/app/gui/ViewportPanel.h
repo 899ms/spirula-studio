@@ -95,6 +95,9 @@ public:
     // otherwise render at different sizes, which is not a comparison.
     float controls_height() const { return _controls_h; }
     void set_controls_pad(float px) { _controls_pad = px; }
+    // The image this wide, left-aligned under controls that keep the whole
+    // width; the owner draws beside it. 0 = all of it.
+    void set_image_width(float w) { _image_w = w; }
 
     // An editing tool over this viewport. While one is installed it owns the
     // left button; the other two stay with navigation, so a tool is never a
@@ -354,6 +357,7 @@ private:
     bool _nav_controls = true;
     float _controls_h = 0.0f;
     float _controls_pad = 0.0f;
+    float _image_w = 0.0f;
 
     // ---- render options a VIEWER may change (a training session may not:
     // what it renders has to be what it is training) ----

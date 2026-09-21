@@ -306,8 +306,20 @@ void CompareView::poll() {
         _pending_move = 0;
     }
     if (_pending_remove >= 0) {
-        remove(_pending_remove);
+        const int gone = _pending_remove;
         _pending_remove = -1;
+        // The render's own model: it carries on with the next one open.
+        int next = -1;
+        for (int i = 0; gone == _render_index && i < count() && next < 0; i++)
+            if (i != gone && _models[(size_t)i]->attached) next = i;
+        auto drop = [this, gone, next] {
+            // Handed on, not left: no autosave notice for a move still open.
+            if (next >= 0) end_render(true);
+            remove(gone);
+            if (next >= 0) begin_render(next > gone ? next - 1 : next);
+        };
+        if (gone == _edit_index && edit_dirty()) confirm_discard_edits(drop);
+        else drop();
     }
     for (auto& m : _models)
         if (!m->attached && m->src.ready()) attach(*m);
@@ -498,7 +510,7 @@ void CompareView::begin_render(int index) {
     });
     _render.set_leave([this] { end_render(); });
     _render.set_remove_model([this](int pane) {
-        if (pane >= 0 && pane < count() && pane != _render_index) _pending_remove = pane;
+        if (pane >= 0 && pane < count()) _pending_remove = pane;
     });
     if (index < 0 || index >= count() || !_models[(size_t)index]->attached) return;
     // An edit on another pane would be left drawing nowhere.
@@ -520,6 +532,7 @@ void CompareView::end_render(bool switching) {
     const int index = _render_index;
     _render.close(switching);
     _render_index = -1;
+    if (index < count()) _models[(size_t)index]->panel.set_image_width(0.0f);
     if (index < count() && _edit_index == index && _edit.active())
         _models[(size_t)index]->panel.set_interactor(&_edit);
 }
@@ -847,7 +860,7 @@ void CompareView::draw_placement_popup(int index) {
     ImGui::EndPopup();
 }
 
-void CompareView::draw_pane(int index, const ImVec2& size) {
+void CompareView::draw_pane(int index, const ImVec2& size, const std::function<void()>& beside) {
     Model& m = *_models[index];
     ImGui::PushID(index);
     ImGui::BeginChild("##pane", size, ImGuiChildFlags_Borders);
@@ -932,6 +945,7 @@ void CompareView::draw_pane(int index, const ImVec2& size) {
             // Nothing is training, so nothing changes between frames unless
             // the camera does: the viewport renders on demand.
             m.panel.draw(/*training=*/false);
+            if (beside) beside();
             break;
         default:
             ui::TextDisabled(msg::viewer_nothing_open);
@@ -974,17 +988,27 @@ void CompareView::draw(float height) {
             _render.draw_preview_pane();
             ImGui::EndChild();
         } else if (mode == PM::Beside) {
-            // A splitter between them: the camera's share of the width.
-            const float room = std::max(1.0f, avail.x - splitter_extent());
+            // One pane across the width, its controls over both; under them
+            // the view and the camera's picture, a splitter between.
+            ViewportPanel& panel = _models[(size_t)_render_index]->panel;
+            const float room = std::max(1.0f, avail.x - 2.0f * st.WindowPadding.x - splitter_extent());
             float& share = _render.beside_share();
             float w = std::clamp(room * (1.0f - share), px(160.0f), std::max(px(160.0f), room - px(160.0f)));
-            draw_pane(_render_index, ImVec2(w, avail.y));
-            if (splitter_v("##besidesplit", &w, px(160.0f), room - px(160.0f), avail.y))
-                share = std::clamp(1.0f - w / room, 0.1f, 0.9f);
-            ImGui::BeginChild("##camera", ImVec2(0, avail.y), ImGuiChildFlags_Borders);
-            _render.draw_preview_pane();
-            ImGui::EndChild();
+            panel.set_image_width(w);
+            draw_pane(_render_index, avail, [&] {
+                float ix, iy, iw, ih;
+                panel.image_rect(ix, iy, iw, ih);
+                // Where the splitter's SameLine picks up: the image's right edge.
+                ImGui::SetCursorScreenPos(ImVec2(ix + iw, iy));
+                ImGui::Dummy(ImVec2(0.0f, ih));
+                if (splitter_v("##besidesplit", &w, px(160.0f), room - px(160.0f), ih))
+                    share = std::clamp(1.0f - w / room, 0.1f, 0.9f);
+                ImGui::BeginChild("##camera", ImVec2(0, ih), ImGuiChildFlags_Borders);
+                _render.draw_preview_pane();
+                ImGui::EndChild();
+            });
         } else {
+            _models[(size_t)_render_index]->panel.set_image_width(0.0f);
             draw_pane(_render_index, avail);
         }
         _controls_h = 0.0f;

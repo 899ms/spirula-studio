@@ -7,6 +7,7 @@
 #include "app/gui/Ui.h"
 #include "app/gui/ViewportPanel.h"
 #include "data/DatasetParser.h"
+#include "i18n/catalog/EditTransform.h"
 #include "i18n/catalog/Render.h"
 
 #include "imgui.h"
@@ -18,6 +19,7 @@
 
 namespace fs = std::filesystem;
 namespace msg = spirula::i18n::msg::render;
+namespace xmsg = spirula::i18n::msg::xform;
 using spirula::i18n::Msg;
 using spirula::i18n::format;
 
@@ -34,8 +36,8 @@ const Resolution kResolutions[] = {
     {1280, 720, &msg::res_hd}, {1920, 1080, &msg::res_full_hd},
     {2560, 1440, &msg::res_qhd}, {3840, 2160, &msg::res_4k},
     {1080, 1920, &msg::res_vertical}, {1080, 1080, &msg::res_square},
-    {3840, 1920, &msg::res_360_4k}, {5760, 2880, &msg::res_360_6k},
-    {7680, 3840, &msg::res_360_8k},
+    {3840, 1920, &msg::res_2to1_4k}, {5760, 2880, &msg::res_2to1_6k},
+    {7680, 3840, &msg::res_2to1_8k},
 };
 constexpr int kNumResolutions = (int)(sizeof kResolutions / sizeof kResolutions[0]);
 
@@ -123,18 +125,16 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
         }
         return;
     }
-    if (io.KeyCtrl && pressed(ImGuiKey_A)) {
+    if (io.KeyCtrl && !io.KeyShift && pressed(ImGuiKey_A)) {
         _sel.assign(_project.keys.size(), 1);
         return;
     }
+    if (io.KeyCtrl && !io.KeyShift && pressed(ImGuiKey_D)) {
+        _sel.assign(_project.keys.size(), 0);
+        return;
+    }
     if (plain && pressed(ImGuiKey_Space)) {
-        _playing = !_playing;
-        if (_playing) {
-            if (_time >= _project.duration() - 1e-6 && !_project.keys.empty())
-                _time = _project.keys.front().time;
-            _play_from = _time;
-            _play_clock = ImGui::GetTime();
-        }
+        set_playing(!_playing);
         return;
     }
     const double frame = 1.0 / std::max(_project.output.fps, 1.0);
@@ -145,17 +145,18 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
     if (plain && (pressed(ImGuiKey_PageDown) || pressed(ImGuiKey_PageUp))) {
         const bool next = pressed(ImGuiKey_PageDown);
         double best = _time;
-        for (const Keyframe& k : _project.keys) {
-            if (next && k.time > _time + 1e-6 && (best == _time || k.time < best)) best = k.time;
-            if (!next && k.time < _time - 1e-6 && (best == _time || k.time > best)) best = k.time;
+        for (double t : trajectory().key_times()) {
+            if (next && t > _time + 1e-6 && (best == _time || t < best)) best = t;
+            if (!next && t < _time - 1e-6 && (best == _time || t > best)) best = t;
         }
         _time = best;
     }
     bool any = false;
     for (uint8_t v : _sel) any = any || v;
-    // Deleting is about the selection, wherever the pointer is.
+    // Deleting is about the selection, wherever the pointer is; over the
+    // viewport the keys left are refitted to the path.
     if (any && plain && (pressed(ImGuiKey_Delete) || pressed(ImGuiKey_Backspace))) {
-        delete_selected();
+        delete_selected(over_view && !over_list);
         return;
     }
     // Over the list or the timeline, the letters that pick and delete.
@@ -201,7 +202,7 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
         return;
     }
     if (plain && pressed(ImGuiKey_X)) {
-        delete_selected();
+        delete_selected(true);
         return;
     }
     const struct { ImGuiKey key; XformKind kind; } ops[] = {
@@ -222,7 +223,8 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
 void RenderSession::draw_status() {
     if (!_have_project) return;
     if (_xform.active()) {
-        ui::TextDisabled(_xform.kind() == XformKind::Scale ? msg::hint_op_fov : msg::hint_op);
+        ui::TextDisabled(_xform.kind() == XformKind::Scale && single_selected() >= 0
+                             ? msg::hint_op_fov : msg::hint_op);
         return;
     }
     if (_pick_target || _pick_waiting) {
@@ -236,6 +238,13 @@ void RenderSession::draw_status() {
 
 void RenderSession::draw_panel() {
     if (!_panel) return;
+    {
+        const ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
+        _panel_rect[0] = wp.x;
+        _panel_rect[1] = wp.y;
+        _panel_rect[2] = ws.x;
+        _panel_rect[3] = ws.y;
+    }
     handle_keys(_mouse_in, _timeline_hovered ||
                                ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows));
     const ImGuiStyle& st = ImGui::GetStyle();
@@ -341,6 +350,7 @@ void RenderSession::draw_keys_section(float full) {
 
     // The keys as a list: the viewport's cameras, in time order.
     const int n = (int)_project.keys.size();
+    const std::vector<double> visits = trajectory().key_times();
     if (n > 0 && ImGui::BeginTable("##keys", 4,
                                    ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
                                    ImGuiTableFlags_ScrollY,
@@ -361,17 +371,18 @@ void RenderSession::draw_keys_section(float full) {
             std::snprintf(label, sizeof label, "%d", i + 1);
             if (ui::SelectableRaw(label, selected(i), ImGuiSelectableFlags_SpanAllColumns)) {
                 click_select(i, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift);
-                _time = k.time;
+                _time = key_visit(i);
             }
             ImGui::TableNextColumn();
-            ui::TextRaw(seconds(k.time));
+            ui::TextRaw(seconds(i < (int)visits.size() ? visits[(size_t)i] : k.time));
             ImGui::TableNextColumn();
+            char b[48];
+            std::snprintf(b, sizeof b, "%.0f\xc2\xb0", lens_fov(_project.lens_at(i)));
             if (k.own_lens || i == 0) {
-                char b[48];
-                std::snprintf(b, sizeof b, "%.0f\xc2\xb0", lens_fov(k.lens));
                 ui::TextRaw(b);
             } else {
-                ui::TextDisabled(msg::lens_same);
+                ui::TextDisabledRaw(b);
+                ui::help_on_hover(msg::lens_auto_help);
             }
             ImGui::TableNextColumn();
             if (k.aim) ui::TextRaw("\xe2\x97\x8e");
@@ -384,8 +395,16 @@ void RenderSession::draw_keys_section(float full) {
         Keyframe& k = _project.keys[(size_t)one];
         const float w = full * 0.55f;
         ImGui::SetNextItemWidth(w);
-        double t = k.time;
-        if (ui::InputDoubleRaw("##ktime", &t, 0.1, 1.0, "%.3f s")) {
+        // At constant speed the path decides when the keys between the ends
+        // are passed.
+        const bool paced = _project.motion.constant_speed && one > 0 &&
+                           one + 1 < (int)_project.keys.size();
+        double t = paced ? key_visit(one) : k.time;
+        ImGui::BeginDisabled(paced);
+        const bool edited = ui::InputDoubleRaw("##ktime", &t, 0.1, 1.0, "%.3f s");
+        ImGui::EndDisabled();
+        if (paced) ui::help_on_hover_disabled(msg::key_time_paced);
+        if (edited && !paced) {
             k.time = std::max(0.0, t);
             const double keep = k.time;
             _project.sort_keys();
@@ -452,6 +471,12 @@ void RenderSession::draw_keys_section(float full) {
         ui::Text(msg::key_position);
     } else if (any) {
         ui::TextDisabledWrapped(msg::keys_many_hint);
+        const Msg* pivots[3] = {&xmsg::pivot_origin, &xmsg::pivot_median, &xmsg::pivot_mean};
+        ImGui::SetNextItemWidth(full * 0.55f);
+        combo_msgs("##pivot", &_pivot, pivots, 3);
+        ImGui::SameLine();
+        ui::Text(xmsg::pivot);
+        ui::help_on_hover(xmsg::pivot_help);
     }
 
     ImGui::SetNextItemWidth(full * 0.45f);
@@ -476,24 +501,30 @@ void RenderSession::draw_lens_section(float full) {
     if (_project.keys.empty()) return;
     int at = single_selected();
     if (at < 0) {
-        // No one key chosen: the lens in force at the playhead.
-        at = 0;
-        for (int i = 0; i < (int)_project.keys.size(); i++)
-            if (_project.keys[(size_t)i].time <= _time + 1e-9) at = i;
+        // No one key chosen: the key last passed, held still while playing
+        // so the section does not change under the pointer.
+        if (!_playing) {
+            const std::vector<double> visits = trajectory().key_times();
+            _lens_key = 0;
+            for (int i = 0; i < (int)visits.size(); i++)
+                if (visits[(size_t)i] <= _time + 1e-9) _lens_key = i;
+        }
+        at = std::clamp(_lens_key, 0, (int)_project.keys.size() - 1);
     }
     Keyframe& k = _project.keys[(size_t)at];
     ui::TextDisabled(msg::lens_of_key, {(long long)(at + 1)});
     if (at > 0) {
-        bool same = !k.own_lens;
-        if (ui::Checkbox(msg::lens_same_as_before, &same)) {
-            k.own_lens = !same;
-            if (k.own_lens) k.lens = _project.lens_at(at - 1);
+        bool glide = !k.own_lens;
+        if (ui::Checkbox(msg::lens_auto, &glide)) {
+            const Lens now = _project.lens_at(at);
+            k.own_lens = !glide;
+            if (k.own_lens) k.lens = now;
             project_changed();
         }
-        ui::help_on_hover(msg::lens_same_as_before_help);
-        if (same) {
-            const Lens& l = _project.lens_at(at);
-            ui::TextDisabled(msg::lens_inherited,
+        ui::help_on_hover(msg::lens_auto_help);
+        if (glide) {
+            const Lens l = _project.lens_at(at);
+            ui::TextDisabled(msg::lens_between,
                              {kProjections[(int)l.projection]->get(), (long long)std::lround(lens_fov(l))});
             return;
         }
@@ -735,11 +766,12 @@ void RenderSession::draw_effects_section(float full) {
     const float w = full * 0.5f;
 
     // Fades: the two every editor has.
-    auto fade = [&](const Msg& name, Fade& f, const char* id) {
+    auto fade = [&](const Msg& name, Fade& f, const char* id, bool in) {
         ImGui::PushID(id);
         int c = (int)f.colour;
         ImGui::SetNextItemWidth(w * 0.7f);
-        if (ui::ComboRaw("##c", &c, {&msg::fade_none, &msg::fade_black, &msg::fade_white})) {
+        if (ui::ComboRaw("##c", &c, {&msg::fade_none, in ? &msg::fade_from_black : &msg::fade_to_black,
+                                     in ? &msg::fade_from_white : &msg::fade_to_white})) {
             f.colour = (FadeColour)c;
             project_changed();
         }
@@ -756,8 +788,8 @@ void RenderSession::draw_effects_section(float full) {
         ui::Text(name);
         ImGui::PopID();
     };
-    fade(msg::fade_in, _project.fade_in, "fi");
-    fade(msg::fade_out, _project.fade_out, "fo");
+    fade(msg::fade_in, _project.fade_in, "fi", true);
+    fade(msg::fade_out, _project.fade_out, "fo", false);
     if (ui::ColorEdit3Raw("##bg", _project.background, ImGuiColorEditFlags_NoInputs))
         project_changed();
     ImGui::SameLine();
@@ -766,23 +798,51 @@ void RenderSession::draw_effects_section(float full) {
     // The models, and how each is drawn.
     ui::SeparatorText(msg::sec_models);
     int remove = -1;
+    const int one = single_selected();
     for (int i = 0; i < (int)_sources.size(); i++) {
         const SourceInfo& s = _sources[(size_t)i];
         if (i >= (int)_project.sources.size()) break;
-        SourceStyle& y = _project.sources[(size_t)i].style;
         ImGui::PushID(i);
         const Msg& kind = s.view.kind == SourceView::Points ? msg::model_points
                           : s.view.kind == SourceView::Mesh ? msg::model_mesh
                                                             : msg::model_splats;
         ui::TextRaw(format(msg::model_line, {(long long)(i + 1), kind.get(), s.name}));
         if (ImGui::IsItemHovered()) ui::SetTooltipRaw(s.path);
-        if (i > 0) {
-            // The primary one is what the camera move is laid out on.
+        if (_sources.size() > 1) {
             ImGui::SameLine(std::max(ImGui::GetCursorPosX(), full - px(24.0f)));
             if (ui::ButtonRaw("x##rm", ImVec2(px(24.0f), 0))) remove = i;
             ui::help_on_hover(msg::model_remove_help);
         }
         ImGui::Indent();
+        // The look from the start, or the one a selected key changes it to.
+        SourceStyle* yp = &_project.sources[(size_t)i].style;
+        bool keyed = false;
+        for (const Keyframe& k : _project.keys)
+            for (const KeyLook& l : k.looks) keyed = keyed || l.source == i;
+        if (one >= 0) {
+            std::vector<KeyLook>& looks = _project.keys[(size_t)one].looks;
+            auto it = std::find_if(looks.begin(), looks.end(),
+                                   [&](const KeyLook& l) { return l.source == i; });
+            bool own = it != looks.end();
+            const std::string label = format(msg::look_at_key, {(long long)(one + 1)}) + "##look";
+            if (ui::CheckboxRaw(label.c_str(), &own)) {
+                if (own) {
+                    SourceStyle from, to;
+                    float mix = 0.0f;
+                    _project.look_at(i, key_visit(one), trajectory().key_times(), from, to, mix);
+                    looks.push_back({i, mix > 0.5f ? to : from});
+                } else {
+                    looks.erase(it);
+                }
+                project_changed();
+            }
+            ui::help_on_hover(msg::look_at_key_help);
+            for (KeyLook& l : looks)
+                if (l.source == i) yp = &l.style;
+        } else if (keyed) {
+            ui::TextDisabledWrapped(msg::look_from_start);
+        }
+        SourceStyle& y = *yp;
         if (s.view.kind == SourceView::Points) {
             int ps = (int)y.point_style;
             ImGui::SetNextItemWidth(w);
@@ -843,7 +903,7 @@ void RenderSession::draw_effects_section(float full) {
         ImGui::Unindent();
         ImGui::PopID();
     }
-    if (remove > 0) remove_source(remove);
+    if (remove >= 0) remove_source(remove);
     if (ui::Button(msg::model_add) && _pick)
         _pick(Pick::AddModel, _sources.empty() ? std::string() : _sources[0].path, "");
     ui::help_on_hover(msg::model_add_help);
@@ -1059,6 +1119,17 @@ void RenderSession::draw_output_section(float full) {
     }
     ImGui::SameLine();
     ui::TextDisabled(msg::out_pixels);
+    bool sphere = false;
+    for (int i = 0; i < (int)_project.keys.size() && !sphere; i++)
+        sphere = _project.lens_at(i).projection == Projection::Equirect;
+    if (sphere && o.width != 2 * o.height) {
+        ui::TextColoredWrapped(kErr, msg::out_not_2to1, {(long long)o.width, (long long)o.height});
+        if (ui::Button(msg::out_make_2to1)) {
+            o.height = std::max(8, o.width / 2);
+            o.width = 2 * o.height;
+            project_changed();
+        }
+    }
 
     if (o.kind == OutputKind::Video || o.kind == OutputKind::Frames) {
         static const double kRates[] = {24, 25, 30, 50, 60};
@@ -1143,8 +1214,10 @@ void RenderSession::draw_output_section(float full) {
         project_changed();
     }
     ImGui::SameLine();
-    if (ui::Button(msg::out_browse, ImVec2(px(90.0f), 0)) && _pick)
+    if (ui::Button(msg::out_browse, ImVec2(px(90.0f), 0)) && _pick) {
+        _export_after_pick = false;
         _pick(Pick::Output, _sources.empty() ? "" : default_project_dir(_sources[0].path), "");
+    }
     ImGui::EndDisabled();
 
     ImGui::Spacing();

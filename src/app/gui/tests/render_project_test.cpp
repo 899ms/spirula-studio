@@ -1,7 +1,8 @@
 // render_project_test -- the render mode's pure half (app/gui/render/): the
 // trajectory through its keys, holds, eased ends, constant speed, C2 joins
-// and closed loops; the lens arithmetic; a project's JSON round trip;
-// moved-project copies; and a GIF read back through a decoder of its own.
+// and closed loops; when each key is passed; the lens arithmetic and its
+// glide between keys; per-key looks; a project's JSON round trip; moved-
+// project copies; and a GIF read back through a decoder of its own.
 
 #include "app/gui/render/GifWriter.h"
 #include "app/gui/render/LensPresets.h"
@@ -354,6 +355,137 @@ void test_lens_kept_on_sort() {
           "a key that becomes the first keeps the lens it was seen through");
 }
 
+void test_lens_glides() {
+    RenderProject p;
+    p.keys = {key(0, 0, 0, 0), key(1, 1, 0, 0), key(3, 2, 0, 0), key(4, 3, 0, 0)};
+    p.keys[0].own_lens = true;
+    p.keys[0].lens.focal = 1.0;
+    p.keys[2].own_lens = true;
+    p.keys[2].lens.focal = 9.0;
+    check(std::fabs(p.lens_at(1).focal - std::cbrt(9.0)) < 1e-9,
+          "a key with no lens of its own glides in log focal between the keys around it");
+    check(p.lens_at(3).focal == 9.0, "past the last key with a lens, that lens is held");
+    p.motion.loop = true;
+    p.end = 6.0;
+    check(std::fabs(p.lens_at(3).focal - std::pow(9.0, 2.0 / 3.0)) < 1e-9,
+          "a loop glides back to the first key's lens");
+    p.motion.loop = false;
+    p.keys[0].lens.tier = p.keys[2].lens.tier = 1;
+    p.keys[2].lens.dist[0] = 0.3f;
+    check(std::fabs(p.lens_at(1).dist[0] - 0.1f) < 1e-6, "distortion glides with the zoom");
+    p.keys[2].lens.projection = Projection::Fisheye;
+    const Lens held = p.lens_at(1);
+    check(held.projection == Projection::Perspective && held.focal == 1.0,
+          "across a change of projection the lens before is held");
+}
+
+void test_key_times() {
+    RenderProject p;
+    p.keys = {key(0, 0, 0, 0), key(1, 0.1, 0, 0), key(2, 5, 0, 0)};
+    p.keys[0].own_lens = true;
+    const Trajectory plain(p);
+    check(plain.key_times() == std::vector<double>({0.0, 1.0, 2.0}),
+          "without constant speed a key is passed at its own time");
+    p.motion.constant_speed = true;
+    for (bool ease : {false, true}) {
+        p.motion.ease = ease;
+        const Trajectory tr(p);
+        const std::vector<double>& v = tr.key_times();
+        const bool ends = v.size() == 3 && v[0] == 0.0 && std::fabs(v[2] - 2.0) < 1e-9;
+        const bool on = ends && dist3(tr.at(v[1]).pos, p.keys[1].pos) < 1e-3;
+        check(on && v[1] < 0.5, std::string("at constant speed the camera is on each key at its "
+                                            "passing time") + (ease ? ", eased" : ""));
+    }
+}
+
+void test_looks() {
+    RenderProject p;
+    p.sources.resize(1);
+    p.sources[0].style.colour = false;
+    p.sources[0].style.point_px = 2.0f;
+    p.keys = {key(0, 0, 0, 0), key(2, 1, 0, 0), key(4, 2, 0, 0)};
+    p.keys[0].own_lens = true;
+    KeyLook l;
+    l.style = p.sources[0].style;
+    l.style.colour = true;
+    l.style.point_px = 6.0f;
+    p.keys[2].looks.push_back(l);
+    const std::vector<double> times = {0.0, 2.0, 4.0};
+    SourceStyle a, b;
+    float mix = -1.0f;
+    p.look_at(0, 1.0, times, a, b, mix);
+    check(!a.colour && b.colour && std::fabs(mix - 0.25f) < 1e-6,
+          "between two looks the picture is mixed by how far along it is");
+    check(a.point_px == 3.0f && b.point_px == 3.0f, "a size glides instead of being mixed");
+    p.look_at(0, 5.0, times, a, b, mix);
+    check(a == l.style && b == l.style && mix == 0.0f, "after the last look it is held");
+    p.look_at(0, 0.0, times, a, b, mix);
+    check(a == p.sources[0].style && mix == 0.0f, "the model's own style is the look at the start");
+
+    const RenderProject q = project_from_json(project_to_json(p));
+    check(q.keys.size() == 3 && q.keys[2].looks.size() == 1 && q.keys[2].looks[0].style == l.style,
+          "a keyframe's looks survive the JSON round trip");
+    p.keys[1].looks.push_back({3, l.style});
+    check(project_from_json(project_to_json(p)).keys[1].looks.empty(),
+          "a look for a model the project does not have is dropped on reading");
+}
+
+void test_refit_after_delete() {
+    // A wobbly path: deleting a key straightens it; the refit should bring
+    // the camera back near where it went and where it looked.
+    RenderProject before;
+    for (int i = 0; i < 8; i++) {
+        Keyframe k = key(i, i, 0.4 * std::sin(1.3 * i), 0.2 * std::cos(0.7 * i));
+        k.aim = i % 2 == 0;
+        k.target[0] = i;
+        k.target[1] = 3.0;
+        update_aim(k, before.up);
+        before.keys.push_back(k);
+    }
+    before.keys[0].own_lens = true;
+    before.keys[0].lens.focal = 1.3;
+    auto error = [&](const RenderProject& now) {
+        const Trajectory a(before), b(now);
+        double worst = 0.0;
+        for (int j = 0; j <= 200; j++) {
+            const double t = before.duration() * j / 200.0;
+            const CameraState ca = a.at(t), cb = b.at(t);
+            const double turn = 2.0 * std::acos(std::min(1.0, qsame(ca.rot, cb.rot)));
+            worst = std::max(worst, dist3(ca.pos, cb.pos) + turn);
+        }
+        return worst;
+    };
+    RenderProject p = before;
+    p.keys.erase(p.keys.begin() + 3);
+    const double plain = error(p);
+    const Lens lens = p.keys[0].lens;
+    refit_keys(p, before, 1.0);
+    const double fitted = error(p);
+    check(fitted < 0.6 * plain, "a key deleted and the rest refitted: the path moves back toward the old one");
+    check(p.keys.size() == 7 && p.keys[0].lens == lens && p.keys[0].time == 0.0 &&
+              p.keys[6].time == 7.0,
+          "the refit leaves the keys' times and lenses alone");
+
+    // An aimed orbit, as the preset makes one, missing a key.
+    RenderProject orbit;
+    for (int i = 0; i < 8; i++) {
+        const double a = 2.0 * 3.14159265358979 * i / 8.0;
+        Keyframe k = key(1.5 * i, 2.0 * std::cos(a), 2.0 * std::sin(a), 0.8);
+        k.aim = true;
+        update_aim(k, orbit.up);
+        orbit.keys.push_back(k);
+    }
+    orbit.keys[0].own_lens = true;
+    orbit.motion.loop = true;
+    orbit.end = 12.0;
+    before = orbit;
+    p = orbit;
+    p.keys.erase(p.keys.begin() + 5);
+    const double gap = error(p);
+    refit_keys(p, before, 2.0);
+    check(error(p) < 0.5 * gap, "an orbit missing a key is refitted back toward its circle");
+}
+
 // ---- a GIF decoder, just enough to read back what GifWriter wrote ----
 
 struct Gif {
@@ -504,6 +636,10 @@ int main() {
     test_spline_is_c2();
     test_closed_loop();
     test_lens_kept_on_sort();
+    test_lens_glides();
+    test_key_times();
+    test_looks();
+    test_refit_after_delete();
     test_gif();
     if (g_failures) {
         std::printf("%d FAILED\n", g_failures);

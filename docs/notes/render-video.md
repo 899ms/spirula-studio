@@ -28,6 +28,12 @@ the run's model on the viewer screen and go straight into the mode.
 Editing and rendering switch into each other from either panel. The editor
 stays open behind the render, so what it deleted or moved is what is filmed.
 
+Keys are picked the same way in the viewport as in the list: a click takes
+one, Ctrl toggles, Shift takes the run from the last one clicked, and a click
+on nothing (or Ctrl+D) takes none. A click on the viewport or the panel stops
+playback before it lands, and the lens section holds its key while playing,
+so what was under the pointer is still there.
+
 ## Coordinates
 
 Poses are stored in the **primary model's saved coordinates**: its file's
@@ -73,7 +79,10 @@ end stops all of them together. The *Curve* decides the slopes at the keys:
 The parameter is key time, unless *Constant speed* is on: then it is the
 distance along the keys, so unevenly timed keys cannot make the spline
 overshoot, and time is warped by arc length (a 48-samples-per-segment
-table). A **closed loop** adds a knot back at the first key and solves the
+table). The keys between the ends are then passed when the path says, not at
+their own times: `Trajectory::key_times` runs the warp backwards, and the
+timeline, a click on a key and the per-key looks all use those times; the
+interior keys' own times are shown read-only. A **closed loop** adds a knot back at the first key and solves the
 spline cyclically (Sherman-Morrison); a rotation that makes a full turn comes
 back as -q, which the cyclic system carries as a sign. A loop's video leaves
 out its last frame, which would be its first again.
@@ -83,11 +92,25 @@ two aimed keys the rotation is instead derived from the interpolated position,
 target and roll, which keeps an orbit on its subject. The projection and the
 distortion tier cannot be blended and change at the key; the zoom glides.
 
+The first key always has a lens of its own; any other may, or takes one in
+between (`RenderProject::lens_at`): log focal length and the distortion
+coefficients glide in key time between the nearest keys before and after that
+have one, held past the last (a loop glides back to the first) and held
+across a change of projection.
+
 Editing keys keeps the move: a key added between two others goes where the
-camera already passes (`add_key`), a deleted or reordered key's neighbours
-keep the lens they were seen through (`keep_lenses`), R turns cameras about
-their own middle, and *Smooth keyframes* pulls keys towards their neighbours'
-line with Taubin's second outward pass so a loop does not shrink.
+camera already passes (`add_key`); a deleted key's own lens passes to the next
+key that has none, so the zoom still gets there; R turns one camera about its
+middle; with several selected, G and R move and turn them about the pivot --
+origin, median or mean -- aim points included, and S spreads their positions
+alone, so a widened orbit still looks at its subject (S on one camera is its
+zoom). Deleting from the viewport refits the keys left to the old
+path (`refit_keys`): Levenberg-Marquardt on a numeric Jacobian over each key's
+position and its aim point or a rotation vector, matching position and
+rotation at 12 samples per key, a radian weighing one scene unit; the times
+and lenses stay. Deleting from the panel or the timeline takes the key out and
+nothing else. *Smooth keyframes* pulls keys towards their neighbours' line
+with Taubin's second outward pass so a loop does not shrink.
 
 ## One frame
 
@@ -107,6 +130,20 @@ Two layers at most meet in one GLSL compositing pass: a mix through a mask
 has cut itself to its side of the level), then two tints (a dip, then the
 fades) and the background. Readback is one `glReadPixels` of the result.
 
+A frame is a list of passes, one per layer and look. A `RenderWorker` keeps a
+single latest-wins request slot, so a second request to the same worker
+before the first came back replaced it and the frame waited forever: the
+cause of previews that stopped playing with several models, and of exports
+stuck at one frame and then at 0 after a cancel. Each worker now gets one
+pass at a time, a pass that has not come back in 60 s is given up with an
+error, and starting or cancelling an export abandons whatever was in flight.
+
+A model's look can change at a keyframe (`Keyframe::looks`): between two keys
+that set one, sizes glide and anything that can only be one thing or the
+other -- colour on or off, shading, point shape, SH degree, primitive -- is
+rendered both ways and mixed on screen by how far along the time is. The
+model's own style is the look at the first key.
+
 Effects that rewrite splats -- *Grow in* scales them up from 2% while they
 fade in, *Sweep* hides those past the level with a soft band -- need the
 splats host-side. They are read from the file on first use, rewritten per
@@ -121,11 +158,19 @@ and the points are exact. Splats render with the primitive the viewport shows
 them with (3DGUT follows a wide lens where 3DGS smears at the edge) unless a
 model's *Render as* says otherwise.
 
-The keys are drawn one size in the world, through the same lens model the
-engine renders with (`camhost::generate_ray`): a pyramid, curved by
-distortion, a dome for a fisheye, a globe for the whole sphere. The camera's
-own picture sits in a resizable corner, side by side behind a splitter, or
-fills the view.
+The keys are drawn with the web viewer's frustum (`data/FrustumTemplate.h`,
+viewer/js/dataset.js `frustumTemplate`, which the viewport's own dataset
+cameras now use too): the border at 16 segments an edge through
+`camhost::generate_ray`, gridlines at twice that over a wide lens, a globe of
+8 meridians and 3 parallels for the whole sphere, and lines from the apex to
+the four corners in 4 pieces -- behind the camera too, for a fisheye past
+180 degrees. They are all one size in the world: the viewport's rule for a
+set of cameras (`frustum_display_size`) applied to the keys, never below what
+it gives the dataset's own cameras, held while an operator runs, times the
+panel's slider. A click hits any drawn line or axis.
+The camera's own picture sits in a resizable corner, fills the view, or sits
+beside it: then the pane's controls run the whole width and the view and the
+picture share the row under them, a splitter between.
 
 ## Transitions
 
@@ -142,7 +187,8 @@ A **shot** is a start time, a model (or nothing) and how it arrives:
 then splats, then meshes -- with the transition that suits each; shots can
 then be reordered (models and transitions trade places, times stay). Fade in
 and fade out are separate from the shots, as in an editor, and a photo has
-none.
+none. Any model can be closed, the first one included: the next becomes the
+primary one, and the keys cross from the old one's placement to its own.
 
 ## Output
 
@@ -166,7 +212,10 @@ stretch. An MP4 is raw RGB piped into an encoder process, chosen per size:
   correct and about 2.5 times the size.
 - Neither: frames and GIF still work, and the panel says why the rest does not.
 
-An equirectangular video is tagged as 360 (Spherical Video V1 and V2).
+An equirectangular video is tagged as 360 (Spherical Video V1 and V2). Its
+sizes are listed as 2:1, and the panel warns when a key's lens is
+equirectangular and the size is not. *Render* with no file chosen asks for one
+and then goes ahead.
 
 ## The file
 
@@ -186,7 +235,10 @@ eased ends, constant speed, C2 joins against Catmull-Rom's C1, closed loops
 (a circle stays a circle within 1%, a looped full turn keeps turning through
 the seam), rigid transforms of the path, aim and roll, the lens arithmetic,
 JSON round trips including older files, moved-project copies, dataset lens
-clustering, and a GIF read back through a decoder of its own. The rest was
+clustering, the lens glide between keys, when each key is passed at
+constant speed, per-key looks and their JSON, the refit after a deletion (an
+orbit missing a key comes back to within a third of its gap), and a GIF read
+back through a decoder of its own. The rest was
 driven through the GUI automation surface ([gui-automation.md](gui-automation.md))
 on a trained scene with a mesh: orbit loops, insertion, deletion, R, the
 lens-aware gizmos, the three preview layouts, keys following a turned model,

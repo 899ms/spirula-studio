@@ -16,10 +16,12 @@
 #include "app/gui/render/LensPresets.h"
 #include "app/gui/render/RenderProject.h"
 #include "app/gui/render/Trajectory.h"
+#include "data/FrustumTemplate.h"
 #include "i18n/Message.h"
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -138,9 +140,9 @@ private:
     // selected, or at the playhead.
     double next_key_time() const;
     void click_select(int index, bool ctrl, bool shift);
-    // Every key keeps the lens it was seen through, whatever happened to
-    // the one before it.
-    void keep_lenses(const std::vector<Lens>& before, const std::vector<int>& from);
+    void set_playing(bool on);
+    // When the camera passes key `i`, which constant speed moves.
+    double key_visit(int i);
     // One pass of smoothing over the selected keys, or all of them.
     void smooth_keys(double strength);
     void smooth_pass(double strength);
@@ -149,7 +151,8 @@ private:
     void remove_source(int index);
     void update_key_from_view(int index);
     void look_through(double time);
-    void delete_selected();
+    // `fit`: the keys left move to keep the path as it was.
+    void delete_selected(bool fit = false);
     void select_only(int index);
     bool selected(int index) const;
     int single_selected() const;
@@ -173,10 +176,12 @@ private:
     // letters that select and delete still mean keys.
     void handle_keys(bool over_view, bool over_list);
     // A camera as the viewport draws it, `scale` times the common size.
+    // `hit` collects the lines drawn, pane coordinates, four floats each.
     void draw_camera(ImDrawList* dl, const ViewProjection& vp, float ox,
                      float oy, const CameraState& c, unsigned col, float scale,
-                     bool axes) const;
-    // World units every camera is drawn at; the panel's size slider scales it.
+                     bool axes, std::vector<float>* hit = nullptr) const;
+    const camhost::FrustumShape& frustum_shape(const Lens& l) const;
+    // World units every camera is drawn at, times the panel's slider.
     double camera_size() const;
 
     // ---- frames ----
@@ -250,6 +255,9 @@ private:
     std::vector<uint8_t> _sel;           // one flag per key
     int _sel_anchor = -1;                // where a Shift-click range starts
     float _smooth_strength = 0.5f;
+    // What several keys turn and scale about: 0 the origin, 1 their median,
+    // 2 their mean.
+    int _pivot = 1;
     float _cam_size = 1.0f;
     double _time = 0.0;                  // the playhead, seconds
     bool _playing = false;
@@ -284,6 +292,16 @@ private:
     int _fly_block_key = 0;
     float _mouse[2] = {0, 0};
     bool _mouse_in = false;
+    // A press that selects on release: an empty spot clears the selection,
+    // a key already selected becomes the only one unless it was dragged.
+    float _press[2] = {0, 0};
+    bool _press_empty = false;
+    int _press_key = -1;
+    // Where the panel was last drawn, screen coordinates: a click there or
+    // on the pane stops playback before it lands.
+    float _panel_rect[4] = {0, 0, 0, 0};
+    // The key the lens section shows, held while playing.
+    int _lens_key = 0;
 
     // Timeline.
     int _drag_key = -1;
@@ -299,9 +317,18 @@ private:
     std::atomic<int> _ffmpeg_probe{0};   // 0 unknown, 1 asking, 2 known
     std::vector<std::string> _ffmpeg_encoders;
     bool _fallback_tried = false;        // the GPU encoder failed; ffmpeg next
+    bool _export_after_pick = false;     // the render button asked where to
     bool builtin_encodes(Codec codec, int width, int height) const;
     std::thread _probe;
     std::string _ffmpeg = "ffmpeg";
+
+    mutable std::map<std::string, camhost::FrustumShape> _shapes;
+    mutable std::string _cam_base_key;
+    mutable double _cam_base = 0.0;
+    mutable double _key_size = 0.0;
+    mutable uint64_t _key_size_rev = 0;
+    // Per key, the lines last drawn for it, which is what a click must hit.
+    std::vector<std::vector<float>> _key_lines;
 
     std::vector<DatasetLens> _dataset_lenses;
     std::string _dataset_lenses_key;

@@ -596,7 +596,8 @@ no ceremony — do not ask, do not leave a note saying you removed it.
 - **The camera models exist twice, on purpose, and only twice.** The device
   copy is `shaders/projection_utils.slang`; the host copy is
   `data/CameraMath.h`, which the GUI's frustum wireframe and `spirula
-  geometry`'s resampling both call. A third copy is a bug waiting to be found
+  geometry`'s resampling both call. The wireframe's shape is the web viewer's,
+  in one host copy too: `data/FrustumTemplate.h`. A third copy is a bug waiting to be found
   by nobody -- `spirula geometry --check` is what tests the host one, by
   round-tripping an analytic plane through every camera model.
 - **"Is this lens too wide for one pinhole?" is asked in three places and must

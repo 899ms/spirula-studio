@@ -5,6 +5,7 @@
 #include "core/Similarity.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 
@@ -94,6 +95,11 @@ double hermite(double p0, double p1, double m0, double m1, double u) {
 
 double smoothstep(double u) { return u * u * (3.0 - 2.0 * u); }
 
+double now_s() {
+    return std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 void normalize4(double q[4]) {
     const double n = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
     if (n > 1e-300) for (int k = 0; k < 4; k++) q[k] /= n;
@@ -160,13 +166,15 @@ void CameraState::c2w(double out[12]) const {
 // Trajectory
 // ===========================================================================
 
-Trajectory::Trajectory(const RenderProject& p) : _p(p) {
+Trajectory::Trajectory(const RenderProject& p, bool measure) : _p(p) {
     const std::vector<Keyframe>& k = p.keys;
     _n = (int)k.size();
     if (_n == 0) return;
     _closed = p.looped();
     _knots = _closed ? _n + 1 : _n;
     const int K = _knots, n = _n;
+    _lens.resize((size_t)n);
+    for (int i = 0; i < n; i++) _lens[(size_t)i] = p.lens_at(i);
     _src.resize((size_t)K);
     _t.resize((size_t)K);
     for (int i = 0; i < K; i++) {
@@ -196,7 +204,7 @@ Trajectory::Trajectory(const RenderProject& p) : _p(p) {
         }
         for (int c = 0; c < 4; c++) _rot[(size_t)i * 4 + c] = q[c];
         _roll[(size_t)i] = ki.roll;
-        _logf[(size_t)i] = std::log(std::max(p.lens_at(_src[(size_t)i]).focal, 1e-6));
+        _logf[(size_t)i] = std::log(std::max(_lens[(size_t)_src[(size_t)i]].focal, 1e-6));
     }
     const double rot_sign = _closed && (_rot[(size_t)n * 4] * _rot[0] + _rot[(size_t)n * 4 + 1] * _rot[1] +
                                         _rot[(size_t)n * 4 + 2] * _rot[2] +
@@ -362,7 +370,8 @@ Trajectory::Trajectory(const RenderProject& p) : _p(p) {
     auto always = [](int) { return true; };
     auto aimed = [&](int i) { return key(i).aim && key(i + 1).aim; };
     auto same_projection = [&](int i) {
-        return p.lens_at(_src[(size_t)i]).projection == p.lens_at(_src[(size_t)i + 1]).projection;
+        return _lens[(size_t)_src[(size_t)i]].projection ==
+               _lens[(size_t)_src[(size_t)i + 1]].projection;
     };
     solve(3, _pos, _dpos, always, 1.0, true);
     solve(4, _rot, _drot, always, rot_sign, false);
@@ -371,6 +380,9 @@ Trajectory::Trajectory(const RenderProject& p) : _p(p) {
     solve(1, _logf, _dfocal, same_projection, 1.0, true);
 
     // Arc length against the parameter, for constant speed and the readout.
+    _visit.assign(k.size(), 0.0);
+    for (int i = 0; i < n; i++) _visit[(size_t)i] = _t[(size_t)i];
+    if (!measure && !p.motion.constant_speed) return;
     const int per = 48;
     const double u0 = _u.front(), u1 = _u.back();
     _cum_u.push_back(u0);
@@ -386,6 +398,33 @@ Trajectory::Trajectory(const RenderProject& p) : _p(p) {
         for (int d = 0; d < 3; d++) last[d] = c.pos[d];
         _cum_u.push_back(u);
         _cum_len.push_back(_length);
+    }
+
+    // warp() run backwards at each key.
+    if (_u == _t || !(_length > 1e-12) || K < 2) return;
+    const double t0 = _t.front(), t1 = _t.back();
+    for (int i = 1; i < n; i++) {
+        // The end is the end; smoothstep is too flat there to invert exactly.
+        if (!_closed && i == n - 1) { _visit[(size_t)i] = t1; continue; }
+        const double u = _u[(size_t)i];
+        const auto it = std::lower_bound(_cum_u.begin(), _cum_u.end(), u);
+        double len = _length;
+        if (it == _cum_u.begin()) len = 0.0;
+        else if (it != _cum_u.end()) {
+            const size_t j = (size_t)(it - _cum_u.begin());
+            const double g = (u - _cum_u[j - 1]) / std::max(_cum_u[j] - _cum_u[j - 1], 1e-300);
+            len = _cum_len[j - 1] + g * (_cum_len[j] - _cum_len[j - 1]);
+        }
+        double f = len / _length;
+        if (p.motion.ease && !_closed) {
+            double lo = 0.0, hi = 1.0;
+            for (int it2 = 0; it2 < 50; it2++) {
+                const double mid = 0.5 * (lo + hi);
+                (smoothstep(mid) < f ? lo : hi) = mid;
+            }
+            f = 0.5 * (lo + hi);
+        }
+        _visit[(size_t)i] = t0 + f * (t1 - t0);
     }
 }
 
@@ -418,7 +457,7 @@ CameraState Trajectory::eval(double u) const {
     if (_knots == 1) {
         for (int d = 0; d < 3; d++) c.pos[d] = k[0].pos[d];
         for (int d = 0; d < 4; d++) c.rot[d] = k[0].rot[d];
-        c.lens = _p.lens_at(0);
+        c.lens = _lens[0];
         return c;
     }
     double f;
@@ -461,8 +500,8 @@ CameraState Trajectory::eval(double u) const {
 
     // The projection and the distortion model cannot be blended, so they
     // change at the key; the zoom and the coefficients glide.
-    const Lens& la = _p.lens_at(ka);
-    const Lens& lb = _p.lens_at(kb);
+    const Lens& la = _lens[(size_t)ka];
+    const Lens& lb = _lens[(size_t)kb];
     c.lens = f >= 1.0 ? lb : la;
     if (la.projection == lb.projection) {
         c.lens.focal = std::exp(channel(_logf, _dfocal, 1, 0));
@@ -471,6 +510,138 @@ CameraState Trajectory::eval(double u) const {
                 c.lens.dist[d] = (float)(la.dist[d] + (lb.dist[d] - la.dist[d]) * smoothstep(f));
     }
     return c;
+}
+
+// Levenberg-Marquardt on a numeric Jacobian, in units of `unit` and radians.
+void refit_keys(RenderProject& p, const RenderProject& before, double unit) {
+    const int n = (int)p.keys.size();
+    if (n < 2) return;
+    const double t0 = p.keys.front().time, t1 = p.duration();
+    if (!(t1 > t0)) return;
+    const Trajectory old_tr(before);
+    const int S = std::clamp(12 * n, 48, 240);
+    std::vector<double> ts((size_t)S);
+    std::vector<CameraState> want((size_t)S);
+    for (int j = 0; j < S; j++) {
+        ts[(size_t)j] = t0 + (t1 - t0) * (j + 0.5) / S;
+        want[(size_t)j] = old_tr.at(ts[(size_t)j]);
+    }
+    const double L = std::max(unit, 1e-12);
+    const std::vector<Keyframe> base = p.keys;
+    const int P = 6 * n, M = 6 * S;
+
+    // Position, then the aim point or a turn (a rotation vector, radians).
+    auto apply = [&](const std::vector<double>& x) {
+        for (int i = 0; i < n; i++) {
+            Keyframe& k = p.keys[(size_t)i];
+            k = base[(size_t)i];
+            const double* v = &x[(size_t)i * 6];
+            for (int d = 0; d < 3; d++) k.pos[d] += v[d] * L;
+            if (k.aim) {
+                for (int d = 0; d < 3; d++) k.target[d] += v[3 + d] * L;
+                update_aim(k, p.up);
+                continue;
+            }
+            const double a = std::sqrt(v[3]*v[3] + v[4]*v[4] + v[5]*v[5]);
+            const double sn = a > 1e-12 ? std::sin(0.5 * a) / a : 0.5;
+            const double dq[4] = {std::cos(0.5 * a), v[3] * sn, v[4] * sn, v[5] * sn};
+            quat_mul(base[(size_t)i].rot, dq, k.rot);
+        }
+    };
+    auto residuals = [&](const std::vector<double>& x, std::vector<double>& r) {
+        apply(x);
+        const Trajectory tr(p, false);
+        r.resize((size_t)M);
+        for (int j = 0; j < S; j++) {
+            const CameraState c = tr.at(ts[(size_t)j]);
+            const CameraState& w = want[(size_t)j];
+            double* o = &r[(size_t)j * 6];
+            for (int d = 0; d < 3; d++) o[d] = (c.pos[d] - w.pos[d]) / L;
+            const double inv[4] = {w.rot[0], -w.rot[1], -w.rot[2], -w.rot[3]};
+            double e[4];
+            quat_mul(inv, c.rot, e);
+            const double sg = e[0] < 0.0 ? -2.0 : 2.0;
+            for (int d = 0; d < 3; d++) o[3 + d] = sg * e[1 + d];
+        }
+    };
+    auto cost_of = [](const std::vector<double>& r) {
+        double c = 0.0;
+        for (double v : r) c += v * v;
+        return c;
+    };
+
+    std::vector<double> x((size_t)P, 0.0), r, rp, trial, J((size_t)M * P);
+    residuals(x, r);
+    double cost = cost_of(r), lambda = 1e-3;
+    const double start = now_s();
+    bool settled = false;
+    for (int it = 0; it < 60 && !settled && now_s() - start < 1.5; it++) {
+        const double h = 1e-5;
+        for (int c = 0; c < P; c++) {
+            x[(size_t)c] += h;
+            residuals(x, rp);
+            x[(size_t)c] -= h;
+            for (int m = 0; m < M; m++) J[(size_t)m * P + c] = (rp[(size_t)m] - r[(size_t)m]) / h;
+        }
+        std::vector<double> A((size_t)P * P, 0.0), g((size_t)P, 0.0);
+        for (int m = 0; m < M; m++) {
+            const double* row = &J[(size_t)m * P];
+            for (int a = 0; a < P; a++) {
+                if (row[a] == 0.0) continue;
+                g[(size_t)a] += row[a] * r[(size_t)m];
+                for (int b = a; b < P; b++) A[(size_t)a * P + b] += row[a] * row[b];
+            }
+        }
+        for (int a = 0; a < P; a++)
+            for (int b = 0; b < a; b++) A[(size_t)a * P + b] = A[(size_t)b * P + a];
+        bool improved = false;
+        for (int tries = 0; tries < 6 && !improved; tries++) {
+            // (A + lambda diag A) dx = -g, by Cholesky.
+            std::vector<double> C = A, dx((size_t)P);
+            for (int a = 0; a < P; a++) C[(size_t)a * P + a] += lambda * A[(size_t)a * P + a] + 1e-12;
+            bool ok = true;
+            for (int a = 0; a < P && ok; a++) {
+                for (int b = 0; b <= a; b++) {
+                    double v = C[(size_t)a * P + b];
+                    for (int k = 0; k < b; k++) v -= C[(size_t)a * P + k] * C[(size_t)b * P + k];
+                    if (a == b) {
+                        if (!(v > 0.0)) { ok = false; break; }
+                        C[(size_t)a * P + a] = std::sqrt(v);
+                    } else {
+                        C[(size_t)a * P + b] = v / C[(size_t)b * P + b];
+                    }
+                }
+            }
+            if (!ok) { lambda *= 10.0; continue; }
+            for (int a = 0; a < P; a++) {
+                double v = -g[(size_t)a];
+                for (int k = 0; k < a; k++) v -= C[(size_t)a * P + k] * dx[(size_t)k];
+                dx[(size_t)a] = v / C[(size_t)a * P + a];
+            }
+            for (int a = P - 1; a >= 0; a--) {
+                double v = dx[(size_t)a];
+                for (int k = a + 1; k < P; k++) v -= C[(size_t)k * P + a] * dx[(size_t)k];
+                dx[(size_t)a] = v / C[(size_t)a * P + a];
+            }
+            trial = x;
+            for (int a = 0; a < P; a++) trial[(size_t)a] += dx[(size_t)a];
+            residuals(trial, rp);
+            const double c = cost_of(rp);
+            if (c < cost) {
+                const double gain = cost - c;
+                x = trial;
+                r = rp;
+                cost = c;
+                lambda = std::max(lambda / 3.0, 1e-9);
+                improved = true;
+                settled = gain < 1e-10 * (1.0 + cost);
+            } else {
+                lambda *= 4.0;
+            }
+        }
+        if (!improved) break;
+    }
+    apply(x);
 }
 
 std::vector<double> Trajectory::sample_path(int n) const {

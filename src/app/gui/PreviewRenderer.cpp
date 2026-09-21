@@ -5,6 +5,7 @@
 #include "app/gui/GlLoader.h"
 #include "app/TrainerCore.h"
 #include "data/CameraMath.h"
+#include "data/FrustumTemplate.h"
 #include "mesh/MeshImport.h"   // mesh_compute_normals
 
 #include <algorithm>
@@ -345,127 +346,15 @@ void fill_line_deltas(std::vector<VL>& v, bool delta_from_aux) {
 }
 
 // ---- camera-frustum template --------------------------------------------
-// Port of viewer/js/dataset.js frustumTemplate / generateRay (itself a port
-// of fill_frustum_segments_kernel + projection_utils.cuh), so distorted and
-// >180-degree fisheye cameras draw as the same dome wireframes as the web
-// viewer and the engine training viewer -- NOT as tan-based pinhole
-// pyramids, which explode for wide fisheyes.
+// data/FrustumTemplate.h, the web viewer's shape: distorted and >180-degree
+// fisheye cameras draw as domes, not as tan-based pyramids.
 
-constexpr int kNSeg = 16;   // segments per image edge (Visualizer.cu:93)
-constexpr int kASeg = 4;    // subdivisions per apex anchor line
-
-enum { M_PINHOLE = 0, M_FISHEYE = 1, M_EQUISOLID = 2, M_EQUIRECT = 3 };
-
-constexpr double kPi = 3.14159265358979323846;   // MSVC has no M_PI by default
-
-struct P3 { float x, y, z; };
-
-using camhost::generate_ray;
-
-struct FrustumLine { std::vector<P3> pts; bool closed; bool dim; };
-struct FrustumTemplate { std::vector<FrustumLine> lines; std::vector<P3> anchors; };
-
-// Camera-space size-1 frustum wireframe (CV convention). Pinhole keeps the
-// classic image-border pyramid; wide models additionally get image-aligned
-// interior gridlines (wire dome); equirectangular gets a lat/long wire
-// globe over the pixel grid. See viewer/js/dataset.js frustumTemplate for
-// the full rationale.
-FrustumTemplate frustum_template(int model, int tier, int w, int h, float fx, float fy,
-                                 float cx, float cy, const float* dist) {
-    FrustumTemplate out;
-    if (w < 1) w = std::max(1, (int)std::lround(2*cx));
-    if (h < 1) h = std::max(1, (int)std::lround(2*cy));
-    // Depth-placement scale factors (Visualizer.cu:123-127) at size = 1.
-    double a = std::sqrt((double)fx*fy/((double)w*h));
-    double rs = 1/std::sqrt(a);
-    double sxy = a*rs, sz = 1/rs;      // both = sqrt(a); kept general
-    bool wide = (model == M_FISHEYE || model == M_EQUISOLID || model == M_EQUIRECT);
-    double shell = std::sqrt((2*sxy*sxy + sz*sz)/3);
-    auto place = [&](const double dir[3]) -> P3 {
-        if (wide) return {(float)(dir[0]*shell), (float)(dir[1]*shell),
-                          (float)(dir[2]*shell)};
-        if (std::fabs(dir[2]) < 1e-6) return {0, 0, 0};
-        return {(float)(dir[0]*sxy/dir[2]), (float)(dir[1]*sxy/dir[2]), (float)sz};
-    };
-    // Unproject; outside the valid domain, shrink uv toward the principal
-    // point until it re-enters (Visualizer.cu:146-157).
-    auto ray = [&](double u, double v, double dir[3]) {
-        if (generate_ray(u, v, model, tier, dist, dir)) return;
-        double t0 = 0, t1 = 1, best[3] = {0, 0, 1};
-        bool have = false;
-        for (int k = 0; k < 12; k++) {
-            double s = 0.5*(t0+t1), rr[3];
-            if (generate_ray(u*s, v*s, model, tier, dist, rr)) {
-                t0 = s; best[0]=rr[0]; best[1]=rr[1]; best[2]=rr[2]; have = true;
-            } else t1 = s;
-        }
-        (void)have;
-        dir[0] = best[0]; dir[1] = best[1]; dir[2] = best[2];
-    };
-    auto sample = [&](double x0, double y0, double x1, double y1, int n) {
-        std::vector<P3> pts;
-        pts.reserve(n + 1);
-        for (int i = 0; i <= n; i++) {
-            double t = (double)i/n;
-            double u = (x0 + (x1-x0)*t - cx)/fx, v = (y0 + (y1-y0)*t - cy)/fy;
-            double dir[3];
-            ray(u, v, dir);
-            pts.push_back(place(dir));
-        }
-        return pts;
-    };
-    auto degenerate = [&](const std::vector<P3>& pts) {
-        const P3& p0 = pts[0];
-        for (const P3& p : pts)
-            if (std::sqrt((p.x-p0.x)*(p.x-p0.x) + (p.y-p0.y)*(p.y-p0.y) +
-                          (p.z-p0.z)*(p.z-p0.z)) >= 1e-5*shell + 1e-12)
-                return false;
-        return true;
-    };
-    auto center_dir = [&]() {
-        double dir[3];
-        ray((w/2.0-cx)/fx, (h/2.0-cy)/fy, dir);
-        return place(dir);
-    };
-
-    if (model == M_EQUIRECT) {
-        // Lat/long wire globe (the i=0/4, j=0/4 lines ARE the image border);
-        // center meridian + parallel bright as the view-direction cue.
-        for (int i = 0; i <= 4; i++) {
-            auto mer = sample(w*i/4.0, 0, w*i/4.0, h, 2*kNSeg);
-            if (!degenerate(mer)) out.lines.push_back({std::move(mer), false, i != 2});
-            auto par = sample(0, h*i/4.0, w, h*i/4.0, 2*kNSeg);
-            if (!degenerate(par)) out.lines.push_back({std::move(par), false, i != 2});
-        }
-        out.anchors.push_back(center_dir());
-    } else {
-        // image-border loop (corners at indices 0, kNSeg, 2*kNSeg, 3*kNSeg)
-        double corners[4][2] = {{0,0}, {(double)w,0}, {(double)w,(double)h}, {0,(double)h}};
-        std::vector<P3> border;
-        for (int e = 0; e < 4; e++) {
-            auto edge = sample(corners[e][0], corners[e][1],
-                               corners[(e+1)%4][0], corners[(e+1)%4][1], kNSeg);
-            border.insert(border.end(), edge.begin(), edge.begin() + kNSeg);
-        }
-        P3 corner_pts[4] = {border[0], border[kNSeg], border[2*kNSeg], border[3*kNSeg]};
-        out.lines.push_back({std::move(border), true, false});
-        if (wide) {
-            for (int i = 1; i <= 3; i++) {   // interior gridlines -> wire dome
-                out.lines.push_back({sample(w*i/4.0, 0, w*i/4.0, h, 2*kNSeg), false, true});
-                out.lines.push_back({sample(0, h*i/4.0, w, h*i/4.0, 2*kNSeg), false, true});
-            }
-        }
-        // Apex->corner anchors only when the corners are in front (classic
-        // pyramid); wider cameras get a single apex->view-direction anchor.
-        bool front = true;
-        for (const P3& p : corner_pts) front = front && p.z > 0;
-        if (!wide || front)
-            out.anchors.assign(corner_pts, corner_pts + 4);
-        else
-            out.anchors.push_back(center_dir());
-    }
-    return out;
-}
+using P3 = camhost::FrustumPoint;
+using FrustumTemplate = camhost::FrustumShape;
+using camhost::FrustumLine;
+using camhost::frustum_template;
+constexpr int kASeg = camhost::kFrustumAnchorSeg;
+constexpr int M_PINHOLE = 0;
 
 }  // namespace
 

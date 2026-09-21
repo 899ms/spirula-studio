@@ -146,7 +146,8 @@ private:
     // engine_blit_view refuses to run before engine_viewer_init, and the grid
     // it draws belongs to whichever model defines the shared frame.
     void ensure_viewer_overlay();
-    void draw_pane(int index, const ImVec2& size);
+    // `beside` draws to the right of the pane's image, inside the pane.
+    void draw_pane(int index, const ImVec2& size, const std::function<void()>& beside = {});
     void draw_placement_popup(int index);
     // The panel driving the link this frame: the one being dragged (sticky
     // for the length of a drag), else whichever moved.
