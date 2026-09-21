@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,18 @@ inline std::string json_number(double v) {
     if (std::isinf(v)) return v > 0 ? "Infinity" : "-Infinity";
     char buf[32];
     std::snprintf(buf, sizeof buf, "%.9g", v);
+    return buf;
+}
+
+// The shortest spelling that reads back as the same double: a document that
+// was parsed and is written again must not come back rounded.
+inline std::string json_number_exact(double v) {
+    if (std::isnan(v) || std::isinf(v)) return json_number(v);
+    char buf[40];
+    for (int digits = 15; digits <= 17; digits++) {
+        std::snprintf(buf, sizeof buf, "%.*g", digits, v);
+        if (std::strtod(buf, nullptr) == v) break;
+    }
     return buf;
 }
 
@@ -134,7 +147,7 @@ inline void json_write(JsonWriter& w, const JsonValue& v) {
             w.end();
             break;
         case JsonValue::Type::String: w.value(v.str); break;
-        case JsonValue::Type::Number: w.value(v.num); break;
+        case JsonValue::Type::Number: w.raw(json_number_exact(v.num)); break;
         case JsonValue::Type::Bool:   w.value(v.b); break;
         default:                      w.raw("null"); break;
     }

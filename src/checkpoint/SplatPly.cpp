@@ -2,6 +2,8 @@
 
 #include "checkpoint/SplatPly.h"
 
+#include "checkpoint/SplatTransform.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -254,7 +256,7 @@ SplatCloud read_splat_ply(const std::string& path, bool want_sh) {
 
 
 void write_splat_ply(const SplatCloud& c, const std::string& path,
-                     const uint8_t* keep) {
+                     const uint8_t* keep, const SplatTransform* moved) {
     const int64_t K = c.dim_sh() - 1;
     int64_t kept = c.num;
     if (keep) {
@@ -287,21 +289,33 @@ void write_splat_ply(const SplatCloud& c, const std::string& path,
                   (std::streamsize)rows * row_floats * sizeof(float));
         rows = 0;
     };
+    const bool move = moved && !moved->is_identity();
+    std::vector<float> sh((size_t)std::max<int64_t>(K, 1) * 3);
     for (int64_t i = 0; i < c.num; i++) {
         if (keep && !keep[i]) continue;
+        float mean[3], quat[4], scale[3];
+        for (int a = 0; a < 3; a++) mean[a] = c.means[(size_t)i * 3 + a];
+        for (int a = 0; a < 3; a++) scale[a] = c.scales[(size_t)i * 3 + a];
+        for (int a = 0; a < 4; a++) quat[a] = c.quats[(size_t)i * 4 + a];
+        const float* rest = K > 0 ? &c.features_sh[(size_t)i * K * 3] : nullptr;
+        if (move) {
+            if (K > 0) std::copy(rest, rest + K * 3, sh.begin());
+            moved->apply(mean, quat, scale, K > 0 ? sh.data() : nullptr, (int)K);
+            rest = sh.data();
+        }
         float* row = buf.data() + (size_t)rows * row_floats;
         int p = 0;
-        for (int a = 0; a < 3; a++) row[p++] = c.means[(size_t)i * 3 + a];
+        for (int a = 0; a < 3; a++) row[p++] = mean[a];
         row[p++] = 0.0f; row[p++] = 0.0f; row[p++] = 0.0f;   // nx ny nz
         for (int a = 0; a < 3; a++) row[p++] = c.features_dc[(size_t)i * 3 + a];
         // A PLY stores f_rest channel-major; SplatCloud holds it
         // coefficient-major, which is the transposition read_splat_ply undoes.
         for (int ch = 0; ch < 3; ch++)
             for (int64_t j = 0; j < K; j++)
-                row[p++] = c.features_sh[((size_t)i * K + j) * 3 + ch];
+                row[p++] = rest[(size_t)j * 3 + ch];
         row[p++] = c.opacities[(size_t)i];
-        for (int a = 0; a < 3; a++) row[p++] = c.scales[(size_t)i * 3 + a];
-        for (int a = 0; a < 4; a++) row[p++] = c.quats[(size_t)i * 4 + a];
+        for (int a = 0; a < 3; a++) row[p++] = scale[a];
+        for (int a = 0; a < 4; a++) row[p++] = quat[a];
         if (++rows == kRowsPerFlush) flush();
     }
     flush();

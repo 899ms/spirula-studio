@@ -73,7 +73,8 @@ public:
     // ... as soon as the first model's loader finishes, which is how a screen
     // hands a model it has only just asked for straight to the editor.
     void edit_first_when_ready() { _edit_when_ready = true; }
-    void end_edit();
+    // `reload` false when the panes are going away with the edit.
+    void end_edit(bool reload = true);
     int editing() const { return _edit_index; }
     bool edit_busy() const { return _edit_loading.load(); }
     EditSession& edit() { return _edit; }
@@ -113,6 +114,9 @@ private:
     };
 
     void take_engine();
+    // Read a pane's model from disk again, in place: what a save over the
+    // file it was loaded from leaves it needing.
+    void reload(int index);
     void remove(int index);
     void move(int index, int dir);
     int  claim_slot();

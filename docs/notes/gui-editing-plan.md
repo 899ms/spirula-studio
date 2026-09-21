@@ -16,8 +16,10 @@ exactly as before, and nothing here may cost it a kernel. That turned out to
 cost nothing to honour — see "Where the work happens" below, which is why
 none of this needed a device kernel on either backend.
 
-Phases 1 and 2 of the order of work below are **built**; what shipped is
-recorded at the end of each section.
+Phases 1 to 4 of the order of work below are **built** (named groups, part of
+phase 3, are not); what shipped is recorded at the end of each section. Phase 4
+has its own note: [scene-transform.md](scene-transform.md), with the SH math in
+[sh-rotation.md](sh-rotation.md).
 
 ## The mistake to avoid
 
@@ -169,6 +171,38 @@ The "select the blue-white sky splats tangled into the tree branches" case is
 this composed with a region, and it needs nothing new — paint roughly over the
 tree with the brush, then *intersect* with a colour and opacity box. That
 composition is the feature; neither half is.
+
+*Built* (`edit/Attributes.{h,cpp}`, `edit/EditAttributes.cpp`), on the host
+like the rest: an attribute pass over a million elements is milliseconds, so
+the two kernels never had to exist. What shipped:
+
+- The table: opacity; largest, smallest and geometric-mean scale; the same
+  three as VISIBLE extent (scale x sqrt(2 ln(255 x opacity)), the distance at
+  which the rasterizer's alpha cut drops the Gaussian -- a huge faint splat is
+  small here, which is the point); anisotropy as a ratio and as the effective
+  rank the `erank` regularizer uses; the base colour as R, G, B, luma,
+  colour-difference U and V, hue and saturation -- display-referred and
+  UNCLAMPED, so an HDR model keeps its range; a sparse point's distance to the
+  nearest camera; and position in SAVED coordinates, so that after aligning the
+  ground "everything below z = 0" is one drag.
+- The histogram bins a ROBUST range (0.2th to 99.8th percentile) and the end
+  bins hold what lies beyond, so dragging the range to the edge of the plot
+  means "and everything past it". Three floaters a kilometre out do not squash
+  the plot into one bar. Log axis per attribute, log bar height as a switch,
+  selected elements drawn over the rest so a range can be steered by what it
+  catches, live preview in the viewport while dragging, typed ends for a
+  threshold somebody already knows, and an "outside" switch that doubles as
+  how a hue range runs through red.
+- A range dragged again straight after is an ADJUSTMENT: the step it made is
+  taken back and replaced, so ten nudges of a threshold are one history entry
+  and "intersect with this range" re-intersects the ORIGINAL selection rather
+  than the already-narrowed one.
+- Colour: an eyedropper (Shift+click adds samples -- a sky is a gradient, and
+  one click is one blue), editable swatches, a tolerance measured in OKLab so
+  equal steps look equally different, and a "match brightness" weight that at
+  0 compares hue and vividness only, so a surface matches in sun and in shade.
+
+Not built: the 2D density plot, and **named groups**.
 
 **Connected components.** A union-find over whatever says what is joined to
 what. That is NOT one rule: a mesh has faces and they are exact, so a mesh
@@ -346,12 +380,27 @@ src/app/gui/ViewportInput.h   the seam ViewportPanel offers a tool
 src/data/SparseEdit.{h,cpp}   writing an edited reconstruction back out
 ```
 
+What phases 3 and 4 added:
+
+```
+src/app/gui/edit/
+  Attributes.{h,cpp}     the per-element scalar table, the histogram, OKLab matching
+  EditAttributes.cpp     ... the session's half: the brushable plot, the colour sampler
+  TransformTool.{h,cpp}  the modal operator (G/R/S ...) and the handles at the pivot
+  EditTransform.cpp      ... the session's half: frames, steps, the alignment helpers
+  AlignFit.{h,cpp}       RANSAC planes, the click fit, the corner fit, auto align
+  WorldGrid.{h,cpp}      the grid that stands still while the model moves
+src/core/Similarity.h          Sim3: the one transform a rigid scene can be given
+src/core/ShRotation.{h,cpp}    closed-form SH band rotation (Ivanic-Ruedenberg)
+src/checkpoint/SplatTransform.{h,cpp}   what a similarity does to one Gaussian
+src/app/gui/ViewportPanel      the navigation gizmo, the orthographic view, the
+                                 edit transform (all viewports, not only the editor)
+```
+
 Still to come, as the later phases arrive:
 
 ```
 src/app/gui/edit/
-  Gizmo.{h,cpp}
-  Attributes.{h,cpp}  the per-element scalar table + the brushable histogram
   Trajectory.{h,cpp}
 ```
 
@@ -408,8 +457,13 @@ widening it.
    segmenting a messy model is what the whole feature is for. Camera
    selection on a sparse reconstruction came with the layers above.
 3. **The histogram panel and named groups.**
+   *Built*, except named groups: see "Attribute predicates" above.
 4. **Transform.** The modal operator, then the gizmo, then SH rotation, then
    baking a placement on save.
+   *Built*, all four, for all three 3D documents, plus what the plan had not
+   thought of: a navigation gizmo for pointers with no middle button, an
+   orthographic view, and helpers that FIND the frame -- auto align, click the
+   ground, click a corner, click the origin. [scene-transform.md](scene-transform.md).
 5. **The mask editor.** Path shape, livewire, paint layer, per-frame
    corrections.
 6. **Trajectories and video export.**
@@ -479,6 +533,24 @@ widening it.
   tool the camera keeps all six and the colliding shortcuts are not read;
   under any other tool the camera gives the letters up and keeps the arrows,
   the wheel and the gamepad.
+
+- **A placement puts two frames on screen.** The elements stay where they
+  were loaded and the viewer applies the placement, which is what makes a drag
+  free -- and means anything drawn in the model's frame (the renderers' grid)
+  moves WITH the model. Whatever the model is being placed against has to be
+  drawn in saved coordinates. [scene-transform.md](scene-transform.md).
+- **An alignment that does not take the view along loses the model.** Laying a
+  wall flat puts it under the camera and off the screen. The view is carried
+  through alignment steps, and back through their undo.
+- **The nearest centre is a floater.** A trained scene is full of faint haze
+  in front of everything, so a pick that takes the front-most Gaussian under
+  the cursor takes haze. Walk the ray the way the renderer does and stop where
+  half the light is gone; fit surfaces through solid Gaussians only.
+- **A local fit needs no tolerance, or it needs the right one.** RANSAC with a
+  thickness sized for a tabletop finds an arbitrary thin slice of a lawn. The
+  click fit is a least-quantile fit through the clicked point instead.
+- **A second save must not read the first save's output.** Row indices and
+  poses both refer to the files as the session found them (`SparseBaseline`).
 
 ## Testing it
 

@@ -116,7 +116,7 @@ void CompareView::set_shown(const std::string& path, bool on,
 
 void CompareView::remove(int index) {
     if (index < 0 || index >= count()) return;
-    if (_edit_index == index) end_edit();
+    if (_edit_index == index) end_edit(false);
     else if (_edit_index > index) _edit_index--;
     Model& m = *_models[index];
     m.panel.detach();
@@ -138,7 +138,7 @@ void CompareView::move(int index, int dir) {
 }
 
 void CompareView::close() {
-    end_edit();
+    end_edit(/*reload_panes=*/false);
     // No destroy_gl here: close() also runs from the destructor, by which
     // point the GL context may be gone. GuiApp::shutdown calls destroy_gl()
     // while it is still current.
@@ -327,15 +327,35 @@ void CompareView::confirm_discard_edits(std::function<void()> then) {
     _ask_discard = true;
 }
 
-void CompareView::end_edit() {
+void CompareView::reload(int index) {
+    if (index < 0 || index >= count()) return;
+    Model& m = *_models[(size_t)index];
+    m.panel.detach();
+    m.src.close();
+    m.src.open(m.path, m.slot, &_engine_mutex);
+    m.attached = false;
+    if (index == 0) _overlay_key.clear();
+}
+
+void CompareView::end_edit(bool reload_panes) {
     _edit_when_ready = false;
     // Whatever the edit did to the other panes goes back with it.
     if (_edit_index >= 0) show_sibling_meshes(_edit_index, FaceCut{});
     if (_edit_worker.joinable()) _edit_worker.join();
     _edit_loading = false;
     _edit_pending.reset();
+    // The pane goes back to what it LOADED, and after a save over that file
+    // what it loaded is no longer what is on disk.
+    const int index = _edit_index;
+    const bool stale = _edit.active() && _edit.saved_over_source();
+    const bool linked = stale && _edit.doc()->linked_count() > 0;
     _edit.close();
     _edit_index = -1;
+    if (!stale || !reload_panes) return;
+    for (int i = 0; i < count(); i++)
+        if (i == index || (linked && _models[(size_t)i]->attached &&
+                           _models[(size_t)i]->src.kind() == SplatViewer::Kind::Mesh))
+            reload(i);
 }
 
 void CompareView::begin_edit(int index) {
@@ -395,12 +415,15 @@ void CompareView::begin_edit(int index) {
             std::mutex* mu = m.src.engine_mutex();
             float t2v[12];
             m.src.to_view_frame(t2v);
+            const bool linear = m.src.linear_color();
             _edit_loading = true;
-            _edit_worker = std::thread([this, file, slot, mu, t2v] {
+            _edit_worker = std::thread([this, file, slot, mu, t2v, linear] {
                 try {
                     spirula::SplatCloud c = spirula::read_splat_ply(file);
-                    _edit_pending = std::make_unique<SplatDoc>(
-                        std::move(c), file, t2v, slot, mu);
+                    auto doc = std::make_unique<SplatDoc>(std::move(c), file,
+                                                          t2v, slot, mu);
+                    doc->set_linear_colour(linear);
+                    _edit_pending = std::move(doc);
                 } catch (const std::exception& e) {
                     _edit_error = e.what();
                 }

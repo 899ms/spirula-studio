@@ -8,6 +8,9 @@
 // ours to rewrite, so the edit lands beside it as a Nerfstudio dataset, which
 // parse_dataset reads first from then on.
 
+#include "core/Similarity.h"
+#include "data/DatasetParser.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -32,13 +35,31 @@ struct SparseKeep {
     std::vector<std::string> drop_images;   // file names, any path prefix
 };
 
-// Rewrite the reconstruction under `dataset_dir`. Each replaced file is
-// copied to `<name>.orig` first, once. Returns what was written.
+// The files as one editing session first found them. `keep` indexes THEIR
+// rows and `moved` starts from THEIR poses, so a second save has to filter
+// these again rather than the files the first save left behind.
+struct SparseBaseline {
+    SparseFormat format = SparseFormat::None;
+    bool text = false;               // COLMAP: the .txt spelling
+    std::string model_dir;           // COLMAP
+    std::string images, points, frames;
+    std::string meta;                // Nerfstudio / Metashape: the JSON text
+    std::string ply_rel;
+    ColmapPoints3D cloud;
+    bool loaded() const { return format != SparseFormat::None; }
+};
+
+// Rewrite the reconstruction, copying each replaced file to `<name>.orig`
+// once. `moved` is in ParsedDataset's RAW frame (COLMAP's world; a
+// transforms.json with applied_transform undone). `base` null re-reads disk.
 std::vector<std::string> sparse_write_filtered(const std::string& dataset_dir,
-                                               const SparseKeep& keep);
+                                               const SparseKeep& keep,
+                                               const Sim3* moved = nullptr,
+                                               SparseBaseline* base = nullptr);
 
 // A plain point cloud, for anything that has no reconstruction behind it.
 void write_ply_points(const std::string& path, const double* xyz,
-                      const uint8_t* rgb, int64_t n, const uint8_t* keep);
+                      const uint8_t* rgb, int64_t n, const uint8_t* keep,
+                      const Sim3* moved = nullptr);
 
 }  // namespace spirula

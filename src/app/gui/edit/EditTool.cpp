@@ -3,12 +3,16 @@
 #include "app/gui/edit/EditTool.h"
 
 #include "i18n/catalog/Edit.h"
+#include "i18n/catalog/EditAttributes.h"
+#include "i18n/catalog/EditTransform.h"
 
 #include "imgui.h"
 
 #include <cmath>
 
 namespace msg = spirula::i18n::msg::edit;
+namespace xmsg = spirula::i18n::msg::xform;
+namespace amsg = spirula::i18n::msg::attr;
 
 namespace gui {
 
@@ -43,6 +47,8 @@ const ToolRow* tool_table() {
         {ToolId::Polygon,  "P", ImGuiKey_P, false},
         {ToolId::Brush,    "C", ImGuiKey_C, false},
         {ToolId::Piece,    "F", ImGuiKey_F, false},
+        {ToolId::Transform,  "T", ImGuiKey_T, false},
+        {ToolId::Eyedropper, "K", ImGuiKey_K, false},
     };
     return rows;
 }
@@ -55,6 +61,8 @@ const spirula::i18n::Msg& tool_label(ToolId t) {
         case ToolId::Polygon: return msg::tool_polygon;
         case ToolId::Brush:   return msg::tool_brush;
         case ToolId::Piece:   return msg::tool_piece;
+        case ToolId::Transform:  return xmsg::tool_transform;
+        case ToolId::Eyedropper: return amsg::tool_eyedropper;
         default:              return msg::tool_navigate;
     }
 }
@@ -67,6 +75,8 @@ const spirula::i18n::Msg& tool_hint(ToolId t) {
         case ToolId::Polygon: return msg::hint_polygon;
         case ToolId::Brush:   return msg::hint_brush;
         case ToolId::Piece:   return msg::hint_piece;
+        case ToolId::Transform:  return xmsg::hint_transform;
+        case ToolId::Eyedropper: return amsg::hint_eyedropper;
         default:              return msg::hint_navigate;
     }
 }
@@ -91,11 +101,11 @@ bool EditTool::pop_point() {
 
 bool EditTool::update(const ViewportInput& in, ShapeStroke& out, bool& consumed) {
     consumed = false;
-    if (_id == ToolId::Navigate) return false;
+    if (_id == ToolId::Navigate || _id == ToolId::Transform) return false;
     _cur[0] = in.x;
     _cur[1] = in.y;
 
-    if (_id == ToolId::Piece) {
+    if (_id == ToolId::Piece || _id == ToolId::Eyedropper) {
         if (in.hovered && in.clicked) {
             consumed = true;
             out.kind = ShapeKind::Box;

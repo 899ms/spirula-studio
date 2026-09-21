@@ -35,6 +35,13 @@ public:
     std::string default_save_path(int target) const override;
     void revert_display() override;
     bool live_centers(dsparse::CenterTable& out) const override;
+    spirula::Sim3 view_frame() const override;
+    bool up_hint(float up[3]) const override;
+    bool colours(std::vector<float>& rgb) const override;
+    bool colours_available() const override {
+        return layer() == 0 && !_ds.points.rgb.empty();
+    }
+    std::vector<float> camera_centres() const override;
 
     spirula::SparseFormat format() const { return _fmt; }
 
@@ -56,6 +63,8 @@ private:
     int64_t _live_cameras = -1;            // what the display was baked for
     std::string _dataset_dir;
     spirula::SparseFormat _fmt = spirula::SparseFormat::None;
+    // The files as this session found them; every save filters these again.
+    spirula::SparseBaseline _baseline;
     Show _show;
 };
 

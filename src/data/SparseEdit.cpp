@@ -71,12 +71,40 @@ void put_le(std::string& out, T v) {
     out.append(reinterpret_cast<const char*>(&v), sizeof(T));
 }
 
+// COLMAP's world-to-camera pose (q as w,x,y,z) under x' = s Q x + u. A camera
+// is rigid and cannot carry s, so its frame grows instead: R' = R Q^T,
+// t' = s t - R' u. docs/notes/scene-transform.md.
+void move_w2c(const Sim3& T, double q[4], double t[3]) {
+    double qt[4];
+    T.quat(qt);
+    // q * conj(qt)
+    const double aw = q[0], ax = q[1], ay = q[2], az = q[3];
+    const double bw = qt[0], bx = -qt[1], by = -qt[2], bz = -qt[3];
+    double r[4] = {aw*bw - ax*bx - ay*by - az*bz,
+                   aw*bx + ax*bw + ay*bz - az*by,
+                   aw*by - ax*bz + ay*bw + az*bx,
+                   aw*bz + ax*by - ay*bx + az*bw};
+    double n = std::sqrt(r[0]*r[0] + r[1]*r[1] + r[2]*r[2] + r[3]*r[3]);
+    if (!(n > 1e-300)) return;
+    if (r[0] < 0) n = -n;
+    for (int i = 0; i < 4; i++) r[i] /= n;
+    const double w = r[0], x = r[1], y = r[2], z = r[3];
+    const double R[9] = {1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w),
+                         2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w),
+                         2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)};
+    for (int i = 0; i < 3; i++)
+        t[i] = T.s * t[i] - (R[i*3+0]*T.t[0] + R[i*3+1]*T.t[1] + R[i*3+2]*T.t[2]);
+    for (int i = 0; i < 4; i++) q[i] = r[i];
+}
+
+
 // images.bin: a count, then per image an id, a pose, a camera id, a
 // null-terminated name and the 2D observations. Rows are copied byte for
 // byte, so nothing an edit did not ask about is rewritten.
 std::string filter_images_bin(const std::string& src,
                               const std::set<std::string>& drop,
-                              std::set<int32_t>& dropped_ids) {
+                              std::set<int32_t>& dropped_ids,
+                              const Sim3* moved) {
     const char* p = src.data();
     const char* end = src.data() + src.size();
     if ((size_t)(end - p) < sizeof(uint64_t))
@@ -106,18 +134,52 @@ std::string filter_images_bin(const std::string& src,
             dropped_ids.insert(id);
             continue;
         }
+        const size_t at = out.size();
         out.append(row, (size_t)(p - row));
+        if (moved) {
+            double pose[7];
+            std::memcpy(pose, &out[at + 4], sizeof pose);
+            move_w2c(*moved, pose, pose + 4);
+            std::memcpy(&out[at + 4], pose, sizeof pose);
+        }
         kept++;
     }
     std::memcpy(&out[0], &kept, sizeof(uint64_t));
     return out;
 }
 
+// frames.bin (COLMAP 3.12+): per frame an id, a rig id, rig_from_world, then
+// its data ids. "" when the layout does not account for every byte -- a file
+// this cannot read exactly is one it must not rewrite.
+std::string move_frames_bin(const std::string& src, const Sim3& moved) {
+    const char* p = src.data();
+    const char* end = src.data() + src.size();
+    if ((size_t)(end - p) < sizeof(uint64_t)) return {};
+    const uint64_t n = read_le<uint64_t>(p);
+    std::string out = src;
+    for (uint64_t i = 0; i < n; i++) {
+        if (end - p < 4 + 4 + 8 * 7 + 4) return {};
+        p += 8;
+        const size_t at = (size_t)(p - src.data());
+        double pose[7];
+        std::memcpy(pose, p, sizeof pose);
+        move_w2c(moved, pose, pose + 4);
+        std::memcpy(&out[at], pose, sizeof pose);
+        p += sizeof pose;
+        const uint32_t ids = read_le<uint32_t>(p);
+        const size_t bytes = (size_t)ids * (4 + 4 + 8);
+        if ((size_t)(end - p) < bytes) return {};
+        p += bytes;
+    }
+    return p == end ? out : std::string();
+}
+
 // points3D.bin: the same, except that a track entry naming a dropped image
 // has to go with it, which makes the row a rewrite rather than a copy.
 std::string filter_points3d_bin(const std::string& src,
                                 const std::vector<uint8_t>& keep,
-                                const std::set<int32_t>& dropped_ids) {
+                                const std::set<int32_t>& dropped_ids,
+                                const Sim3* moved) {
     const char* p = src.data();
     const char* end = src.data() + src.size();
     if ((size_t)(end - p) < sizeof(uint64_t))
@@ -140,7 +202,14 @@ std::string filter_points3d_bin(const std::string& src,
             throw std::runtime_error("points3D.bin is truncated");
         p += track_bytes;
         if (i < keep.size() && !keep[(size_t)i]) continue;
+        const size_t at = out.size();
         out.append(head, head_bytes);
+        if (moved) {
+            double xyz[3], q[3];
+            std::memcpy(xyz, &out[at + 8], sizeof xyz);
+            moved->apply(xyz, q);
+            std::memcpy(&out[at + 8], q, sizeof q);
+        }
         if (dropped_ids.empty()) {
             put_le<uint64_t>(out, track);
             out.append(track_at, track_bytes);
@@ -168,7 +237,8 @@ std::string filter_points3d_bin(const std::string& src,
 // a record is two lines and the second may be empty.
 std::string filter_images_txt(const std::string& src,
                               const std::set<std::string>& drop,
-                              std::set<int32_t>& dropped_ids) {
+                              std::set<int32_t>& dropped_ids,
+                              const Sim3* moved) {
     std::string out;
     out.reserve(src.size());
     size_t pos = 0;
@@ -198,14 +268,24 @@ std::string filter_images_txt(const std::string& src,
         char name[1024] = {0};
         double d[7];
         int cam = 0;
-        if (std::sscanf(line.c_str() + b, "%d %lf %lf %lf %lf %lf %lf %lf %d %1023s",
+        const bool parsed =
+            std::sscanf(line.c_str() + b, "%d %lf %lf %lf %lf %lf %lf %lf %d %1023s",
                         &id, &d[0], &d[1], &d[2], &d[3], &d[4], &d[5], &d[6],
-                        &cam, name) == 10 &&
-            drop.count(leaf_of(name))) {
+                        &cam, name) == 10;
+        if (parsed && drop.count(leaf_of(name))) {
             dropped_ids.insert(id);
             continue;
         }
-        (void)obs_start;
+        if (parsed && moved) {
+            move_w2c(*moved, d, d + 4);
+            char buf[512];
+            std::snprintf(buf, sizeof buf,
+                          "%d %.17g %.17g %.17g %.17g %.17g %.17g %.17g %d %s\n",
+                          id, d[0], d[1], d[2], d[3], d[4], d[5], d[6], cam, name);
+            out += buf;
+            out.append(src, obs_start, pos - obs_start);
+            continue;
+        }
         out.append(src, start, pos - start);
     }
     return out;
@@ -213,7 +293,8 @@ std::string filter_images_txt(const std::string& src,
 
 std::string filter_points3d_txt(const std::string& src,
                                 const std::vector<uint8_t>& keep,
-                                const std::set<int32_t>& dropped_ids) {
+                                const std::set<int32_t>& dropped_ids,
+                                const Sim3* moved) {
     std::string out;
     out.reserve(src.size());
     size_t pos = 0, index = 0;
@@ -235,23 +316,34 @@ std::string filter_points3d_txt(const std::string& src,
             pos = next;
             continue;
         }
-        if (dropped_ids.empty()) {
+        if (dropped_ids.empty() && !moved) {
             out.append(src, pos, std::min(next, src.size()) - pos);
             pos = next;
             continue;
         }
-        // Rewrite the track: the first eight fields are the point, the rest
-        // is (image_id, point2D_idx) pairs.
+        // Rewrite the row: the first eight fields are the point -- its id,
+        // xyz, rgb and error -- and the rest is (image_id, point2D_idx) pairs.
         std::string line = src.substr(b, t - b);
         const char* s = line.c_str();
         char* q = nullptr;
         std::string head;
+        double xyz[3] = {0, 0, 0};
+        size_t xyz_from = 0, xyz_to = 0;
         for (int f = 0; f < 8; f++) {
             const double v = std::strtod(s, &q);
             if (q == s) break;
-            (void)v;
+            if (f == 1) xyz_from = head.size();
+            if (f >= 1 && f <= 3) xyz[f - 1] = v;
             head.append(s, (size_t)(q - s));
+            if (f == 3) xyz_to = head.size();
             s = q;
+        }
+        if (moved && xyz_to > xyz_from) {
+            double o[3];
+            moved->apply(xyz, o);
+            char buf[128];
+            std::snprintf(buf, sizeof buf, " %.17g %.17g %.17g", o[0], o[1], o[2]);
+            head.replace(xyz_from, xyz_to - xyz_from, buf);
         }
         std::string track;
         while (true) {
@@ -299,6 +391,77 @@ bool drop_frames(JsonValue& meta, const std::set<std::string>& drop) {
     const bool changed = kept.size() != frames->arr.size();
     frames->arr = std::move(kept);
     return changed;
+}
+
+// A transforms.json holds its poses in the frame applied_transform maps the
+// raw one INTO, so the same placement there is the conjugate A T A^-1, and
+// applied_transform itself is left alone. docs/notes/scene-transform.md.
+Sim3 to_json_frame(const JsonValue& meta, const Sim3& T) {
+    const JsonValue* at = meta.find("applied_transform");
+    if (!at || !at->is_array() || at->arr.size() < 3) return T;
+    double A[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    for (int r = 0; r < 3; r++) {
+        const JsonValue& row = at->arr[(size_t)r];
+        if (!row.is_array() || row.arr.size() < 4) return T;
+        for (int c = 0; c < 4; c++) A[r*4+c] = row.arr[(size_t)c].as_double();
+    }
+    double Ai[16], M[16] = {0}, tmp[16], out[16];
+    dsparse::invert_affine4x4(A, Ai);
+    double m34[12];
+    T.to_3x4(m34);
+    for (int i = 0; i < 12; i++) M[i] = m34[i];
+    M[15] = 1.0;
+    auto mul = [](const double* a, const double* b, double* o) {
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++) {
+                double v = 0.0;
+                for (int k = 0; k < 4; k++) v += a[r*4+k] * b[k*4+c];
+                o[r*4+c] = v;
+            }
+    };
+    mul(A, M, tmp);
+    mul(tmp, Ai, out);
+    return Sim3::from_3x4(out);
+}
+
+// Camera-to-world: the position moves with the scene, the axes only turn --
+// a transform_matrix whose columns stopped being unit would be a lens.
+void move_frames(JsonValue& meta, const Sim3& T) {
+    for (auto& [k, frames] : meta.obj) {
+        if (k != "frames" || !frames.is_array()) continue;
+        for (JsonValue& f : frames.arr)
+            for (auto& [fk, tm] : f.obj) {
+                if (fk != "transform_matrix" || !tm.is_array() ||
+                    tm.arr.size() < 3)
+                    continue;
+                double m[12];
+                bool ok = true;
+                for (int r = 0; r < 3 && ok; r++) {
+                    ok = tm.arr[(size_t)r].is_array() &&
+                         tm.arr[(size_t)r].arr.size() >= 4;
+                    for (int c = 0; c < 4 && ok; c++)
+                        m[r*4+c] = tm.arr[(size_t)r].arr[(size_t)c].as_double();
+                }
+                if (!ok) continue;
+                double o[12];
+                for (int c = 0; c < 3; c++) {
+                    const double v[3] = {m[0*4+c], m[1*4+c], m[2*4+c]};
+                    double w[3];
+                    T.rotate(v, w);
+                    for (int r = 0; r < 3; r++) o[r*4+c] = w[r];
+                }
+                const double pos[3] = {m[3], m[7], m[11]};
+                double q[3];
+                T.apply(pos, q);
+                for (int r = 0; r < 3; r++) o[r*4+3] = q[r];
+                for (int r = 0; r < 3; r++)
+                    for (int c = 0; c < 4; c++) {
+                        JsonValue& cell = tm.arr[(size_t)r].arr[(size_t)c];
+                        cell.type = JsonValue::Type::Number;
+                        cell.num = o[r*4+c];
+                    }
+            }
+    }
 }
 
 void set_string(JsonValue& obj, const char* key, const std::string& value) {
@@ -375,7 +538,8 @@ std::string resolve_sparse_dir(const std::string& path) {
 
 
 void write_ply_points(const std::string& path, const double* xyz,
-                      const uint8_t* rgb, int64_t n, const uint8_t* keep) {
+                      const uint8_t* rgb, int64_t n, const uint8_t* keep,
+                      const Sim3* moved) {
     int64_t kept = n;
     if (keep) {
         kept = 0;
@@ -392,8 +556,9 @@ void write_ply_points(const std::string& path, const double* xyz,
     f << "end_header\n";
     for (int64_t i = 0; i < n; i++) {
         if (keep && !keep[i]) continue;
-        const float p[3] = {(float)xyz[i * 3], (float)xyz[i * 3 + 1],
-                            (float)xyz[i * 3 + 2]};
+        double q[3] = {xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]};
+        if (moved) moved->apply(&xyz[i * 3], q);
+        const float p[3] = {(float)q[0], (float)q[1], (float)q[2]};
         f.write(reinterpret_cast<const char*>(p), sizeof p);
         const uint8_t c[3] = {rgb ? rgb[i * 3] : (uint8_t)200,
                               rgb ? rgb[i * 3 + 1] : (uint8_t)200,
@@ -405,77 +570,118 @@ void write_ply_points(const std::string& path, const double* xyz,
 }
 
 
-std::vector<std::string> sparse_write_filtered(const std::string& dataset_dir,
-                                               const SparseKeep& keep) {
-    std::vector<std::string> written;
-    const std::set<std::string> drop = leaf_set(keep.drop_images);
-    switch (sparse_format_of(dataset_dir)) {
+namespace {
+
+// Read everything an edit of `dataset_dir` starts from.
+SparseBaseline load_baseline(const std::string& dataset_dir) {
+    SparseBaseline b;
+    b.format = sparse_format_of(dataset_dir);
+    std::error_code ec;
+    switch (b.format) {
         case SparseFormat::Colmap: {
-            bool text = false;
-            const std::string model = find_colmap_model(dataset_dir, "", &text);
-            if (model.empty())
+            b.model_dir = find_colmap_model(dataset_dir, "", &b.text);
+            if (b.model_dir.empty())
                 throw std::runtime_error("no COLMAP points3D under " + dataset_dir);
-            std::set<int32_t> dropped_ids;
-            if (!drop.empty()) {
-                const fs::path ip = fs::path(model) /
-                                    (text ? "images.txt" : "images.bin");
-                const std::string src = read_file(ip);
-                const std::string body =
-                    text ? filter_images_txt(src, drop, dropped_ids)
-                         : filter_images_bin(src, drop, dropped_ids);
-                keep_original(ip);
-                write_file(ip, body);
-                written.push_back(ip.string());
-            }
-            const fs::path pp = fs::path(model) /
-                                (text ? "points3D.txt" : "points3D.bin");
-            const std::string src = read_file(pp);
-            keep_original(pp);
-            write_file(pp, text ? filter_points3d_txt(src, keep.points, dropped_ids)
-                                : filter_points3d_bin(src, keep.points, dropped_ids));
-            written.push_back(pp.string());
+            const fs::path m(b.model_dir);
+            b.images = read_file(m / (b.text ? "images.txt" : "images.bin"));
+            b.points = read_file(m / (b.text ? "points3D.txt" : "points3D.bin"));
+            if (!b.text && fs::exists(m / "frames.bin", ec))
+                b.frames = read_file(m / "frames.bin");
             break;
         }
         case SparseFormat::Nerfstudio: {
-            const fs::path meta_path = fs::path(dataset_dir) / "transforms.json";
-            JsonValue meta = json_parse(read_file(meta_path));
-            std::string rel = nerf_ply_rel(meta);
-            if (rel.empty()) rel = "points3D.ply";
-            const fs::path ply = fs::path(dataset_dir) / rel;
-            std::error_code ec;
-            ColmapPoints3D pts;
-            if (fs::exists(ply, ec)) {
-                pts = read_ply_points(ply.string());
-                keep_original(ply);
-            }
-            write_ply_points(ply.string(), pts.xyz.data(),
-                             pts.rgb.empty() ? nullptr : pts.rgb.data(),
-                             pts.num(), keep.points.data());
-            written.push_back(ply.string());
-            const bool frames_changed = drop_frames(meta, drop);
-            if (frames_changed || !meta.has("ply_file_path")) {
-                set_string(meta, "ply_file_path", rel);
-                keep_original(meta_path);
-                JsonWriter w;
-                json_write(w, meta);
-                write_file(meta_path, w.str());
-                written.push_back(meta_path.string());
-            }
+            b.meta = read_file(fs::path(dataset_dir) / "transforms.json");
+            b.ply_rel = nerf_ply_rel(json_parse(b.meta));
+            if (!b.ply_rel.empty() &&
+                fs::exists(fs::path(dataset_dir) / b.ply_rel, ec))
+                b.cloud = read_ply_points((fs::path(dataset_dir) / b.ply_rel).string());
             break;
         }
         case SparseFormat::Metashape: {
             DatasetParserConfig cfg;
-            JsonValue meta = metashape_meta(dataset_dir, cfg);
-            const ColmapPoints3D pts =
-                read_points_of(dataset_dir, nerf_ply_rel(meta));
-            const fs::path ply = fs::path(dataset_dir) / "points3D_edited.ply";
-            write_ply_points(ply.string(), pts.xyz.data(),
-                             pts.rgb.empty() ? nullptr : pts.rgb.data(),
-                             pts.num(), keep.points.data());
+            const JsonValue meta = metashape_meta(dataset_dir, cfg);
+            b.cloud = read_points_of(dataset_dir, nerf_ply_rel(meta));
+            JsonWriter w;
+            json_write(w, meta);
+            b.meta = w.str();
+            break;
+        }
+        default:
+            throw std::runtime_error("no reconstruction to write back in " +
+                                     dataset_dir);
+    }
+    return b;
+}
+
+}  // namespace
+
+std::vector<std::string> sparse_write_filtered(const std::string& dataset_dir,
+                                               const SparseKeep& keep,
+                                               const Sim3* moved,
+                                               SparseBaseline* base) {
+    if (moved && moved->is_identity()) moved = nullptr;
+    SparseBaseline local;
+    if (!base) base = &local;
+    if (!base->loaded()) *base = load_baseline(dataset_dir);
+    const SparseBaseline& b = *base;
+
+    std::vector<std::string> written;
+    const std::set<std::string> drop = leaf_set(keep.drop_images);
+    switch (b.format) {
+        case SparseFormat::Colmap: {
+            const fs::path model(b.model_dir);
+            std::set<int32_t> dropped_ids;
+            if (!drop.empty() || moved) {
+                const fs::path ip = model / (b.text ? "images.txt" : "images.bin");
+                const std::string body =
+                    b.text ? filter_images_txt(b.images, drop, dropped_ids, moved)
+                           : filter_images_bin(b.images, drop, dropped_ids, moved);
+                keep_original(ip);
+                write_file(ip, body);
+                written.push_back(ip.string());
+            }
+            // COLMAP itself reads rig_from_world in preference to the image's
+            // own pose, so a model that has the file has to have it moved.
+            if (moved && !b.frames.empty()) {
+                const std::string body = move_frames_bin(b.frames, *moved);
+                if (!body.empty()) {
+                    const fs::path fp = model / "frames.bin";
+                    keep_original(fp);
+                    write_file(fp, body);
+                    written.push_back(fp.string());
+                }
+            }
+            const fs::path pp = model / (b.text ? "points3D.txt" : "points3D.bin");
+            keep_original(pp);
+            write_file(pp, b.text ? filter_points3d_txt(b.points, keep.points,
+                                                        dropped_ids, moved)
+                                  : filter_points3d_bin(b.points, keep.points,
+                                                        dropped_ids, moved));
+            written.push_back(pp.string());
+            break;
+        }
+        case SparseFormat::Nerfstudio:
+        case SparseFormat::Metashape: {
+            // A Metashape export is not ours to rewrite: the edit lands beside
+            // it as the Nerfstudio dataset the parser reads first from then on.
+            const bool ours = b.format == SparseFormat::Nerfstudio;
+            JsonValue meta = json_parse(b.meta);
+            std::string rel = ours ? b.ply_rel : std::string("points3D_edited.ply");
+            if (rel.empty()) rel = "points3D.ply";
+            Sim3 in_json;
+            if (moved) in_json = to_json_frame(meta, *moved);
+            const fs::path ply = fs::path(dataset_dir) / rel;
+            if (ours) keep_original(ply);
+            write_ply_points(ply.string(), b.cloud.xyz.data(),
+                             b.cloud.rgb.empty() ? nullptr : b.cloud.rgb.data(),
+                             b.cloud.num(), keep.points.data(),
+                             moved ? &in_json : nullptr);
             written.push_back(ply.string());
             drop_frames(meta, drop);
-            set_string(meta, "ply_file_path", "points3D_edited.ply");
+            if (moved) move_frames(meta, in_json);
+            set_string(meta, "ply_file_path", rel);
             const fs::path meta_path = fs::path(dataset_dir) / "transforms.json";
+            if (ours) keep_original(meta_path);
             JsonWriter w;
             json_write(w, meta);
             write_file(meta_path, w.str());

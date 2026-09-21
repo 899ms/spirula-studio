@@ -193,6 +193,56 @@ bool PointsDoc::live_centers(dsparse::CenterTable& out) const {
     return true;
 }
 
+// RAW file coordinates -> the normalized frame: the parser's centring shift,
+// then the inverse of train_to_normalized.
+spirula::Sim3 PointsDoc::view_frame() const {
+    double A[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    if (_ds.train_frame_scale != 1.0f) {
+        double T[16];
+        for (int i = 0; i < 16; i++) T[i] = _ds.train_to_normalized[i];
+        dsparse::invert_affine4x4(T, A);
+    }
+    spirula::Sim3 shift;
+    for (int i = 0; i < 3; i++) shift.t[i] = -_ds.center[(size_t)i];
+    return spirula::Sim3::from_3x4(A) * shift;
+}
+
+bool PointsDoc::up_hint(float up[3]) const {
+    if (layer_count() <= kCameras) return false;
+    const std::vector<uint8_t>& ck = alive_of(kCameras);
+    double acc[3] = {0, 0, 0};
+    for (size_t i = 0; i < ck.size(); i++) {
+        if (!ck[i]) continue;
+        // OpenGL camera-to-world: the second column is the camera's up.
+        for (int r = 0; r < 3; r++) acc[r] += _ds.c2w[i * 12 + r * 4 + 1];
+    }
+    const spirula::Sim3 n = view_frame();
+    double v[3];
+    n.rotate(acc, v);
+    const double len = std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+    if (!(len > 1e-9)) return false;
+    for (int r = 0; r < 3; r++) up[r] = (float)(v[r] / len);
+    return true;
+}
+
+bool PointsDoc::colours(std::vector<float>& rgb) const {
+    if (layer() != kPoints || _ds.points.rgb.empty()) return false;
+    rgb.resize(_ds.points.rgb.size());
+    for (size_t i = 0; i < rgb.size(); i++) rgb[i] = _ds.points.rgb[i] / 255.0f;
+    return true;
+}
+
+// Live cameras only, read straight off the camera layer.
+std::vector<float> PointsDoc::camera_centres() const {
+    std::vector<float> out;
+    if (layer_count() <= kCameras) return out;
+    const std::vector<uint8_t>& ck = alive_of(kCameras);
+    const float* p = positions_of(kCameras);
+    for (size_t i = 0; i < ck.size(); i++)
+        if (ck[i]) out.insert(out.end(), p + i * 3, p + i * 3 + 3);
+    return out;
+}
+
 void PointsDoc::revert_display() {
     if (_show) _show(_ds, _post, nullptr);
 }
@@ -236,14 +286,19 @@ void PointsDoc::save(int target, const std::string& path,
         for (size_t i = 0; i < ck.size(); i++)
             if (!ck[i] && i < _ds.image_filenames.size())
                 keep.drop_images.push_back(_ds.image_filenames[i]);
-        spirula::sparse_write_filtered(path, keep);
+        const spirula::Sim3 moved = file_placement();
+        spirula::sparse_write_filtered(path, keep, &moved, &_baseline);
         if (progress) (*progress)++;
         return;
     }
+    // A loose PLY is in the parsed frame, which the centring shift left.
+    spirula::Sim3 shift;
+    for (int i = 0; i < 3; i++) shift.t[i] = _ds.center[(size_t)i];
+    const spirula::Sim3 moved = file_placement() * shift;
     spirula::write_ply_points(
         path, _ds.points.xyz.data(),
         _ds.points.rgb.empty() ? nullptr : _ds.points.rgb.data(),
-        _ds.points.num(), alive_of(kPoints).data());
+        _ds.points.num(), alive_of(kPoints).data(), &moved);
     if (progress) (*progress)++;
 }
 

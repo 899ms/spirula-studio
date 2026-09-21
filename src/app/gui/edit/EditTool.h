@@ -22,16 +22,26 @@ namespace spirula { namespace i18n { struct Msg; } }
 
 namespace gui {
 
+// The first kNumSelectTools are what the Select tab lays out; Transform and
+// Eyedropper are reached from their own parts of the panel.
 enum class ToolId {
-    Navigate = 0, Box, Ellipse, Lasso, Polygon, Brush, Piece
+    Navigate = 0, Box, Ellipse, Lasso, Polygon, Brush, Piece,
+    Transform, Eyedropper
 };
-inline constexpr int kNumTools = 7;
+inline constexpr int kNumSelectTools = 7;
+inline constexpr int kNumTools = 9;
 
 class EditTool {
 public:
     ToolId id() const { return _id; }
     void set_id(ToolId t);
-    bool owns_pointer() const { return _id != ToolId::Navigate; }
+    // The left button: Transform leaves it to the camera except over a
+    // handle, which is the session's call and not a property of the tool.
+    bool owns_pointer() const {
+        return _id != ToolId::Navigate && _id != ToolId::Transform;
+    }
+    // The letter keys, which Transform does take: S has to mean scale.
+    bool owns_keys() const { return _id != ToolId::Navigate; }
     bool in_progress() const { return _active; }
 
     float brush_radius() const { return _brush; }

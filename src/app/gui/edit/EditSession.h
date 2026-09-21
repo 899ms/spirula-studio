@@ -9,10 +9,12 @@
 // renders.
 
 #include "app/gui/ViewportInput.h"
+#include "app/gui/edit/Attributes.h"
 #include "app/gui/edit/EditDoc.h"
 #include "app/gui/edit/EditTool.h"
 #include "app/gui/edit/ElementGrid.h"
 #include "app/gui/edit/SelectShape.h"
+#include "app/gui/edit/TransformTool.h"
 
 #include <atomic>
 #include <functional>
@@ -84,13 +86,23 @@ public:
     // One line under the viewport: the active tool and its keys.
     void draw_status();
 
-    bool owns_left_button() const override { return _tool.owns_pointer(); }
+    bool owns_left_button() const override {
+        return _tool.owns_pointer() || _xform.active() || _pick != Pick::None;
+    }
     // The letter that switched tools is usually still down on the frame the
     // switch takes effect, so Q would both select Navigate and fly the camera
     // once. The block lifts when that key comes up.
     bool blocks_fly_keys() const override {
-        return _tool.owns_pointer() || _fly_block_key != 0;
+        return _tool.owns_keys() || _xform.active() || _fly_block_key != 0;
     }
+    bool owns_right_button() const override { return _xform.active(); }
+    // Once the model has been moved the renderers' own grid is in the wrong
+    // place, so from then on the grid is this session's to draw.
+    bool draws_world_grid() const override;
+    // Whether what is on disk still matches the pane that was loaded from it:
+    // false once a save went over the source, which is the owner's cue to
+    // read the file again when the edit ends.
+    bool saved_over_source() const { return _saved_over_source; }
     bool on_viewport_input(const ViewportInput& in) override;
     void draw_viewport_overlay(const ViewportOverlay& v) override;
     // A long job is in flight; editing waits for it.
@@ -102,6 +114,50 @@ public:
     int work_total() const { return _save_total.load(); }
 
 private:
+    // ---- placing the model (EditTransform.cpp) ----
+    enum class Pivot { Origin = 0, Median, Mean, Selection };
+    enum class Pick { None = 0, Ground, Corner, Origin };
+    // Saved coordinates (the file's, placement applied) -> the shared frame.
+    spirula::Sim3 saved_to_shared() const;
+    spirula::Sim3 base_frame() const;
+    bool xform_frame(XformFrame& f);
+    bool pointer_in_view(float& x, float& y) const;
+    void pivot_model(double out[3]);
+    void begin_xform(XformKind kind);
+    // A step made in the shared frame / in saved coordinates, as one history
+    // entry.
+    void place_shared(const spirula::Sim3& step, const spirula::i18n::Msg& name);
+    // `carry` takes the view along: an alignment is the WORLD being defined
+    // under the model, and a model that leaves the screen looks like a bug.
+    void place_saved(const spirula::Sim3& step, const spirula::i18n::Msg& name,
+                     bool carry = false);
+    void set_placement(const spirula::Sim3& next, const spirula::i18n::Msg& name,
+                       bool carry = false);
+    void push_placement();
+    // Undo and redo across an alignment take the view with them too.
+    void follow_history();
+    void quarter_turn(int axis, bool negative);
+    void auto_align();
+    void ground_from_selection();
+    void pick_align(float px, float py);
+    // Live layer-0 points in saved coordinates, thinned to at most `cap`.
+    std::vector<double> saved_points(int64_t cap, bool selected_only,
+                                     std::vector<int64_t>* index = nullptr) const;
+    void enter_transform();
+    void draw_transform_tab(float full);
+
+    // ---- selecting by attribute and by colour (EditAttributes.cpp) ----
+    void draw_attribute_section(float full);
+    void draw_colour_section(float full);
+    void refresh_attribute();
+    // A selection that replaces the last one of the same kind rather than
+    // stacking on it: dragging a range again is an adjustment, not a new step.
+    void begin_adjustable(int kind);
+    void preview_adjustable(const std::vector<uint8_t>& w);
+    void commit_adjustable(const std::vector<uint8_t>& w, const std::string& label);
+    void pick_colour(float px, float py, bool append);
+    void run_colour(bool commit);
+
     void apply_stroke(const ShapeStroke& s, const ViewportInput& in);
     // Compute the selection a recipe describes and either record it as a step
     // or write it straight in -- a setting change is its own step, so the
@@ -172,6 +228,60 @@ private:
     std::atomic<bool> _save_busy{false};
     std::atomic<int> _save_done{0}, _save_total{0};
     std::string _save_error;
+    std::string _save_path;
+
+    // ---- placement ----
+    TransformTool _xform;
+    XformKind _xform_mode = XformKind::Move;
+    int _xform_hot = -1;
+    spirula::Sim3 _xform_from;        // the placement the running operator began at
+    spirula::Sim3 _seen_placement;    // as of the last frame, for follow_history
+    int _seen_head = 0;
+    ToolId _xform_return = ToolId::Navigate;
+    int _pivot = (int)Pivot::Median;
+    Pick _pick = Pick::None;
+    bool _align_yaw = true, _align_centre = true, _corner_to_origin = false;
+    float _align_tol = 1.0f;          // x 1% of the model's extent
+    bool _levelling_was = false, _levelling_touched = false;
+    bool _moved_ever = false;         // the grid is this session's from here on
+    struct Centres {
+        int layer = -1;
+        int64_t alive = -1, selected = -1;
+        uint64_t sel_rev = 0;
+        double median[3] = {0, 0, 0}, mean[3] = {0, 0, 0}, sel[3] = {0, 0, 0};
+    } _centres;
+    float _placement_fields[7] = {0, 0, 0, 0, 0, 0, 1};   // t, euler deg, s
+    bool _fields_active = false;
+
+    // ---- attributes ----
+    std::vector<Attr> _attrs;         // what the current layer offers
+    int _attrs_layer = -1;
+    int _attr = 0;                    // index into _attrs
+    std::vector<float> _attr_values;
+    AttrHistogram _hist;
+    uint64_t _hist_rev = 0;
+    int _hist_attr = -1;
+    bool _hist_log_counts = true;
+    bool _range_outside = false;
+    double _range[2] = {0.25, 0.75};  // fractions of the histogram's axis
+    bool _range_set = false;
+    int _range_drag = 0;              // 0 none, 1 low edge, 2 high edge, 3 new
+    double _range_anchor = 0.0;
+    // Colour samples, display-referred RGB, and how close is close.
+    std::vector<float> _samples;
+    std::vector<float> _colours;
+    uint64_t _colours_key = 0;
+    float _colour_tol = 0.08f, _colour_light = 1.0f;
+    // The adjustable selection in flight: what it started from, and which
+    // history position it left behind when it was last committed.
+    std::vector<uint8_t> _adjust_before;
+    int _adjust_kind = 0, _adjust_head = -1;
+    bool _adjust_live = false;
+    double _preview_at = 0.0;
+
+    int _tab = 0;                     // 0 select, 1 transform
+    bool _tab_force = false;
+    bool _saved_over_source = false;
 
     std::function<void(int, const std::string&, bool, const std::string&)>
         _pick_save;

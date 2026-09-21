@@ -138,10 +138,13 @@ src/
 │   ├── CrashLog.{h,cpp}    the stack trace every tool leaves in <config>/crash.log
 │   │                         when it faults -- armed for all of them in Main.cpp
 │   ├── gui/                Dear ImGui desktop app (`spirula` with no arguments)
-│   │   └── edit/             selecting parts of a model and deleting them:
-│   │                           one document/selection/tool seam over splats,
-│   │                           sparse points and meshes
-│   │                           -- docs/notes/gui-editing-plan.md
+│   │   └── edit/             selecting parts of a model (by region, by
+│   │                           attribute, by colour), deleting them, and
+│   │                           placing the whole model: one document /
+│   │                           selection / tool seam over splats, sparse
+│   │                           points and meshes
+│   │                           -- docs/notes/gui-editing-plan.md,
+│   │                              docs/notes/scene-transform.md
 │   ├── webviewer/          HTTP server + render worker + viewer.html (the ONE
 │   │                         browser client, embedded into the engine library
 │   │                         so the CLI and the GUI serve the same bytes)
@@ -631,6 +634,23 @@ no ceremony — do not ask, do not leave a note saying you removed it.
   vertex color) is written BEFORE the bake, not after. `generate_mesh()` is
   ordered that way on purpose; moving a write past the atlas ships a file whose
   colors no longer match its vertices.
+- **Rotating a splat model means rotating its SH, and the sign convention is
+  where that goes wrong.** `core/ShRotation.h` is the closed form
+  (Ivanic-Ruedenberg), conjugated for the Condon-Shortley phase
+  `shaders/harmonics.slang` carries; without the conjugation bands 1 and 3 are
+  wrong by signs a casual render does not show. `sh_rotation_test` holds it to
+  a sampled fit of that basis and `splat_transform_render` to the engine
+  itself. Touch the basis and both have to follow. docs/notes/sh-rotation.md.
+- **An edited model's placement is applied by the VIEWER until it is saved**
+  (`EditDoc::placement`), so there are two frames on screen: the elements'
+  own, and the saved coordinates the grid, the pivot and the alignment helpers
+  live in. docs/notes/scene-transform.md has the algebra; get a composition
+  order wrong and the model moves the right amount about the wrong point.
+- **The viewport's orthographic view is a pinhole 256x further off with a lens
+  256x longer** (`ViewportPanel`, `kOrthoPull`), because then every renderer,
+  primitive and selection test works unchanged. Anything that takes a
+  RELATIVE depth tolerance has to subtract the pull-back first
+  (`ViewProjection::ortho_back`).
 - **A GUI worker that clears a `busy` flag at the end of its function will
   strand it.** Every early `return set_error(...)` skips the line, and the next
   request is refused forever. Use a scope guard (`SegmentPanel::start_job`).

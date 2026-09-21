@@ -277,6 +277,9 @@ inline bool MenuItem(const Msg& m, std::initializer_list<Arg> a) {
 inline bool MenuItemRaw(const char* s, bool selected = false) {
     return ImGui::MenuItem(s, nullptr, selected);
 }
+inline bool BeginTabItem(const Msg& m, ImGuiTabItemFlags flags = 0) {
+    return ImGui::BeginTabItem(detail::label(m), nullptr, flags);
+}
 inline bool CollapsingHeader(const Msg& m, ImGuiTreeNodeFlags flags = 0) {
     return ImGui::CollapsingHeader(detail::label(m), flags);
 }

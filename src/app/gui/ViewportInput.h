@@ -26,6 +26,10 @@ struct ViewportInput {
 struct ViewportOverlay {
     ImDrawList* dl = nullptr;
     float x = 0, y = 0, w = 0, h = 0;
+    // The grid switch and its cell, in model units, for an interactor that
+    // draws the grid itself (draws_world_grid).
+    bool grid = false;
+    float grid_cell = 1.0f;
 };
 
 // An interaction that owns the viewport's LEFT button while it is installed;
@@ -40,6 +44,13 @@ struct ViewportInteractor {
     // the same question: the key that switches back to navigation is one of
     // them, and it is still down on the frame the switch happens.
     virtual bool blocks_fly_keys() const { return owns_left_button(); }
+    // A modal operation cancels on the right button, which the panel would
+    // otherwise start a pan with.
+    virtual bool owns_right_button() const { return false; }
+    // The renderers draw their grid in the MODEL's frame, which is the wrong
+    // one while the model is being placed against it. True hands the grid to
+    // draw_viewport_overlay, fixed in the frame the model moves through.
+    virtual bool draws_world_grid() const { return false; }
     // True when the tool took this frame's left button.
     virtual bool on_viewport_input(const ViewportInput& in) = 0;
     virtual void draw_viewport_overlay(const ViewportOverlay& v) = 0;

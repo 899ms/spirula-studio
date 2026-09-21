@@ -940,13 +940,20 @@ unsigned PreviewRenderer::render(int W, int H, const float view[16],
                                  PreviewProjection proj, float sx, float sy,
                                  float scene_radius, float view_dist,
                                  const float view_target[3], bool show_cams,
-                                 float frustum_scale, bool show_grid) {
+                                 float frustum_scale, bool show_grid,
+                                 float ortho_back) {
     if (!_built || !_gl_ok || W < 1 || H < 1) return 0;
     if (!ensure_fbo(W, H)) return 0;
     if (show_grid) ensure_grid(scene_radius, view_dist, view_target);
 
-    float zn = std::max(1e-5f, 0.002f * scene_radius);
-    float zf = std::max(10.0f * zn, 500.0f * scene_radius);
+    // Depth is LINEAR over this range, so a near plane costs no precision;
+    // what it must do is hold a camera that a placement moved a long way off.
+    float zn = std::max(1e-7f, 0.002f * std::min(scene_radius, view_dist));
+    float zf = std::max({10.0f * zn, 500.0f * scene_radius, 20.0f * view_dist});
+    if (ortho_back > 0.0f) {
+        zn = std::max(zn, ortho_back - zf);
+        zf = ortho_back + zf;
+    }
 
     glx::BindFramebuffer(GL_FRAMEBUFFER, (GLuint)_fbo);
     glViewport(0, 0, W, H);

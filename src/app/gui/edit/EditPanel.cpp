@@ -5,12 +5,18 @@
 
 #include "app/gui/Ui.h"
 #include "i18n/catalog/Edit.h"
+#include "i18n/catalog/EditAttributes.h"
+#include "i18n/catalog/EditTransform.h"
 
 #include "imgui.h"
 
 #include <algorithm>
+#include <cmath>
+#include <string>
 
 namespace msg = spirula::i18n::msg::edit;
+namespace xmsg = spirula::i18n::msg::xform;
+namespace amsg = spirula::i18n::msg::attr;
 using spirula::i18n::Msg;
 
 namespace gui {
@@ -156,6 +162,41 @@ void option_slider_int(EditSession& s, const Msg& m, int* slot, int lo, int hi,
     }
 }
 
+constexpr double kPi = 3.14159265358979323846;
+
+// R = Rz Ry Rx in degrees -- the order the comparison view's placement
+// fields use, so the two sets of numbers mean the same thing.
+void euler_of(const double R[9], float deg[3]) {
+    const double sy = -R[6];
+    double x, y, z;
+    if (std::fabs(sy) < 0.999999) {
+        y = std::asin(sy);
+        x = std::atan2(R[7], R[8]);
+        z = std::atan2(R[3], R[0]);
+    } else {
+        y = sy > 0 ? kPi / 2 : -kPi / 2;
+        x = std::atan2(-R[5], R[4]);
+        z = 0.0;
+    }
+    deg[0] = (float)(x * 180.0 / kPi);
+    deg[1] = (float)(y * 180.0 / kPi);
+    deg[2] = (float)(z * 180.0 / kPi);
+    // "-0.00" is what rounding leaves of an angle nobody asked for.
+    for (int k = 0; k < 3; k++)
+        if (std::fabs(deg[k]) < 5e-4f) deg[k] = 0.0f;
+}
+
+void euler_to(const float deg[3], double R[9]) {
+    const double k = kPi / 180.0;
+    const double cx = std::cos(deg[0]*k), sx = std::sin(deg[0]*k);
+    const double cy = std::cos(deg[1]*k), sy = std::sin(deg[1]*k);
+    const double cz = std::cos(deg[2]*k), sz = std::sin(deg[2]*k);
+    const double M[9] = {cz*cy, cz*sy*sx - sz*cx, cz*sy*cx + sz*sx,
+                         sz*cy, sz*sy*sx + cz*cx, sz*sy*cx - cz*sx,
+                         -sy,   cy*sx,            cy*cx};
+    for (int i = 0; i < 9; i++) R[i] = M[i];
+}
+
 }  // namespace
 
 
@@ -163,24 +204,50 @@ void EditSession::handle_keys() {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput || ImGui::IsAnyItemActive()) return;
     if (!_doc) return;
+    // A running operator reads the keyboard itself: X is an axis there, not
+    // "delete", and a digit is a distance.
+    if (_xform.active()) return;
 
     // While Navigate is the active tool the camera owns WASDQE, so the keys
     // that collide with it are not read here. Every other key still is, which
     // is how a letter switches away from Navigate in the first place.
     const bool fly = _tool.id() == ToolId::Navigate;
 
+    const bool plain = !io.KeyCtrl && !io.KeyAlt && !io.KeyShift;
     for (int i = 0; i < kNumTools; i++) {
         const ToolRow& row = tool_table()[i];
         if (row.fly_key && fly) continue;
-        if (!io.KeyCtrl && !io.KeyAlt && !io.KeyShift &&
-            ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false)) {
-            _tool.set_id(row.id);
+        if (plain && ImGui::IsKeyPressed((ImGuiKey)row.imgui_key, false)) {
+            if (row.id == ToolId::Transform) {
+                enter_transform();
+            } else {
+                _tool.set_id(row.id);
+                _pick = Pick::None;
+                if (_tab != 0) { _tab = 0; _tab_force = true; }
+            }
             // The key is still down this frame; the camera must not also read
             // it on the way into Navigate.
             if (row.fly_key) _fly_block_key = row.imgui_key;
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) _tool.cancel();
+    // G / R / S, from any tool -- except S under Navigate, where it is the
+    // camera's "back" and has been since before there was an editor.
+    if (plain) {
+        const struct { ImGuiKey key; XformKind kind; bool fly; } ops[] = {
+            {ImGuiKey_G, XformKind::Move, false},
+            {ImGuiKey_R, XformKind::Rotate, false},
+            {ImGuiKey_S, XformKind::Scale, true}};
+        for (const auto& op : ops) {
+            if ((op.fly && fly) || !ImGui::IsKeyPressed(op.key, false)) continue;
+            enter_transform();
+            begin_xform(op.kind);
+            return;
+        }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        _tool.cancel();
+        _pick = Pick::None;
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
         ShapeStroke s;
@@ -242,6 +309,17 @@ void EditSession::draw_status() {
         ui::Text(msg::working);
         return;
     }
+    if (_xform.active()) {
+        ui::TextDisabled(_xform.kind() == XformKind::Scale ? xmsg::hint_op_scale
+                                                           : xmsg::hint_op);
+        return;
+    }
+    if (_pick != Pick::None) {
+        ui::TextDisabled(_pick == Pick::Ground   ? xmsg::hint_pick_ground
+                         : _pick == Pick::Corner ? xmsg::hint_pick_corner
+                                                 : xmsg::hint_pick_origin);
+        return;
+    }
     ui::TextDisabled(_tool.hint());
     if (_tool.owns_pointer()) {
         ImGui::SameLine();
@@ -253,8 +331,17 @@ void EditSession::draw_status() {
 void EditSession::draw_panel() {
     if (!_doc) return;
     EditDoc& d = *_doc;
-    const float full = ImGui::GetContentRegionAvail().x;
     const ImGuiStyle& st = ImGui::GetStyle();
+
+    // The body scrolls; the strip under it does not, and its height is
+    // reserved whether or not anything is in it. A banner that appears at the
+    // top of a panel moves every control out from under the cursor.
+    const float strip = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("##editbody", ImVec2(0, -strip));
+
+    // Measured INSIDE the child: its scrollbar takes width, and a row sized
+    // from outside runs under it.
+    const float full = ImGui::GetContentRegionAvail().x;
     const float half = (full - st.ItemSpacing.x) * 0.5f;
     const float third = (full - st.ItemSpacing.x * 2) / 3.0f;
 
@@ -269,12 +356,6 @@ void EditSession::draw_panel() {
     const float slider_w =
         std::max(full - label_w - st.ItemInnerSpacing.x, full * 0.3f);
 
-    // The body scrolls; the strip under it does not, and its height is
-    // reserved whether or not anything is in it. A banner that appears at the
-    // top of a panel moves every control out from under the cursor.
-    const float strip = ImGui::GetFrameHeightWithSpacing();
-    ImGui::BeginChild("##editbody", ImVec2(0, -strip));
-
     // A long walk over the elements is in flight and every action below
     // depends on what it finds.
     ImGui::BeginDisabled(busy());
@@ -288,128 +369,168 @@ void EditSession::draw_panel() {
         ui::help_on_hover(msg::layer_help);
     }
 
-    // ---- tools ----
-    ui::SeparatorText(msg::sec_tool);
-    {
-        constexpr int kPerRow = 3;
-        const float w = (full - st.ItemSpacing.x * (kPerRow - 1)) / kPerRow;
-        int col = 0;
-        for (int i = 0; i < kNumTools; i++) {
-            if (col) ImGui::SameLine();
-            const ToolRow& row = tool_table()[i];
-            if (key_button(tool_label(row.id), w, row.key, _tool.id() == row.id))
-                _tool.set_id(row.id);
-            ui::help_on_hover(tool_hint(row.id));
-            if (++col == kPerRow) col = 0;
-        }
-    }
-    if (_tool.id() == ToolId::Brush) {
-        float r = _tool.brush_radius();
-        ImGui::SetNextItemWidth(slider_w);
-        if (ui::SliderFloat(msg::opt_brush_size, &r, 2.0f, 300.0f, "%.0f"))
-            _tool.set_brush_radius(r);
-    }
-
-    // ---- the set ----
-    ui::SeparatorText(msg::sec_select);
-    ui::Text(msg::stat_selected, {(long long)d.sel().count()});
-    ImGui::SameLine();
-    ui::TextDisabled(d.element_name());
-    if (act_button(Act::All, msg::act_all, third)) select_all(true);
-    ImGui::SameLine();
-    if (act_button(Act::None, msg::act_none, third)) select_all(false);
-    ImGui::SameLine();
-    if (act_button(Act::Invert, msg::act_invert, third)) invert_selection();
-
-    // What a new selection does to the one already there. The modifiers do
-    // the same thing, which is what the tooltip says rather than a mode.
-    {
-        const Msg* labels[kNumCombine] = {&msg::combine_replace, &msg::combine_add,
-                                          &msg::combine_subtract,
-                                          &msg::combine_intersect};
-        const Act acts[kNumCombine] = {Act::Replace, Act::Add, Act::Subtract,
-                                       Act::Intersect};
-        // Packed greedily: four of these do not fit on one line in a narrow
-        // panel, and the fourth going off the edge is how it used to look.
-        float x = 0.0f;
-        for (int i = 0; i < kNumCombine; i++) {
-            const char* key = act_row(acts[i]).key;
-            const float w = ImGui::GetFrameHeight() + st.ItemInnerSpacing.x +
-                            ImGui::CalcTextSize(labels[i]->get()).x +
-                            st.ItemInnerSpacing.x +
-                            ImGui::CalcTextSize(key).x;
-            if (i && x + st.ItemSpacing.x + w <= full) {
-                ImGui::SameLine();
-                x += st.ItemSpacing.x + w;
-            } else {
-                x = w;
+    // Two jobs, two tabs: choosing part of the model, and placing all of it.
+    // History and saving are under both, because both end in them.
+    if (ImGui::BeginTabBar("##edittabs")) {
+        const bool force = _tab_force;
+        _tab_force = false;
+        if (ui::BeginTabItem(xmsg::tab_select,
+                             force && _tab == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
+            if (_tab != 0 && !force) {
+                // Clicked: back to whatever tool was in hand before.
+                _tab = 0;
+                _pick = Pick::None;
+                _tool.set_id(_xform_return);
             }
-            if (ui::RadioButton(*labels[i], _combine == i)) _combine = i;
-            ImGui::SameLine(0.0f, st.ItemInnerSpacing.x);
-            ui::TextDisabledRaw(key);
+        // ---- tools ----
+        ui::SeparatorText(msg::sec_tool);
+        {
+            constexpr int kPerRow = 3;
+            const float w = (full - st.ItemSpacing.x * (kPerRow - 1)) / kPerRow;
+            int col = 0;
+            for (int i = 0; i < kNumSelectTools; i++) {
+                if (col) ImGui::SameLine();
+                const ToolRow& row = tool_table()[i];
+                if (key_button(tool_label(row.id), w, row.key, _tool.id() == row.id)) {
+                    _tool.set_id(row.id);
+                    _pick = Pick::None;
+                }
+                ui::help_on_hover(tool_hint(row.id));
+                if (++col == kPerRow) col = 0;
+            }
         }
-        ui::help_on_hover(msg::combine_help);
-    }
+        if (_tool.id() == ToolId::Brush) {
+            float r = _tool.brush_radius();
+            ImGui::SetNextItemWidth(slider_w);
+            if (ui::SliderFloat(msg::opt_brush_size, &r, 2.0f, 300.0f, "%.0f"))
+                _tool.set_brush_radius(r);
+        }
 
-    option_box(*this, msg::opt_front_only, &_opt.front_only);
-    ui::help_on_hover(msg::opt_front_only_help);
-    if (d.kind() == EditDoc::Kind::Splats) {
-        option_box(*this, msg::opt_by_extent, &_opt.by_extent);
-        ui::help_on_hover(msg::opt_by_extent_help);
-    }
-    option_box(*this, msg::opt_depth_limit, &_opt.depth_limit);
-    ui::help_on_hover(msg::opt_depth_limit_help);
-    if (_opt.depth_limit) {
-        option_slider(*this, msg::opt_depth_near, &_opt.near_frac, 0.0f, 1.0f,
-                      "%.2f", slider_w);
-        option_slider(*this, msg::opt_depth_far, &_opt.far_frac, 0.0f, 1.0f,
-                      "%.2f", slider_w);
-    }
+        // ---- the set ----
+        ui::SeparatorText(msg::sec_select);
+        ui::Text(msg::stat_selected, {(long long)d.sel().count()});
+        ImGui::SameLine();
+        ui::TextDisabled(d.element_name());
+        if (act_button(Act::All, msg::act_all, third)) select_all(true);
+        ImGui::SameLine();
+        if (act_button(Act::None, msg::act_none, third)) select_all(false);
+        ImGui::SameLine();
+        if (act_button(Act::Invert, msg::act_invert, third)) invert_selection();
 
-    if (act_button(Act::Grow, msg::act_grow, half)) grow_shrink(true);
-    ImGui::SameLine();
-    if (act_button(Act::Shrink, msg::act_shrink, half)) grow_shrink(false);
-    if (act_button(Act::Floaters, msg::act_floaters, full))
-        keep_largest_components();
-    ui::help_on_hover(msg::act_floaters_help);
+        // What a new selection does to the one already there. The modifiers do
+        // the same thing, which is what the tooltip says rather than a mode.
+        {
+            const Msg* labels[kNumCombine] = {&msg::combine_replace, &msg::combine_add,
+                                              &msg::combine_subtract,
+                                              &msg::combine_intersect};
+            const Act acts[kNumCombine] = {Act::Replace, Act::Add, Act::Subtract,
+                                           Act::Intersect};
+            // Packed greedily: four of these do not fit on one line in a narrow
+            // panel, and the fourth going off the edge is how it used to look.
+            float x = 0.0f;
+            for (int i = 0; i < kNumCombine; i++) {
+                const char* key = act_row(acts[i]).key;
+                const float w = ImGui::GetFrameHeight() + st.ItemInnerSpacing.x +
+                                ImGui::CalcTextSize(labels[i]->get()).x +
+                                st.ItemInnerSpacing.x +
+                                ImGui::CalcTextSize(key).x;
+                if (i && x + st.ItemSpacing.x + w <= full) {
+                    ImGui::SameLine();
+                    x += st.ItemSpacing.x + w;
+                } else {
+                    x = w;
+                }
+                if (ui::RadioButton(*labels[i], _combine == i)) _combine = i;
+                ImGui::SameLine(0.0f, st.ItemInnerSpacing.x);
+                ui::TextDisabledRaw(key);
+            }
+            ui::help_on_hover(msg::combine_help);
+        }
 
-    if (ui::CollapsingHeader(msg::sec_advanced)) {
-        option_slider(*this, msg::act_reach, &_radius_mul, 0.0f, 6.0f, "%.2f",
-                      slider_w);
-        ui::help_on_hover(msg::act_reach_help);
-        option_slider_int(*this, msg::act_pieces_kept, &_keep_components, 1, 32,
+        option_box(*this, msg::opt_front_only, &_opt.front_only);
+        ui::help_on_hover(msg::opt_front_only_help);
+        if (d.kind() == EditDoc::Kind::Splats) {
+            option_box(*this, msg::opt_by_extent, &_opt.by_extent);
+            ui::help_on_hover(msg::opt_by_extent_help);
+        }
+        option_box(*this, msg::opt_depth_limit, &_opt.depth_limit);
+        ui::help_on_hover(msg::opt_depth_limit_help);
+        if (_opt.depth_limit) {
+            option_slider(*this, msg::opt_depth_near, &_opt.near_frac, 0.0f, 1.0f,
+                          "%.2f", slider_w);
+            option_slider(*this, msg::opt_depth_far, &_opt.far_frac, 0.0f, 1.0f,
+                          "%.2f", slider_w);
+        }
+
+        if (act_button(Act::Grow, msg::act_grow, half)) grow_shrink(true);
+        ImGui::SameLine();
+        if (act_button(Act::Shrink, msg::act_shrink, half)) grow_shrink(false);
+        if (act_button(Act::Floaters, msg::act_floaters, full))
+            keep_largest_components();
+        ui::help_on_hover(msg::act_floaters_help);
+
+        if (ui::CollapsingHeader(msg::sec_advanced)) {
+            option_slider(*this, msg::act_reach, &_radius_mul, 0.0f, 6.0f, "%.2f",
                           slider_w);
-        option_slider(*this, msg::opt_front_tol, &_opt.front_tol, 0.0f, 0.5f,
-                      "%.3f", slider_w);
-        ui::help_on_hover(msg::opt_front_tol_help);
-        if (d.kind() == EditDoc::Kind::Splats)
-            option_slider(*this, msg::opt_extent_scale, &_opt.extent_scale,
-                          0.25f, 4.0f, "%.2f", slider_w);
-    }
+            ui::help_on_hover(msg::act_reach_help);
+            option_slider_int(*this, msg::act_pieces_kept, &_keep_components, 1, 32,
+                              slider_w);
+            option_slider(*this, msg::opt_front_tol, &_opt.front_tol, 0.0f, 0.5f,
+                          "%.3f", slider_w);
+            ui::help_on_hover(msg::opt_front_tol_help);
+            if (d.kind() == EditDoc::Kind::Splats)
+                option_slider(*this, msg::opt_extent_scale, &_opt.extent_scale,
+                              0.25f, 4.0f, "%.2f", slider_w);
+        }
 
-    // ---- what is done with it ----
-    ui::SeparatorText(msg::sec_actions);
-    ImGui::BeginDisabled(d.sel().empty());
-    if (act_button(Act::Delete, msg::act_delete, half)) {
-        d.run(make_hide_op(d, false));
+
+            if (ui::CollapsingHeader(amsg::sec_attribute)) draw_attribute_section(full);
+            if (d.colours_available()) {
+                if (ui::CollapsingHeader(amsg::sec_colour)) {
+                    const ToolRow& k = tool_table()[(int)ToolId::Eyedropper];
+                    if (key_button(tool_label(k.id), full, k.key,
+                                   _tool.id() == ToolId::Eyedropper))
+                        _tool.set_id(_tool.id() == ToolId::Eyedropper
+                                         ? ToolId::Navigate : ToolId::Eyedropper);
+                    ui::help_on_hover(tool_hint(k.id));
+                    draw_colour_section(full);
+                }
+            }
+
+        // ---- what is done with it ----
+        ui::SeparatorText(msg::sec_actions);
+        ImGui::BeginDisabled(d.sel().empty());
+        if (act_button(Act::Delete, msg::act_delete, half)) {
+            d.run(make_hide_op(d, false));
+        }
+        ui::help_on_hover_disabled(d.sel().empty() ? msg::stat_nothing_selected
+                                                   : msg::act_delete_help);
+        ImGui::SameLine();
+        if (act_button(Act::Isolate, msg::act_isolate, half)) {
+            d.run(make_hide_op(d, true));
+        }
+        ui::help_on_hover_disabled(d.sel().empty() ? msg::stat_nothing_selected
+                                                   : msg::act_isolate_help);
+        ImGui::EndDisabled();
+        const int64_t hidden = d.count() - d.alive_count();
+        ImGui::BeginDisabled(hidden == 0);
+        if (act_button(Act::Restore, msg::act_restore, full)) {
+            d.run(make_reveal_op(d));
+        }
+        ImGui::EndDisabled();
+        ui::Text(msg::stat_kept, {(long long)d.alive_count(), (long long)d.count()});
+        if (hidden) ui::TextDisabled(msg::stat_hidden, {(long long)hidden});
+
+            ImGui::EndTabItem();
+        }
+        if (ui::BeginTabItem(xmsg::tab_transform,
+                             force && _tab == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
+            if (_tab != 1 && !force) enter_transform();
+            draw_transform_tab(full);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
-    ui::help_on_hover_disabled(d.sel().empty() ? msg::stat_nothing_selected
-                                               : msg::act_delete_help);
-    ImGui::SameLine();
-    if (act_button(Act::Isolate, msg::act_isolate, half)) {
-        d.run(make_hide_op(d, true));
-    }
-    ui::help_on_hover_disabled(d.sel().empty() ? msg::stat_nothing_selected
-                                               : msg::act_isolate_help);
-    ImGui::EndDisabled();
-    const int64_t hidden = d.count() - d.alive_count();
-    ImGui::BeginDisabled(hidden == 0);
-    if (act_button(Act::Restore, msg::act_restore, full)) {
-        d.run(make_reveal_op(d));
-    }
-    ImGui::EndDisabled();
-    ui::Text(msg::stat_kept, {(long long)d.alive_count(), (long long)d.count()});
-    if (hidden) ui::TextDisabled(msg::stat_hidden, {(long long)hidden});
 
     // ---- history ----
     ui::SeparatorText(msg::sec_history);
@@ -543,6 +664,154 @@ void EditSession::draw_panel() {
             if (ui::Button(msg::cancel_job)) cancel_work();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// The Transform tab
+// ---------------------------------------------------------------------------
+
+void EditSession::draw_transform_tab(float full) {
+    EditDoc& d = *_doc;
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float half = (full - st.ItemSpacing.x) * 0.5f;
+    const float third = (full - st.ItemSpacing.x * 2) / 3.0f;
+
+    ui::TextDisabledWrapped(xmsg::tab_transform_help);
+
+    // ---- the three handles, and the keys that do the same without them ----
+    ui::SeparatorText(xmsg::sec_move);
+    const struct { XformKind kind; const Msg* name; const Msg* help; const char* key; } modes[] = {
+        {XformKind::Move, &xmsg::mode_move, &xmsg::mode_move_help, "G"},
+        {XformKind::Rotate, &xmsg::mode_rotate, &xmsg::mode_rotate_help, "R"},
+        {XformKind::Scale, &xmsg::mode_scale, &xmsg::mode_scale_help, "S"}};
+    for (int i = 0; i < 3; i++) {
+        if (i) ImGui::SameLine();
+        if (key_button(*modes[i].name, third, modes[i].key,
+                       _xform_mode == modes[i].kind)) {
+            _xform_mode = modes[i].kind;
+            _pick = Pick::None;
+        }
+        ui::help_on_hover(*modes[i].help);
+    }
+    {
+        const Msg* pivots[4] = {&xmsg::pivot_origin, &xmsg::pivot_median,
+                                &xmsg::pivot_mean, &xmsg::pivot_selection};
+        const float lw = ImGui::CalcTextSize(xmsg::pivot.get()).x;
+        ImGui::SetNextItemWidth(std::max(full - lw - st.ItemInnerSpacing.x, full * 0.4f));
+        if (ui::BeginCombo(xmsg::pivot, pivots[_pivot]->get())) {
+            for (int i = 0; i < 4; i++) {
+                // A selection that is empty has no middle to turn about.
+                if (i == (int)Pivot::Selection && d.sel().empty()) continue;
+                if (ui::Selectable(*pivots[i], i == _pivot)) _pivot = i;
+            }
+            ImGui::EndCombo();
+        }
+        ui::help_on_hover(xmsg::pivot_help);
+        if (_pivot == (int)Pivot::Selection && d.sel().empty())
+            _pivot = (int)Pivot::Median;
+    }
+
+    // A model that came in lying on its side is the commonest complaint, and
+    // it is one click: no dragging a ring to "about ninety".
+    ui::Text(xmsg::quarter_turns);
+    {
+        const char* axes[3] = {"X", "Y", "Z"};
+        const float w = (full - st.ItemSpacing.x * 5) / 6.0f;
+        for (int a = 0; a < 3; a++)
+            for (int neg = 0; neg < 2; neg++) {
+                if (a || neg) ImGui::SameLine();
+                const std::string label = std::string(axes[a]) + (neg ? " -90\xc2\xb0" : " +90\xc2\xb0");
+                ImGui::PushID(a * 2 + neg);
+                if (ui::ButtonRaw((label + "##quarter").c_str(), ImVec2(w, 0)))
+                    quarter_turn(a, neg != 0);
+                ImGui::PopID();
+            }
+        ui::help_on_hover(xmsg::quarter_turns_help);
+    }
+
+    // ---- letting the model say where its floor is ----
+    ui::SeparatorText(xmsg::sec_align);
+    if (ui::Button(xmsg::auto_align, ImVec2(full, 0))) auto_align();
+    ui::help_on_hover(xmsg::auto_align_help);
+    auto pick_button = [&](Pick what, const Msg& name, const Msg& help, float w) {
+        if (key_button(name, w, nullptr, _pick == what))
+            _pick = _pick == what ? Pick::None : what;
+        ui::help_on_hover(help);
+    };
+    pick_button(Pick::Ground, xmsg::pick_ground, xmsg::pick_ground_help, half);
+    ImGui::SameLine();
+    pick_button(Pick::Corner, xmsg::pick_corner, xmsg::pick_corner_help, half);
+    pick_button(Pick::Origin, xmsg::pick_origin, xmsg::pick_origin_help, half);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(d.sel_of(0).empty());
+    if (ui::Button(xmsg::ground_from_selection, ImVec2(half, 0))) ground_from_selection();
+    ImGui::EndDisabled();
+    ui::help_on_hover_disabled(xmsg::ground_from_selection_help);
+
+    if (ui::CollapsingHeader(xmsg::sec_align_options)) {
+        ui::Checkbox(xmsg::opt_align_yaw, &_align_yaw);
+        ui::help_on_hover(xmsg::opt_align_yaw_help);
+        ui::Checkbox(xmsg::opt_align_centre, &_align_centre);
+        ui::help_on_hover(xmsg::opt_align_centre_help);
+        ui::Checkbox(xmsg::opt_corner_origin, &_corner_to_origin);
+        ui::help_on_hover(xmsg::opt_corner_origin_help);
+        const float lw = ImGui::CalcTextSize(xmsg::opt_align_tol.get()).x;
+        ImGui::SetNextItemWidth(std::max(full - lw - st.ItemInnerSpacing.x, full * 0.3f));
+        ui::SliderFloat(xmsg::opt_align_tol, &_align_tol, 0.1f, 5.0f, "%.2f");
+        ui::help_on_hover(xmsg::opt_align_tol_help);
+    }
+
+    // ---- the numbers, in the file's own units ----
+    ui::SeparatorText(xmsg::sec_numbers);
+    {
+        const spirula::Sim3 now = d.file_placement();
+        if (!_fields_active) {
+            for (int k = 0; k < 3; k++) _placement_fields[k] = (float)now.t[k];
+            float e[3];
+            euler_of(now.R, e);
+            for (int k = 0; k < 3; k++) _placement_fields[3 + k] = e[k];
+            _placement_fields[6] = (float)now.s;
+        }
+        bool any_active = false, commit = false;
+        const float lw = std::max({ImGui::CalcTextSize(xmsg::field_position.get()).x,
+                                   ImGui::CalcTextSize(xmsg::field_rotation.get()).x,
+                                   ImGui::CalcTextSize(xmsg::field_scale.get()).x});
+        const float fw = (std::max(full - lw - st.ItemInnerSpacing.x, full * 0.5f) -
+                          st.ItemInnerSpacing.x * 2) / 3.0f;
+        auto row = [&](const Msg& name, int first, int n, const char* fmt) {
+            for (int k = 0; k < n; k++) {
+                if (k) ImGui::SameLine(0.0f, st.ItemInnerSpacing.x);
+                ImGui::PushID(first + k);
+                ImGui::SetNextItemWidth(fw);
+                ui::InputFloatRaw("##pf", &_placement_fields[first + k], fmt);
+                any_active |= ImGui::IsItemActive();
+                commit |= ImGui::IsItemDeactivatedAfterEdit();
+                ImGui::PopID();
+            }
+            ImGui::SameLine(0.0f, st.ItemInnerSpacing.x);
+            ui::Text(name);
+        };
+        row(xmsg::field_position, 0, 3, "%.4g");
+        row(xmsg::field_rotation, 3, 3, "%.2f");
+        row(xmsg::field_scale, 6, 1, "%.4g");
+        ui::help_on_hover(xmsg::field_help);
+        _fields_active = any_active;
+        if (commit) {
+            spirula::Sim3 want;
+            for (int k = 0; k < 3; k++) want.t[k] = _placement_fields[k];
+            euler_to(&_placement_fields[3], want.R);
+            want.s = std::max((double)_placement_fields[6], 1e-6);
+            const spirula::Sim3 n = d.view_frame();
+            set_placement(n * want * n.inverse(), xmsg::op_set_numbers);
+        }
+    }
+    ImGui::BeginDisabled(d.placement().is_identity());
+    if (ui::Button(xmsg::reset_placement, ImVec2(full, 0)))
+        set_placement(spirula::Sim3(), xmsg::op_reset);
+    ImGui::EndDisabled();
+
+    if (_levelling_touched) ui::TextDisabledWrapped(xmsg::note_levelling);
+    if (d.kind() == EditDoc::Kind::Splats) ui::TextDisabledWrapped(xmsg::note_sh);
 }
 
 }  // namespace gui

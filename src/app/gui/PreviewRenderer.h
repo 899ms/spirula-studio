@@ -76,7 +76,10 @@ public:
                     PreviewProjection proj, float sx, float sy,
                     float scene_radius, float view_dist,
                     const float view_target[3], bool show_cams,
-                    float frustum_scale, bool show_grid);
+                    float frustum_scale, bool show_grid,
+                    // How far an orthographic view's camera was pulled back
+                    // along its axis (ViewportPanel::ortho_pullback), 0 if not.
+                    float ortho_back = 0.0f);
 
     // Base frustum size (camhost::frustum_display_size, normalized frame).
     float base_camera_size() const { return _base_cam_size; }

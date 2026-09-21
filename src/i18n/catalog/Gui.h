@@ -9029,6 +9029,87 @@ SS_MSG(batch_plan_mesh_run,
     RU("{0}. Построить меш по прогону, обученному с {1}"),
     TR("{0}. {1} ile eğitilen çalıştırmadan ağ oluştur"));
 
+
+// ===========================================================================
+// The navigation gizmo
+// ===========================================================================
+
+SS_MSG(gizmo_help,
+    EN("Drag to orbit. Click an axis to look along it; click it again for the far side."),
+    JA("ドラッグで視点を回転します。軸をクリックするとその軸方向から見ます。もう一度クリックすると反対側からになります。"),
+    ZH_HANS("拖动以环绕视角。点击某个轴可沿该轴观察，再点一次则从另一侧观察。"),
+    ZH_HANT("拖曳以環繞視角。點選某個軸可沿該軸觀看，再點一次則從另一側觀看。"),
+    KO("드래그하면 시점이 회전합니다. 축을 클릭하면 그 축 방향에서 보고, 다시 클릭하면 반대쪽에서 봅니다."),
+    DE("Ziehen dreht die Ansicht. Ein Klick auf eine Achse blickt entlang dieser Achse, ein zweiter Klick von der Gegenseite."),
+    FR("Faites glisser pour tourner autour. Cliquez sur un axe pour regarder le long de celui-ci, et une seconde fois pour le côté opposé."),
+    ES("Arrastra para orbitar. Haz clic en un eje para mirar a lo largo de él; otro clic para el lado opuesto."),
+    PT("Arraste para orbitar. Clique em um eixo para olhar ao longo dele; clique de novo para o lado oposto."),
+    IT("Trascina per orbitare. Fai clic su un asse per guardare lungo di esso; un altro clic per il lato opposto."),
+    NL("Sleep om rond het model te draaien. Klik op een as om erlangs te kijken; klik nogmaals voor de andere kant."),
+    RU("Перетащите, чтобы вращать вид. Щёлкните по оси, чтобы смотреть вдоль неё; ещё раз — с обратной стороны."),
+    TR("Yörüngede dönmek için sürükleyin. Bir eksene tıklayınca o eksen boyunca bakılır; yeniden tıklayınca karşı taraftan."));
+
+SS_MSG(gizmo_zoom_help,
+    EN("Drag up or down to zoom."),
+    JA("上下にドラッグしてズームします。"),
+    ZH_HANS("上下拖动以缩放。"),
+    ZH_HANT("上下拖曳以縮放。"),
+    KO("위아래로 드래그해 확대·축소합니다."),
+    DE("Zum Zoomen nach oben oder unten ziehen."),
+    FR("Faites glisser vers le haut ou le bas pour zoomer."),
+    ES("Arrastra hacia arriba o abajo para acercar o alejar."),
+    PT("Arraste para cima ou para baixo para aproximar ou afastar."),
+    IT("Trascina in alto o in basso per ingrandire o ridurre."),
+    NL("Sleep omhoog of omlaag om te zoomen."),
+    RU("Перетащите вверх или вниз, чтобы приблизить или отдалить."),
+    TR("Yakınlaştırmak için yukarı ya da aşağı sürükleyin."));
+
+SS_MSG(gizmo_pan_help,
+    EN("Drag to pan."),
+    JA("ドラッグして視点を平行移動します。"),
+    ZH_HANS("拖动以平移视角。"),
+    ZH_HANT("拖曳以平移視角。"),
+    KO("드래그해 시점을 평행 이동합니다."),
+    DE("Zum Verschieben der Ansicht ziehen."),
+    FR("Faites glisser pour déplacer la vue."),
+    ES("Arrastra para desplazar la vista."),
+    PT("Arraste para deslocar a vista."),
+    IT("Trascina per spostare la vista."),
+    NL("Sleep om het beeld te verschuiven."),
+    RU("Перетащите, чтобы сдвинуть вид."),
+    TR("Görünümü kaydırmak için sürükleyin."));
+
+SS_MSG(gizmo_to_ortho,
+    EN("Switch to the orthographic view (numeric-pad 5)."),
+    JA("平行投影に切り替えます（テンキーの 5）。"),
+    ZH_HANS("切换到正交视图（数字键盘 5）。"),
+    ZH_HANT("切換到正交視圖（數字鍵盤 5）。"),
+    KO("직교 투영으로 전환합니다(숫자 패드 5)."),
+    DE("Zur orthografischen Ansicht wechseln (Ziffernblock 5)."),
+    FR("Passer à la vue orthographique (pavé numérique 5)."),
+    ES("Cambiar a la vista ortográfica (teclado numérico 5)."),
+    PT("Mudar para a vista ortográfica (teclado numérico 5)."),
+    IT("Passa alla vista ortografica (tastierino numerico 5)."),
+    NL("Overschakelen naar orthografische weergave (numeriek toetsenblok 5)."),
+    RU("Переключиться на ортографический вид (цифровая клавиатура 5)."),
+    TR("Ortografik görünüme geç (sayısal tuş takımı 5)."));
+
+SS_MSG(gizmo_to_perspective,
+    EN("Switch to the perspective view (numeric-pad 5)."),
+    JA("透視投影に切り替えます（テンキーの 5）。"),
+    ZH_HANS("切换到透视视图（数字键盘 5）。"),
+    ZH_HANT("切換到透視視圖（數字鍵盤 5）。"),
+    KO("원근 투영으로 전환합니다(숫자 패드 5)."),
+    DE("Zur perspektivischen Ansicht wechseln (Ziffernblock 5)."),
+    FR("Passer à la vue en perspective (pavé numérique 5)."),
+    ES("Cambiar a la vista en perspectiva (teclado numérico 5)."),
+    PT("Mudar para a vista em perspectiva (teclado numérico 5)."),
+    IT("Passa alla vista prospettica (tastierino numerico 5)."),
+    NL("Overschakelen naar perspectiefweergave (numeriek toetsenblok 5)."),
+    RU("Переключиться на перспективный вид (цифровая клавиатура 5)."),
+    TR("Perspektif görünüme geç (sayısal tuş takımı 5)."));
+
+
 }  // namespace gui
 }  // namespace msg
 }  // namespace i18n

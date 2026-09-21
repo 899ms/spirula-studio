@@ -107,8 +107,42 @@ public:
                      int& camera_model, float eye[3]) const;
     // Where the last draw put the image on screen, in ImGui coordinates.
     void image_rect(float& x, float& y, float& w, float& h) const;
+    // The same pose in the SHARED frame the camera navigates, which is where
+    // a placement is dragged: the model moves through it, the grid does not.
+    void nav_camera(int W, int H, float w2c[12], float& fx, float& fy,
+                    int& camera_model, float eye[3]) const;
+    // How far the orthographic emulation pulled the render camera back along
+    // its axis, in the frame view_camera / nav_camera report; 0 in perspective.
+    float ortho_pullback(bool shared) const;
+    // The orbit pivot, shared frame: what the view is looking at.
+    void nav_target(float out[3]) const {
+        for (int i = 0; i < 3; i++) out[i] = _cam.target[i];
+    }
     // A render is due: what a tool calls after changing what is drawn.
     void invalidate() { _dirty = true; }
+
+    // A placement under edit, model frame -> model frame, composed INSIDE the
+    // owner's: what the editor moves while the owner's alignment stays put.
+    void set_edit_transform(const float a[12]);
+    // Model -> shared with no edit applied: the frame a placement is made in.
+    void base_transform(float out[12]) const;
+    float world_grid_cell() const;
+    // The parsers' up->+Z guess (adopt_gauge). Placing a model means seeing
+    // the axes that get SAVED, which is with the guess switched off.
+    bool has_levelling() const { return !_align_identity; }
+    bool level_cameras() const { return _level_cameras; }
+    void set_level_cameras(bool on);
+
+    // Take the view along with a step of the shared frame (row-major 3x4
+    // similarity), then stand it upright again: the model stays where it was
+    // on screen and it is the grid that arrives under it.
+    void carry_view(const float step[12]);
+
+    // Look along a world axis (0..2, `negative` for the far side), switching
+    // to the orthographic view; and the switch on its own.
+    void snap_view(int axis, bool negative);
+    bool ortho() const { return _ortho; }
+    void set_ortho(bool on);
     // Where the centring menu's points come from when the user PICKS one, so
     // an edited model centres on what is left of it. Asked only on the pick:
     // a median per frame is a hiccup, and a centre is where you asked for it.
@@ -256,6 +290,34 @@ private:
     // The grid's cell in model units, from the same rule both backends use.
     float grid_cell() const;
     void draw_grid_overlay(float x, float y, int line) const;
+    // The navigation gizmo in the image's corner: drag to orbit, click an
+    // axis to look along it. True while it has the pointer.
+    bool gizmo_input(bool hovered_image);
+    void draw_gizmo() const;
+    void draw_overlays();
+    void animate_view(double now);
+    bool external_grid() const;
+    // Camera-to-world in the shared frame, pulled back when orthographic.
+    void render_c2w(float out[12]) const;
+    float ortho_back() const;
+
+    // Orthographic is a pinhole a long way off with a long lens: every
+    // renderer, primitive and selection test then works unchanged.
+    bool _ortho = false;
+    bool _ortho_auto = false;        // entered by an axis click: orbit leaves it
+    // A view change in flight (axis snap): rotation slerped, pivot distance kept.
+    bool _anim = false;
+    double _anim_t0 = 0.0;
+    float _anim_from[4] = {0, 0, 0, 1}, _anim_to[4] = {0, 0, 0, 1};
+    // Gizmo pointer state.
+    bool _giz_down = false, _giz_dragged = false, _giz_hover = false;
+    int _giz_hot = -1;               // 0..5: +X +Y +Z -X -Y -Z under the cursor
+    int _giz_button = 0;             // 0 none, 1 pan, 2 zoom (the side buttons)
+    float _giz_press[2] = {0, 0};
+    mutable int _giz_tip_on = -2;    // what the tooltip timer is running for
+    mutable double _giz_tip_since = 0.0;
+    float _m2s_edit[12] = {1,0,0,0, 0,1,0,0, 0,0,1,0};
+    float _m2s_base[12] = {1,0,0,0, 0,1,0,0, 0,0,1,0};
     ViewportInteractor* _interactor = nullptr;
     std::function<bool(dsparse::CenterTable&)> _center_provider;
     // The image rectangle of the last draw, which is the frame a tool's
@@ -293,7 +355,7 @@ private:
     float _frustum_scale = 1.0f;     // camera-frustum size multiplier
     // 0 = auto (see render_scale), 1 = 50%, 2 = 75%, 3 = 100%
     int _scale_idx = 0;
-    float _last_pose[10] = {};       // pos + rot + target, to spot motion
+    float _last_pose[11] = {};       // pos + rot + target + ortho, to spot motion
     // The pose (or camera model / FOV) changed during the last draw. Drives
     // the side-by-side link; note_motion sets it, draw clears it.
     bool _moved_last_draw = false;

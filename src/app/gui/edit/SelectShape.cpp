@@ -162,6 +162,7 @@ void OcclusionBuffer::build(const EditDoc& doc, const ViewProjection& view) {
     _W = std::max(1, (int)(view.W * _scale));
     _H = std::max(1, (int)(view.H * _scale));
     _z.assign((size_t)_W * _H, kFar);
+    _back = view.ortho_back;
 
     const float* pos = doc.positions();
     const float* rad = doc.radii();
@@ -195,7 +196,9 @@ bool OcclusionBuffer::visible(float px, float py, float depth, float tol) const 
     const int x = (int)(px * _scale), y = (int)(py * _scale);
     if (x < 0 || y < 0 || x >= _W || y >= _H) return true;
     const float z = _z[(size_t)y * _W + x];
-    return z >= kFar || depth <= z * (1.0f + tol) + 1e-6f;
+    // The slack is a share of the distance from the NAVIGATED eye, which in an
+    // orthographic view is a long way in front of the one that rendered.
+    return z >= kFar || depth <= z + tol * std::max(z - _back, 1e-6f) + 1e-6f;
 }
 
 

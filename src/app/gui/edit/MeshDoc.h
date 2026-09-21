@@ -60,6 +60,12 @@ public:
     void set_linked(bool on) override { _link = on; }
     std::string default_save_path(int target) const override;
     void revert_display() override;
+    spirula::Sim3 view_frame() const override {
+        return spirula::Sim3::from_3x4(_t2n);
+    }
+    bool normals(std::vector<float>& n, std::vector<float>& w) const override;
+    bool colours(std::vector<float>& rgb) const override;
+    bool colours_available() const override;
 
     // The other files one meshing run wrote: the same surface in another
     // format, so a face deleted here can be deleted there too.

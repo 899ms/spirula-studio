@@ -2,9 +2,12 @@
 
 #include "app/gui/edit/EditSession.h"
 
+#include "app/gui/Layout.h"
 #include "app/gui/ViewportPanel.h"
 #include "i18n/Message.h"
+#include "app/gui/edit/WorldGrid.h"
 #include "i18n/catalog/Edit.h"
+#include "i18n/catalog/EditTransform.h"
 
 #include "imgui.h"
 
@@ -15,6 +18,8 @@
 #include <numeric>
 
 namespace msg = spirula::i18n::msg::edit;
+namespace xmsg = spirula::i18n::msg::xform;
+using spirula::Sim3;
 
 namespace gui {
 
@@ -35,7 +40,26 @@ void EditSession::open(std::unique_ptr<EditDoc> doc, ViewportPanel* panel) {
     // Opening in Navigate: the first thing anyone does with a model they have
     // just opened is look at it from somewhere else.
     _tool.set_id(ToolId::Navigate);
+    _tab = 0;
+    _tab_force = true;
+    _xform.cancel();
+    _pick = Pick::None;
+    _moved_ever = false;
+    _levelling_touched = false;
+    _saved_over_source = false;
+    _centres = Centres{};
+    _attrs.clear();
+    _attrs_layer = -1;
+    _hist_attr = -1;
+    _range_set = false;
+    _samples.clear();
+    _colours.clear();
+    _adjust_head = -1;
+    _adjust_live = false;
     if (_doc) _doc->mark_geometry_dirty();
+    _seen_placement = Sim3();
+    _seen_head = 0;
+    push_placement();
 }
 
 void EditSession::close() {
@@ -48,10 +72,18 @@ void EditSession::close() {
     _comp = Components{};
     _pending.reset();
     _fly_block_key = 0;
+    _xform.cancel();
+    _pick = Pick::None;
     if (_panel) {
         _panel->set_interactor(nullptr);
         _panel->set_center_provider(nullptr);
+        // The placement was the editor's to show; what the pane goes back to
+        // is the file, as it was read.
+        static const float kIdentity[12] = {1,0,0,0, 0,1,0,0, 0,0,1,0};
+        _panel->set_edit_transform(kIdentity);
+        if (_levelling_touched) _panel->set_level_cameras(_levelling_was);
     }
+    _levelling_touched = false;
     if (_doc) _doc->revert_display();
     if (_panel) _panel->invalidate();
     _panel = nullptr;
@@ -86,6 +118,7 @@ bool EditSession::view(ViewProjection& out) const {
                         out.camera_model, out.eye);
     out.cx = 0.5f * (float)out.W;
     out.cy = 0.5f * (float)out.H;
+    out.ortho_back = _panel->ortho_pullback(false);
     return true;
 }
 
@@ -106,6 +139,8 @@ void EditSession::set_layer(int i) {
     _occ_dirty = true;
     _comp = Components{};
     _pending.reset();
+    _adjust_head = -1;
+    _adjust_live = false;
     _doc->mark_display_dirty();
 }
 
@@ -116,12 +151,68 @@ void EditSession::set_layer(int i) {
 
 bool EditSession::on_viewport_input(const ViewportInput& in) {
     if (!_doc || busy()) return false;
+
+    // A running operator has the pointer whatever tool started it.
+    if (_xform.active()) {
+        XformFrame f;
+        if (!xform_frame(f)) {
+            _xform.cancel();
+            push_placement();
+            return true;
+        }
+        const TransformTool::Result r = _xform.update(in, f);
+        const Sim3 base = base_frame();
+        const Sim3 preview = base.inverse() * _xform.delta() * base * _xform_from;
+        if (r == TransformTool::Result::Confirmed) {
+            if (!_xform.delta().is_identity()) {
+                const spirula::i18n::Msg& name =
+                    _xform.kind() == XformKind::Move ? xmsg::op_move
+                    : _xform.kind() == XformKind::Rotate ? xmsg::op_rotate
+                                                         : xmsg::op_scale;
+                set_placement(preview, name);
+            } else {
+                push_placement();
+            }
+        } else if (r == TransformTool::Result::Cancelled) {
+            push_placement();
+        } else if (_panel) {
+            float a[12];
+            preview.to_3x4(a);
+            _panel->set_edit_transform(a);
+        }
+        return true;
+    }
+
+    if (_tool.id() == ToolId::Transform) {
+        if (_pick != Pick::None) {
+            if (in.hovered && in.clicked) pick_align(in.x, in.y);
+            return in.down || in.clicked;
+        }
+        XformFrame f;
+        _xform_hot = -1;
+        if (in.hovered && xform_frame(f)) {
+            _xform_hot = _xform.hit_handle(_xform_mode, f, in.x, in.y);
+            if (_xform_hot >= 0 && in.clicked) {
+                _xform_from = _doc->placement();
+                const int axis = _xform_hot < 3 ? _xform_hot
+                               : _xform_hot < 6 ? _xform_hot - 3 : -1;
+                _xform.begin(_xform_mode, f, in.x, in.y, /*drag=*/true, axis,
+                             _xform_hot >= 3 && _xform_hot < 6);
+                return true;
+            }
+        }
+        // Off the handles the left button is still the camera's.
+        return false;
+    }
+
     ShapeStroke s;
     bool consumed = false;
     if (_tool.update(in, s, consumed)) {
         if (_tool.id() == ToolId::Piece)
             select_component_under(s.pts[0], s.pts[1],
                                    combine_now(in.shift, in.ctrl));
+        else if (_tool.id() == ToolId::Eyedropper)
+            pick_colour(s.pts[0], s.pts[1], in.shift);
         else
             apply_stroke(s, in);
     }
@@ -130,7 +221,27 @@ bool EditSession::on_viewport_input(const ViewportInput& in) {
 
 void EditSession::draw_viewport_overlay(const ViewportOverlay& v) {
     if (!_doc) return;
-    _tool.draw_overlay(v.dl, ImVec2(v.x, v.y));
+    const ImVec2 origin(v.x, v.y);
+    XformFrame f;
+    const bool have = xform_frame(f);
+    if (have && v.grid && draws_world_grid()) {
+        float target[3] = {0, 0, 0};
+        if (_panel) _panel->nav_target(target);
+        const double focus[3] = {target[0], target[1], target[2]};
+        draw_world_grid(v.dl, origin, f.cam, saved_to_shared(), v.grid_cell, focus);
+    }
+    if (have && _xform.active()) {
+        _xform.draw_overlay(v.dl, origin, f);
+        // Beside the pointer, where the eyes already are.
+        const std::string text = _xform.readout(f);
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        const ImVec2 at(m.x + px(18.0f), m.y + px(14.0f));
+        v.dl->AddText(ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 220), text.c_str());
+        v.dl->AddText(at, IM_COL32(255, 255, 255, 255), text.c_str());
+    } else if (have && _tool.id() == ToolId::Transform && _pick == Pick::None) {
+        _xform.draw_handles(v.dl, origin, _xform_mode, f, _xform_hot);
+    }
+    _tool.draw_overlay(v.dl, origin);
 }
 
 void EditSession::apply_stroke(const ShapeStroke& s, const ViewportInput& in) {
@@ -461,6 +572,9 @@ void EditSession::poll() {
         _save_worker.join();
         if (_save_error.empty()) {
             _doc->mark_saved();
+            if (_save_path == _doc->source_path() ||
+                _save_path == _doc->default_save_path(_save_target))
+                _saved_over_source = true;
             _status = spirula::i18n::format(msg::saved_to,
                                             {_doc->default_save_path(_save_target)});
             _status_err = false;
@@ -475,6 +589,10 @@ void EditSession::poll() {
         return;
     }
     handle_keys();
+    if (!_xform.active()) {
+        follow_history();
+        push_placement();
+    }
     // The occlusion buffer belongs to one camera and one live set; either
     // moving invalidates it, and rebuilding is the next selection's business
     // rather than this frame's.
@@ -528,6 +646,7 @@ void EditSession::save_to(int target, const std::string& path) {
     if (!_doc || path.empty() || busy()) return;
     if (_save_worker.joinable()) _save_worker.join();
     _save_error.clear();
+    _save_path = path;
     _save_done = 0;
     _save_total = std::max(1, _doc->save_steps(target));
     _save_busy = true;

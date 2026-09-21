@@ -338,6 +338,33 @@ private:
 
 }  // namespace
 
+namespace {
+
+class PlacementOp : public EditOp {
+public:
+    PlacementOp(const spirula::Sim3& was, const spirula::Sim3& next,
+                std::string label, bool carried)
+        : _was(was), _next(next), _label(std::move(label)), _carried(carried) {}
+    bool carries_view() const override { return _carried; }
+    void apply(EditDoc& doc) override { doc.set_placement(_next); }
+    void undo(EditDoc& doc) override { doc.set_placement(_was); }
+    std::string label() const override { return _label; }
+    size_t bytes() const override { return sizeof *this + _label.size(); }
+
+private:
+    spirula::Sim3 _was, _next;
+    std::string _label;
+    bool _carried;
+};
+
+}  // namespace
+
+std::unique_ptr<EditOp> make_placement_op(EditDoc& doc, const spirula::Sim3& next,
+                                          std::string label, bool carries_view) {
+    return std::make_unique<PlacementOp>(doc.placement(), next, std::move(label),
+                                         carries_view);
+}
+
 std::unique_ptr<EditOp> make_setting_op(std::function<void(bool)> apply,
                                         std::string label,
                                         std::shared_ptr<const SelectRecipe> recipe) {

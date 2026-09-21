@@ -12,6 +12,7 @@
 // and its cameras -- and every tool works on the one that is current.
 
 #include "app/gui/edit/Selection.h"
+#include "core/Similarity.h"
 #include "data/SceneCenter.h"
 #include "i18n/Message.h"
 
@@ -21,6 +22,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+namespace spirula { struct SplatCloud; }
 
 namespace gui {
 
@@ -43,6 +46,9 @@ struct EditOp {
     virtual size_t bytes() const = 0;
     // Set on the steps that are a selection, null on the rest.
     virtual std::shared_ptr<const SelectRecipe> recipe() const { return {}; }
+    // A placement made with the view taken along (an alignment): walking the
+    // history across it has to take the view back the same way.
+    virtual bool carries_view() const { return false; }
 };
 
 // What "Save a copy" can write this document as. `ext` is the extension a
@@ -115,7 +121,52 @@ public:
         return at(layer).alive;
     }
     const Selection& sel_of(int layer) const { return at(layer).sel; }
+    const float* positions_of(int layer) const { return at(layer).pos.data(); }
     int64_t alive_count_of(int layer) const { return at(layer).alive_count; }
+
+    // ---- placement ----
+
+    // One similarity of the positions() frame for every layer: the scene is
+    // rigid. The VIEWER applies it; nothing here moves until a save bakes it.
+    const spirula::Sim3& placement() const { return _placement; }
+    void set_placement(const spirula::Sim3& p) { _placement = p; _rev++; }
+    // File coordinates into the frame positions() are in.
+    virtual spirula::Sim3 view_frame() const = 0;
+    // The placement as the file's own coordinates see it: what a save writes.
+    spirula::Sim3 file_placement() const {
+        const spirula::Sim3 n = view_frame();
+        return n.inverse() * _placement * n;
+    }
+    // A unit normal and a weight per element of layer 0, in the positions()
+    // frame, where the document has them: a flat Gaussian, a mesh vertex.
+    virtual bool normals(std::vector<float>& n, std::vector<float>& w) const {
+        (void)n; (void)w;
+        return false;
+    }
+    // ---- raw material for the attribute table (Attributes.h) ----
+    // A display-referred, UNCLAMPED colour per element of the current layer.
+    virtual bool colours(std::vector<float>& rgb) const {
+        (void)rgb;
+        return false;
+    }
+    // The same question without the answer, for a panel deciding what to show.
+    virtual bool colours_available() const { return false; }
+    // The Gaussians themselves, when that is what the elements are.
+    virtual const spirula::SplatCloud* splats() const { return nullptr; }
+    // Camera centres in the positions() frame, [n, 3]; empty without cameras.
+    virtual std::vector<float> camera_centres() const { return {}; }
+
+    // How much each element of layer 0 is part of a SURFACE, 0..1, or null
+    // when they all are. A trained model is full of faint, oversized haze
+    // that no floor should be fitted through.
+    virtual const float* solidity() const { return nullptr; }
+
+    // Which way the people who took the photos thought was up, same frame:
+    // the mean of the cameras' own up axes. False without cameras.
+    virtual bool up_hint(float up[3]) const {
+        (void)up;
+        return false;
+    }
 
     // ---- history ----
     // Runs `op` and puts it on the stack; drops the oldest entries when the
@@ -140,8 +191,11 @@ public:
     // ---- what the ops write through ----
     void set_alive(int64_t i, bool a);
     void set_selection(const std::vector<uint8_t>& w);
-    void mark_geometry_dirty() { _geom_dirty = true; _display_dirty = true; }
-    void mark_display_dirty() { _display_dirty = true; }
+    void mark_geometry_dirty() { _geom_dirty = true; _display_dirty = true; _rev++; }
+    void mark_display_dirty() { _display_dirty = true; _rev++; }
+    // Bumped by every change to what is live or selected: what a cache of
+    // anything derived from either is keyed on.
+    uint64_t revision() const { return _rev; }
 
     bool dirty() const { return _edited; }
     void mark_saved() { _edited = false; }
@@ -202,6 +256,7 @@ private:
     std::vector<Layer> _layers;
     int _cur = 0;
     std::string _source;
+    spirula::Sim3 _placement;
 
     std::vector<std::unique_ptr<EditOp>> _ops;
     int _head = 0;
@@ -209,6 +264,7 @@ private:
     bool _edited = false;
     bool _geom_dirty = true;
     bool _display_dirty = true;
+    uint64_t _rev = 1;
 };
 
 
@@ -234,5 +290,11 @@ std::unique_ptr<EditOp> make_select_op(EditDoc& doc, std::vector<uint8_t> next,
 std::unique_ptr<EditOp> make_setting_op(std::function<void(bool)> apply,
                                         std::string label,
                                         std::shared_ptr<const SelectRecipe> recipe);
+
+// A placement change. Both ends are stored rather than the step between
+// them, so walking the history back and forth never accumulates rounding.
+std::unique_ptr<EditOp> make_placement_op(EditDoc& doc, const spirula::Sim3& next,
+                                          std::string label,
+                                          bool carries_view = false);
 
 }  // namespace gui

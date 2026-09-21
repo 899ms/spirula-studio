@@ -123,12 +123,31 @@ namespace {
 
 // Rewrite one of them, dropping the faces `dropped` names. Its own colours,
 // UVs and texture ride along untouched.
-void filter_sibling(const std::string& path, const FaceCut& cut) {
+void move_mesh(meshing::MeshData& m, const spirula::Sim3& T) {
+    if (T.is_identity()) return;
+    for (auto& v : m.V) {
+        const double p[3] = {v[0], v[1], v[2]};
+        double q[3];
+        T.apply(p, q);
+        v = {(float)q[0], (float)q[1], (float)q[2]};
+    }
+    for (auto& nrm : m.N) {
+        const double p[3] = {nrm[0], nrm[1], nrm[2]};
+        double q[3];
+        T.rotate(p, q);
+        nrm = {(float)q[0], (float)q[1], (float)q[2]};
+    }
+}
+
+void filter_sibling(const std::string& path, const FaceCut& cut,
+                    const spirula::Sim3& moved) {
     meshing::MeshData m;
     std::string err;
     if (!meshing::read_mesh(path, m, err)) throw std::runtime_error(err);
     meshing::MeshData out;
+    // Matched in the coordinates the file was written in, moved after.
     mesh_drop_faces(m, cut, out);
+    move_mesh(out, moved);
     meshing::MeshColorMode mode = meshing::MeshColorMode::None;
     if (!out.UV.empty() && !out.texture.empty())
         mode = meshing::MeshColorMode::Texture;
@@ -354,6 +373,8 @@ void MeshDoc::save(int target, const std::string& path,
     out.tex_width = _m.tex_width;
     out.tex_height = _m.tex_height;
     out.texture = _m.texture;
+    const spirula::Sim3 moved = file_placement();
+    move_mesh(out, moved);
 
     meshing::MeshColorMode mode = meshing::MeshColorMode::None;
     if (!out.UV.empty() && !out.texture.empty())
@@ -375,11 +396,50 @@ void MeshDoc::save(int target, const std::string& path,
     // leaves them too -- matched by position, since the atlas renumbers.
     if (!_link || _siblings.empty()) return;
     const FaceCut cut = dropped_faces();
-    if (cut.empty()) return;
+    if (cut.empty() && moved.is_identity()) return;
     for (const std::string& s : _siblings) {
-        filter_sibling(s, cut);
+        filter_sibling(s, cut, moved);
         if (progress) (*progress)++;
     }
+}
+
+bool MeshDoc::colours_available() const {
+    return textured(_m) || _m.C.size() == _m.V.size();
+}
+
+bool MeshDoc::colours(std::vector<float>& rgb) const {
+    const bool has_uv = textured(_m);
+    if (!has_uv && _m.C.size() != _m.V.size()) return false;
+    rgb.resize(_m.V.size() * 3);
+    for (size_t i = 0; i < _m.V.size(); i++) {
+        const std::array<unsigned char, 3> c =
+            has_uv ? sample_texture(_m, i) : _m.C[i];
+        for (int k = 0; k < 3; k++) rgb[i * 3 + k] = c[(size_t)k] / 255.0f;
+    }
+    return true;
+}
+
+bool MeshDoc::normals(std::vector<float>& n, std::vector<float>& w) const {
+    if (_m.N.size() != _m.V.size()) return false;
+    const size_t num = _m.V.size();
+    n.resize(num * 3);
+    w.assign(num, 0.0f);
+    for (size_t i = 0; i < num; i++)
+        for (int r = 0; r < 3; r++) n[i * 3 + r] = _m.N[i][r];
+    // A vertex speaks for a third of every face it is on.
+    for (const auto& f : _m.F) {
+        const auto& a = _m.V[(size_t)f[0]];
+        const auto& b = _m.V[(size_t)f[1]];
+        const auto& c = _m.V[(size_t)f[2]];
+        const float e1[3] = {b[0]-a[0], b[1]-a[1], b[2]-a[2]};
+        const float e2[3] = {c[0]-a[0], c[1]-a[1], c[2]-a[2]};
+        const float cx = e1[1]*e2[2] - e1[2]*e2[1];
+        const float cy = e1[2]*e2[0] - e1[0]*e2[2];
+        const float cz = e1[0]*e2[1] - e1[1]*e2[0];
+        const float area = 0.5f * std::sqrt(cx*cx + cy*cy + cz*cz) / 3.0f;
+        for (int k = 0; k < 3; k++) w[(size_t)f[k]] += area;
+    }
+    return true;
 }
 
 }  // namespace gui
