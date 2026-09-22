@@ -8,6 +8,7 @@
 
 #include "app/gui/render/RenderProject.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace gui::render {
@@ -59,6 +60,15 @@ private:
 // Keys deleted from `before`: move the rest of `p` (poses, not lenses) so the
 // camera passes where it did. A radian of turn weighs `unit` of distance.
 void refit_keys(RenderProject& p, const RenderProject& before, double unit);
+
+// How much the camera accelerates over the move, turning included (a radian
+// weighs `unit`), summed over 30 samples a second: what smoothing lowers.
+double motion_energy(const RenderProject& p, double unit);
+// Key times part of the way to where the speed between keys -- turning
+// included -- changes smoothly from gap to gap. The ends, the stops and keys
+// not `movable` keep their times, and each run between them its length.
+void smooth_key_speeds(RenderProject& p, const std::vector<uint8_t>& movable, double strength,
+                       double unit);
 
 // The quaternion of `a` then `b`, and a rotation of a vector, (w, x, y, z).
 void quat_mul(const double a[4], const double b[4], double out[4]);

@@ -26,6 +26,10 @@ comparison, not a stage, and does not offer it. A finished training run offers
 **Render photo or video** and **Edit the model** under *Train again*: both open
 the run's model on the viewer screen and go straight into the mode.
 
+A camera project dropped on the window opens its first model on the viewer
+screen, the render on it with the project, and so the other models it names
+(`GuiApp::open_render_project`).
+
 Editing and rendering switch into each other from either panel. The editor
 stays open behind the render, so what it deleted or moved is what is filmed.
 
@@ -119,8 +123,19 @@ path (`refit_keys`): Levenberg-Marquardt on a numeric Jacobian over each key's
 position and its aim point or a rotation vector, matching position and
 rotation at 12 samples per key, a radian weighing one scene unit; the times
 and lenses stay. Deleting from the panel or the timeline takes the key out and
-nothing else. *Smooth keyframes* pulls keys towards their neighbours' line
-with Taubin's second outward pass so a loop does not shrink.
+nothing else. *Smooth keyframes* makes the motion smoother, moving what
+*What* leaves free: the poses at their times, pulled towards their
+neighbours' line with Taubin's second outward pass so a loop does not
+shrink; the times along the same path, so the speed between keys -- the way
+from one to the next, turning included, over its time -- changes gradually
+from gap to gap, each run between keys that keep their time (the ends, the
+stops, keys not selected) keeping its length (`smooth_key_speeds`); or both.
+Evening the gaps instead, as it first did, made a fitted flight jerkier: its
+keys crowd where the path bends, so equal times made unequal speeds. A press
+is kept only if the camera accelerates less over the whole move
+(`motion_energy`, 30 samples a second, a radian weighing the scene's size);
+failing that it is tried at half the strength, and at worst changes nothing
+and says so.
 
 ## Flying a path
 
@@ -195,9 +210,15 @@ stay deleted: the rewrite starts from the editor's survivors.
 
 A mesh under a fisheye or equirectangular lens is projected per vertex, so a
 long triangle keeps straight edges where the lens would bend them; the splats
-and the points are exact. Splats render with the primitive the viewport shows
-them with (3DGUT follows a wide lens where 3DGS smears at the edge) unless a
-model's *Render as* says otherwise.
+and the points are exact. Splats render with the primitive *Render as* names,
+*Automatic* unless one is chosen
+(`resolve_primitive`): 3DGUT where 3DGS smears -- the whole sphere, or a lens
+whose distortion folds over itself somewhere in the frame, which
+`lens_needs_ut` finds by the engine's `is_valid_distortion` on a grid twice
+the frame's size -- and elsewhere what the model was trained as, Mip or 3DGS,
+since 3DGUT cuts a large splat near the camera along its square tiles. The
+viewport, which never distorts, keeps its own three and the model's own
+default.
 
 The keys are drawn with the web viewer's frustum (`data/FrustumTemplate.h`,
 viewer/js/dataset.js `frustumTemplate`, which the viewport's own dataset
@@ -240,13 +261,27 @@ before the dips and wipes were one each read their colour and direction
 across.
 
 How a shot **leaves** is, by default, as the next one arrives: the next
-shot's transition takes both at once, as above. It can leave its own way
+shot's transition takes both at once, as above -- the last one stays to the
+end. It can leave its own way
 instead -- any transition but a dip, over its own time, starting an *offset*
 after the next shot starts -- and then each model is drawn through its own
 half on its own: before the next arrives (a negative offset leaves the
 background between), overlapping it (a positive one keeps both on screen), or
 exactly with it. `shot_mix` says, for any moment, which shot is arriving and
 which leaving and how far each is; the frame and the timeline both read it.
+The last shot's own way out ends *offset* after the video does, and may be a
+dip: into its colour, held to the end -- the fade out. The first shot's dip
+comes from its colour, since nothing is before it -- the fade in. So the
+project-wide fades are the shots' now; a file from before them has its fades
+turned into those two where the shots have none (`settle_shots`), and a fade
+that cannot be is kept and shown until it is set to none.
+
+A transition with nothing on its other side -- the first shot's, one into or
+out of a gap, and every half of a way out of its own -- has the whole change
+to itself. The 3D ones start where their half would and end where it would
+(`fx_solo_time`), where before they waited through the half meant for the
+other model, black for up to a third; the picture ones ease out rather than
+in, so they are under way from the first frame.
 
 The 3D ones (sweep on) move the models' own elements: one set of formulas in
 `TransitionFx.h`, run on the host per splat (means, opacities and scales
@@ -267,7 +302,11 @@ way out; `RenderSession::fx_frame`). As the camera sees it, the frame is the
 camera's at that moment: dust falls and rain drops down the screen and a
 sweep climbs it, while a spiral turns and a ripple spreads about the view's
 own axis, at the scene's depth -- round the middle of the picture, however it
-is framed and wherever the camera stands. Dust, rain and the spiral default
+is framed and wherever the camera stands. What the camera does not see is
+not ordered (`FxView`: the quantiles are of the elements in the frame, when
+there are enough of them), and the moves are as wide as the picture at the
+scene's depth rather than the scene, so a long lens, or a camera inside the
+scene, sees the change from its start. Dust, rain and the spiral default
 to the camera; the sweep and the ripple to the world, where a level and a
 wave over the ground look like what they are. Every one begins with the old
 model exactly as it was and ends with the new one exactly as it is, outliers
@@ -331,6 +370,14 @@ stretch. An MP4 is raw RGB piped into an encoder process, chosen per size:
   correct and about 2.5 times the size.
 - Neither: frames and GIF still work, and the panel says why the rest does not.
 
+A save or a render asks where with the folder and the name filled in --
+`renders/` beside the model, made if it is not there yet, since a picker
+handed a missing folder opens wherever it last was; and the project's own
+name, or the model's past the names every run shares (`splat`,
+`step-*.ckpt`, `sparse/0`), with the extension the output needs (Windows is
+told it as the default extension). Quitting with a camera move unsaved asks:
+save over its file, save it as, discard, or stay.
+
 An equirectangular video is tagged as 360 (Spherical Video V1 and V2). Its
 sizes are listed as 2:1, and the panel warns when a key's lens is
 equirectangular and the size is not. *Render* with no file chosen asks for one,
@@ -377,8 +424,11 @@ constant speed, per-key looks and their JSON, the refit after a deletion (an
 orbit missing a key comes back to within a third of its gap), transition
 settings and the older names they replaced, a shot's way out and camera
 setting in the file, the quantile lookups, every 3D transition starting and
-ending exactly at rest, who is on screen when (`shot_mix`: crossfades, a
-first shot arriving from nothing, leaving early, overlapping, cutting out),
+ending exactly at rest, and with nothing on the other side starting at once
+and still ending at rest, who is on screen when (`shot_mix`: crossfades, a
+first shot arriving from nothing, leaving early, overlapping, cutting out,
+the last shot's way out at the end), older fades becoming the shots', which
+lenses want 3DGUT,
 the flight fit (still ends trimmed, a stop kept as flown and dropped between,
 the path followed within the tolerance, more detail keeping more keys), and a
 GIF read back through a decoder of its own. The rest was

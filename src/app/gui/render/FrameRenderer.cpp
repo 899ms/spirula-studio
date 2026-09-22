@@ -270,7 +270,7 @@ struct FrameRenderer::Slot {
     spirula::Sim3 pts_at;
     bool pts_valid = false;
     SceneCore core;
-    double q_key[12] = {};
+    double q_key[21] = {};
     FxGeo q;
     bool q_valid = false;
 
@@ -433,28 +433,57 @@ bool FrameRenderer::scene_core(int source, SceneCore& out) {
 }
 
 bool FrameRenderer::scene_quantiles(int source, const double centre[3], const double up[3],
-                                    const double e1[3], const double e2[3], FxGeo& q) {
+                                    const double e1[3], const double e2[3], FxGeo& q,
+                                    const FxView* view) {
     SceneCore core;
     if (!scene_core(source, core)) return false;
     Slot& s = *_slots[(size_t)source];
-    const double key[12] = {centre[0], centre[1], centre[2], up[0], up[1], up[2],
-                            e1[0], e1[1], e1[2], e2[0], e2[1], e2[2]};
+    double key[21] = {centre[0], centre[1], centre[2], up[0], up[1], up[2],
+                      e1[0], e1[1], e1[2], e2[0], e2[1], e2[2]};
+    if (view) {
+        for (int k = 0; k < 3; k++) { key[12 + k] = view->pos[k]; key[15 + k] = view->fwd[k]; }
+        key[18] = view->tx;
+        key[19] = view->ty;
+        key[20] = view->cone + 1.0;
+    }
     if (s.q_valid && std::memcmp(key, s.q_key, sizeof key) == 0) {
         std::memcpy(q.qh, s.q.qh, sizeof q.qh);
         std::memcpy(q.qa, s.q.qa, sizeof q.qa);
         std::memcpy(q.qr, s.q.qr, sizeof q.qr);
         return true;
     }
-    const size_t m = s.pts.size() / 3;
+    const size_t all = s.pts.size() / 3;
+    // What the camera sees, when it sees enough to go by.
+    std::vector<size_t> seen;
+    if (view) {
+        const double cos_cone = std::cos(view->cone);
+        for (size_t i = 0; i < all; i++) {
+            const double d[3] = {s.pts[i*3] - view->pos[0], s.pts[i*3+1] - view->pos[1],
+                                 s.pts[i*3+2] - view->pos[2]};
+            const double z = d[0]*view->fwd[0] + d[1]*view->fwd[1] + d[2]*view->fwd[2];
+            if (view->cone > 0.0) {
+                const double len = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+                if (z >= cos_cone * len) seen.push_back(i);
+                continue;
+            }
+            if (z <= 0.0) continue;
+            const double x = d[0]*view->right[0] + d[1]*view->right[1] + d[2]*view->right[2];
+            const double y = d[0]*view->up[0] + d[1]*view->up[1] + d[2]*view->up[2];
+            if (std::fabs(x) <= view->tx * z && std::fabs(y) <= view->ty * z) seen.push_back(i);
+        }
+    }
+    const bool subset = seen.size() >= 64;
+    const size_t m = subset ? seen.size() : all;
     std::vector<float> h(m), a(m), r(m);
-    for (size_t i = 0; i < m; i++) {
+    for (size_t j = 0; j < m; j++) {
+        const size_t i = subset ? seen[j] : j;
         const double d[3] = {s.pts[i*3] - centre[0], s.pts[i*3+1] - centre[1],
                              s.pts[i*3+2] - centre[2]};
         const double x1 = d[0]*e1[0] + d[1]*e1[1] + d[2]*e1[2];
         const double x2 = d[0]*e2[0] + d[1]*e2[1] + d[2]*e2[2];
-        h[i] = (float)(d[0]*up[0] + d[1]*up[1] + d[2]*up[2]);
-        a[i] = (float)x1;
-        r[i] = (float)std::sqrt(x1*x1 + x2*x2);
+        h[j] = (float)(d[0]*up[0] + d[1]*up[1] + d[2]*up[2]);
+        a[j] = (float)x1;
+        r[j] = (float)std::sqrt(x1*x1 + x2*x2);
     }
     auto table = [&](std::vector<float>& v, float* out) {
         std::sort(v.begin(), v.end());
@@ -522,7 +551,8 @@ void FrameRenderer::submit(Pass& p) {
     q.distortion = kTierNames[tier];
     for (int k = 0; k < 8; k++) q.dist[k] = tier ? c.lens.dist[k] : 0.0f;
     q.raw = true;
-    q.primitive = style.primitive.empty() ? s.view.primitive : style.primitive;
+    q.primitive = resolve_primitive(style.primitive, s.view.cfg.primitive, c.lens, _spec.width,
+                                    _spec.height);
     q.sh_degree = style.sh_degree;
 
     const bool effect = l.grow != 1.0f || l.fade_in < 1.0f || l.clip != 0 || l.fx.kind != 0;

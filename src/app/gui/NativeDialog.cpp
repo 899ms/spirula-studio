@@ -4,6 +4,7 @@
 
 #include "app/gui/Subprocess.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -91,6 +92,9 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     dlg->SetOptions(opts);
     if (saving && !r.suggested.empty())
         dlg->SetFileName(widen(r.suggested).c_str());
+    // A name typed without its extension gets the first one offered.
+    if (saving && !r.extensions.empty() && r.extensions[0].size() > 1)
+        dlg->SetDefaultExtension(widen(r.extensions[0].substr(1)).c_str());
 
     const std::wstring title = widen(r.title);
     if (!title.empty()) dlg->SetTitle(title.c_str());
@@ -114,8 +118,11 @@ std::vector<std::string> platform_pick(const Request& r, NativeDialog::Job&) {
     }
 
     if (!r.start_dir.empty()) {
+        // The shell parses backslashes only; a path joined here may mix both.
+        std::string dir = r.start_dir;
+        std::replace(dir.begin(), dir.end(), '/', '\\');
         IShellItem* item = nullptr;
-        if (SUCCEEDED(SHCreateItemFromParsingName(widen(r.start_dir).c_str(),
+        if (SUCCEEDED(SHCreateItemFromParsingName(widen(dir).c_str(),
                                                   nullptr,
                                                   IID_PPV_ARGS(&item)))) {
             dlg->SetFolder(item);

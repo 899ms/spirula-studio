@@ -76,6 +76,28 @@ inline float local(float t, float s0, float w) { return sat((t - s0 * (1.0f - w)
 inline float phase(float t, float a, float b) { return sat((t - a) / (b - a)); }
 }  // namespace fxd
 
+// A transition with nothing on its other side has the whole change to
+// itself: arriving it starts where its half would, leaving it ends where
+// its half would. `t` of the change into the `t` fx_apply takes.
+inline float fx_solo_time(int kind, bool in, float t, const float prm[2]) {
+    float a = 0.0f, b = 1.0f;
+    switch (kind) {
+        case 8: a = 0.25f; b = 0.8f; break;
+        case 9: a = 0.3f; b = 0.7f; break;
+        case 10: a = 0.35f; b = 0.65f; break;
+        case 11: a = 0.1f; b = 0.6f; break;
+        case 13: {
+            // The front a width short of the nearest, past the furthest.
+            const float w = std::fmax(prm[1], 0.02f);
+            a = w / (1.0f + 4.0f * w);
+            b = (1.0f + 3.0f * w) / (1.0f + 4.0f * w);
+            break;
+        }
+        default: break;
+    }
+    return in ? a + t * (1.0f - a) : t * b;
+}
+
 // `kind` is a Transition; `in` the model arriving. `d` is the displacement,
 // in the positions' units.
 inline void fx_apply(int kind, bool in, float t, const float prm[2], const FxGeo& g,

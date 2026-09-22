@@ -183,17 +183,20 @@ void test_json_and_moves() {
                q.keys[i].hold == p.keys[i].hold && (i == 0 || q.keys[i].own_lens == p.keys[i].own_lens);
     same = same && q.keys[1].lens == p.keys[1].lens && q.shots.size() == 2 &&
            q.shots[1].transition == Transition::Sweep && q.sources[1].style.point_style == PointStyle::Sphere &&
-           q.fade_out.colour == FadeColour::White && q.output.kind == OutputKind::Frames &&
+           q.fade_out.colour == FadeColour::None && q.shots[1].exit.own &&
+           q.shots[1].exit.transition == Transition::Dip && q.shots[1].exit.colour[0] == 1.0f &&
+           q.output.kind == OutputKind::Frames &&
            q.output.codec == Codec::Av1 && q.output.format == ImageFormat::PngAlpha &&
            q.motion.curve == Curve::CatmullRom && q.motion.loop &&
            q.sources[0].style.primitive == "3dgut";
-    check(same, "a project survives its JSON");
+    check(same, "a project survives its JSON, an older fade out as the last shot's dip out");
     const RenderProject old = project_from_json(
         "{\"format\":\"spirula-render\",\"version\":1,\"motion\":{\"smooth\":true},"
         "\"output\":{\"image_format\":\"png\",\"transparent\":true}}");
     check(old.motion.curve == Curve::CatmullRom && old.output.format == ImageFormat::PngAlpha,
           "an older project keeps its curve and its transparency");
-    check(project_to_json(q) == project_to_json(p), "and writes back byte for byte");
+    check(project_to_json(project_from_json(project_to_json(q))) == project_to_json(q),
+          "and, once read, writes back byte for byte");
 
     // Turning the whole path keeps every camera aimed at the turned target.
     const double axis[3] = {0, 0, 1}, c[3] = {0, 0, 0};
@@ -615,8 +618,54 @@ void test_transitions() {
             if (!ok) { ends = false; bad = std::to_string(kind); }
         }
     }
+    // With nothing on the other side a transition has the whole change: from
+    // its first moment nothing waits, and it ends where its half would.
+    bool solo = true;
+    for (int kind = (int)Transition::Dust; kind <= (int)Transition::Ripple; kind++) {
+        Shot sh;
+        sh.transition = (Transition)kind;
+        shot_defaults(sh);
+        float moved_in = 0.0f;
+        for (uint32_t i = 0; i < 400; i++) {
+            float r1, r2, d[3], al, sz;
+            fx_random(i, r1, r2);
+            const float* pos = pts[i].data();
+            fx_apply(kind, true, fx_solo_time(kind, true, 0.0f, sh.param), sh.param, g, pos, r1, r2, d, al, sz);
+            solo = solo && al < 1e-3f;
+            fx_apply(kind, true, fx_solo_time(kind, true, 1.0f, sh.param), sh.param, g, pos, r1, r2, d, al, sz);
+            solo = solo && std::fabs(al - 1.0f) < 1e-3f;
+            fx_apply(kind, false, fx_solo_time(kind, false, 1.0f, sh.param), sh.param, g, pos, r1, r2, d, al, sz);
+            solo = solo && al < 1e-3f;
+            fx_apply(kind, true, fx_solo_time(kind, true, 0.2f, sh.param), sh.param, g, pos, r1, r2, d, al, sz);
+            moved_in = std::max(moved_in, al);
+        }
+        if (kind != (int)Transition::Sweep && kind != (int)Transition::Grow) solo = solo && moved_in > 0.05f;
+    }
+    check(solo, "with nothing on the other side, a 3D transition starts at once and still ends at rest");
     check(ends, "every 3D transition begins and ends where the models rest" +
                     (bad.empty() ? std::string() : " (fails: " + bad + ")"));
+}
+
+// Which lenses want 3DGUT: the sphere, and a distortion that folds in frame.
+void test_auto_primitive() {
+    Lens pin;
+    pin.focal = 0.5;
+    Lens sphere;
+    sphere.projection = Projection::Equirect;
+    Lens mild = pin, folding = pin;
+    mild.tier = folding.tier = 1;
+    mild.dist[0] = -0.05f;
+    folding.dist[0] = -0.3f;
+    check(!lens_needs_ut(pin, 1920, 1080) && lens_needs_ut(sphere, 1920, 960) &&
+              !lens_needs_ut(mild, 1920, 1080) && lens_needs_ut(folding, 1920, 1080),
+          "3DGUT for the sphere and a lens folding in frame, 3DGS for the rest");
+    check(resolve_primitive("", "3dgs", folding, 1920, 1080) == "3dgut" &&
+              resolve_primitive("", "3dgs", pin, 1920, 1080) == "3dgs" &&
+              resolve_primitive("", "mip", pin, 1920, 1080) == "mip" &&
+              resolve_primitive("", "3dgut", pin, 1920, 1080) == "3dgs" &&
+              resolve_primitive("mip", "3dgs", sphere, 1920, 960) == "mip",
+          "the automatic primitive: 3DGUT for the lens that needs it, else as trained; "
+          "a chosen one stays");
 }
 
 // Who is on screen when, and how far each is through its way in or out.
@@ -626,16 +675,16 @@ void test_shot_mix() {
     b.start = 4.0;
     b.transition = Transition::Crossfade;
     b.duration = 2.0;
-    ShotMix m = shot_mix({a, b}, 5.0);
+    ShotMix m = shot_mix({a, b}, 5.0, 10.0);
     check(m.in == 1 && m.out == 0 && near(m.u_in, 0.5) && !m.own,
           "a crossfade takes the one before out as the next comes in");
     Shot first;
     first.transition = Transition::Crossfade;
     first.duration = 2.0;
-    m = shot_mix({first}, 1.0);
+    m = shot_mix({first}, 1.0, 10.0);
     check(m.in == 0 && m.out == -1 && near(m.u_in, 0.5) && !m.own,
           "the first shot can arrive from nothing");
-    m = shot_mix({first}, 5.0);
+    m = shot_mix({first}, 5.0, 10.0);
     check(m.in == 0 && m.out == -1 && near(m.u_in, 1.0), "and is there once it has");
 
     // Leaving a second early, over two, as the next rains in over two.
@@ -645,15 +694,15 @@ void test_shot_mix() {
     a.exit.offset = -1.0;
     b.transition = Transition::Rain;
     const std::vector<Shot> shots = {a, b};
-    m = shot_mix(shots, 2.9);
+    m = shot_mix(shots, 2.9, 10.0);
     check(m.in == 0 && m.out == -1 && !m.own, "before it leaves, the shot is simply there");
-    m = shot_mix(shots, 3.5);
+    m = shot_mix(shots, 3.5, 10.0);
     check(m.in == -1 && m.out == 0 && near(m.u_out, 0.25) && m.own,
           "leaving early, it goes before the next arrives");
-    m = shot_mix(shots, 4.5);
+    m = shot_mix(shots, 4.5, 10.0);
     check(m.in == 1 && m.out == 0 && near(m.u_in, 0.25) && near(m.u_out, 0.75) && m.own,
           "then the two overlap, each through its own");
-    m = shot_mix(shots, 5.5);
+    m = shot_mix(shots, 5.5, 10.0);
     check(m.in == 1 && m.out == -1 && near(m.u_in, 0.75) && m.own,
           "gone, while the next is still arriving");
     // Leaving a second after the next has come, at once: both whole meanwhile.
@@ -661,11 +710,50 @@ void test_shot_mix() {
     c.exit.transition = Transition::Cut;
     c.exit.offset = 1.0;
     d.transition = Transition::Cut;
-    m = shot_mix({c, d}, 4.5);
+    m = shot_mix({c, d}, 4.5, 10.0);
     check(m.in == 1 && m.out == 0 && near(m.u_in, 1.0) && near(m.u_out, 0.0) && m.own,
           "a later way out keeps both on screen");
-    m = shot_mix({c, d}, 5.5);
+    m = shot_mix({c, d}, 5.5, 10.0);
     check(m.in == 1 && m.out == -1, "and a cut out takes it at once");
+
+    // The last shot leaves by its own way at the end: a dip into black a
+    // second before the end, over two.
+    Shot only;
+    only.exit.own = true;
+    only.exit.transition = Transition::Dip;
+    only.exit.duration = 2.0;
+    only.exit.offset = -1.0;
+    m = shot_mix({only}, 6.0, 10.0);
+    check(m.in == 0 && m.out == -1 && !m.own, "the last shot is simply there before it leaves");
+    m = shot_mix({only}, 8.0, 10.0);
+    check(m.in == -1 && m.out == 0 && near(m.u_out, 0.5) && m.own,
+          "then it leaves by its own way, ending at the end less the offset");
+    m = shot_mix({only}, 9.5, 10.0);
+    check(m.out == 0 && near(m.u_out, 1.0), "and stays gone, into its colour, to the end");
+
+    // An older file's fades become the first shot's dip in and the last's dip out.
+    RenderProject old;
+    old.fade_in.colour = FadeColour::White;
+    old.fade_in.seconds = 1.5;
+    old.fade_out.colour = FadeColour::Black;
+    old.fade_out.seconds = 2.0;
+    settle_shots(old);
+    check(old.shots.size() == 1 && old.shots[0].transition == Transition::Dip &&
+              old.shots[0].colour[0] == 1.0f && near(old.shots[0].duration, 1.5) &&
+              old.shots[0].exit.own && old.shots[0].exit.transition == Transition::Dip &&
+              old.shots[0].exit.colour[0] == 0.0f && near(old.shots[0].exit.duration, 2.0) &&
+              old.fade_in.colour == FadeColour::None && old.fade_out.colour == FadeColour::None,
+          "the old fades in and out become the shots' own");
+    RenderProject kept;
+    kept.shots.resize(2);
+    kept.shots[0].transition = Transition::Rain;
+    kept.shots[0].exit.own = true;
+    kept.shots[0].exit.transition = Transition::Dip;
+    kept.fade_in.colour = FadeColour::Black;
+    settle_shots(kept);
+    check(kept.fade_in.colour == FadeColour::Black && kept.shots[0].transition == Transition::Rain &&
+              kept.shots[0].exit.transition == Transition::Crossfade,
+          "a fade that has no free place stays, and only the last shot ends in a dip");
 }
 
 // A hand-flown move: still for a second, round a quarter circle, a two
@@ -749,6 +837,43 @@ void test_flight() {
     fit.length = 10.0;
     fit_flight(fl, fit, 4.0, Lens{}, p);
     check(std::fabs(p.keys.back().time - 10.0) < 1e-6, "a length asked for is the length");
+    // Smoothing the timing makes the speed between keys change gradually: a
+    // crawl through one gap of a straight run goes, and a fitted flight comes
+    // out smoother than spacing its keys evenly in time makes it.
+    {
+        RenderProject run;
+        run.motion.ease = false;
+        for (int i = 0; i < 7; i++) {
+            Keyframe k;
+            k.pos[0] = i;
+            k.time = i < 3 ? i : i + 2.0;          // the gap from 2 to 3 takes 3 s
+            run.keys.push_back(k);
+        }
+        run.keys[0].own_lens = true;
+        const double before = motion_energy(run, 1.0);
+        RenderProject once = run;
+        smooth_key_speeds(once, std::vector<uint8_t>(7, 1), 0.5, 1.0);
+        check(motion_energy(once, 1.0) < 0.8 * before && once.keys.front().time == 0.0 &&
+                  once.keys.back().time == run.keys.back().time,
+              "smoothing the timing evens a crawl out of a straight run, the ends kept");
+        fit.length = 0.0;
+        fit.timing = 0.5;
+        fit.detail = 0.5;
+        RenderProject flown;
+        fit_flight(fl, fit, 4.0, Lens{}, flown);
+        const double e0 = motion_energy(flown, 4.0);
+        RenderProject speeds = flown, even = flown;
+        smooth_key_speeds(speeds, std::vector<uint8_t>(flown.keys.size(), 1), 0.5, 4.0);
+        const int n = (int)even.keys.size();
+        const double t0 = even.keys.front().time, t1 = even.keys.back().time;
+        for (int i = 1; i + 1 < n; i++)
+            even.keys[(size_t)i].time += 0.5 * (t0 + (t1 - t0) * i / (n - 1) - even.keys[(size_t)i].time);
+        check(motion_energy(speeds, 4.0) <= e0 * 1.001 &&
+                  motion_energy(speeds, 4.0) < motion_energy(even, 4.0),
+              "on a fitted flight, smoothing the speeds lowers the acceleration to " +
+                  std::to_string(motion_energy(speeds, 4.0) / e0) + " (evening the gaps: " +
+                  std::to_string(motion_energy(even, 4.0) / e0) + ")");
+    }
     std::vector<FlightSample> still(30);
     for (int i = 0; i < 30; i++) still[(size_t)i].t = i / 30.0;
     check(fit_flight(still, fit, 4.0, Lens{}, p) == 0, "a flight that never moved makes no keys");
@@ -910,6 +1035,7 @@ int main() {
     test_refit_after_delete();
     test_transitions();
     test_shot_mix();
+    test_auto_primitive();
     test_flight();
     test_gif();
     if (g_failures) {

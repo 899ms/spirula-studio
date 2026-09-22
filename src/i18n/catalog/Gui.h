@@ -576,37 +576,38 @@ SS_MSG(home_new_dataset_help,
        "açılır."));
 
 SS_MSG(home_drop_hint,
-    EN("...or drop a dataset folder, photo folders, video files, or a model or "
-       "mesh file anywhere in this window"),
+    EN("...or drop a dataset folder, photo folders, video files, a model or "
+       "mesh file, or a camera project anywhere in this window"),
     JA("…または、データセットフォルダ・写真フォルダ・動画ファイル・モデルや"
-       "メッシュのファイルをこのウィンドウのどこかにドロップしてください"),
-    ZH_HANS("…或者把数据集文件夹、照片文件夹、视频文件，或者模型和网格文件拖到"
-            "这个窗口的任意位置"),
-    ZH_HANT("…或者把資料集資料夾、相片資料夾、影片檔，或者模型和網格檔案拖到"
-            "這個視窗的任意位置"),
-    KO("…또는 데이터셋 폴더, 사진 폴더, 동영상 파일, 모델이나 메시 파일을 이 창 "
-       "아무 곳에나 끌어다 놓으세요"),
-    DE("… oder ziehen Sie einen Datensatzordner, Fotoordner, Videodateien oder "
-       "eine Modell- oder Netzdatei irgendwo in dieses Fenster"),
+       "メッシュのファイル・カメラプロジェクトをこのウィンドウのどこかにドロップ"
+       "してください"),
+    ZH_HANS("…或者把数据集文件夹、照片文件夹、视频文件、模型和网格文件，或者相机"
+            "项目拖到这个窗口的任意位置"),
+    ZH_HANT("…或者把資料集資料夾、相片資料夾、影片檔、模型和網格檔案，或者相機"
+            "專案拖到這個視窗的任意位置"),
+    KO("…또는 데이터셋 폴더, 사진 폴더, 동영상 파일, 모델이나 메시 파일, 카메라 "
+       "프로젝트를 이 창 아무 곳에나 끌어다 놓으세요"),
+    DE("… oder ziehen Sie einen Datensatzordner, Fotoordner, Videodateien, eine "
+       "Modell- oder Netzdatei oder ein Kameraprojekt irgendwo in dieses Fenster"),
     FR("… ou déposez un dossier de jeu de données, des dossiers de photos, des "
-       "fichiers vidéo, ou un fichier de modèle ou de maillage n'importe où "
-       "dans cette fenêtre"),
+       "fichiers vidéo, un fichier de modèle ou de maillage, ou un projet de "
+       "caméra n'importe où dans cette fenêtre"),
     ES("… o arrastre una carpeta de conjunto de datos, carpetas de fotos, "
-       "archivos de vídeo, o un archivo de modelo o de malla a cualquier punto "
-       "de esta ventana"),
+       "archivos de vídeo, un archivo de modelo o de malla, o un proyecto de "
+       "cámara a cualquier punto de esta ventana"),
     PT("… ou arraste uma pasta de conjunto de dados, pastas de fotos, arquivos "
-       "de vídeo, ou um arquivo de modelo ou de malha para qualquer ponto "
-       "desta janela"),
+       "de vídeo, um arquivo de modelo ou de malha, ou um projeto de câmera "
+       "para qualquer ponto desta janela"),
     IT("… oppure trascina una cartella di dataset, cartelle di foto, file video, "
-       "o un file di modello o di mesh in un punto qualsiasi di questa "
-       "finestra"),
-    NL("… of sleep een datasetmap, fotomappen, videobestanden, of een model- of "
-       "meshbestand ergens in dit venster"),
+       "un file di modello o di mesh, o un progetto di camera in un punto "
+       "qualsiasi di questa finestra"),
+    NL("… of sleep een datasetmap, fotomappen, videobestanden, een model- of "
+       "meshbestand, of een cameraproject ergens in dit venster"),
     RU("…или перетащите папку набора данных, папки с фотографиями, видеофайлы, "
-       "либо файл модели или меша в любое место этого окна"),
+       "файл модели или меша либо проект камеры в любое место этого окна"),
     TR("…ya da bir veri kümesi klasörünü, fotoğraf klasörlerini, video "
-       "dosyalarını veya bir model ya da ağ dosyasını bu pencerenin herhangi "
-       "bir yerine bırakın"));
+       "dosyalarını, bir model ya da ağ dosyasını veya bir kamera projesini bu "
+       "pencerenin herhangi bir yerine bırakın"));
 
 SS_MSG(home_recent,
     EN("Recent"),        JA("最近使った項目"), ZH_HANS("最近"),   ZH_HANT("最近"),

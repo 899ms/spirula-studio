@@ -112,6 +112,17 @@ public:
 
     // The project on disk has changes it does not.
     bool dirty() const;
+    // For the quit dialog: the project's own file, if it has one; saving
+    // over it (false with none); and asking where to save it.
+    const std::string& project_file() const { return _project_path; }
+    // A project file, opened as the panel's Open does.
+    void open_project(const std::string& path) { open_from(path); }
+    bool save_in_place();
+    void ask_save_as();
+    // What a save or a render is offered as: the project's name, or the
+    // model's, with the extension it needs.
+    std::string suggested_project_name() const;
+    std::string suggested_output_name() const;
     // Rendering: the owner keeps the pane's model where it is meanwhile.
     bool exporting() const { return _job.state != Job::Idle; }
     // Playing back or exporting: the window keeps drawing.
@@ -137,6 +148,7 @@ private:
     void project_changed();
     const Trajectory& trajectory();
     void save_to(const std::string& path);
+    std::string base_name() const;
     spirula::Sim3 primary_placement() const;
     void open_from(const std::string& path);
 
@@ -154,8 +166,9 @@ private:
     void set_playing(bool on);
     // When the camera passes key `i`, which constant speed moves.
     double key_visit(int i);
-    // One pass of smoothing over the selected keys, or all of them.
-    void smooth_keys(double strength);
+    // Smoothing over the selected keys, or all of them: `what` may move, 0
+    // their poses, 1 their times, 2 both.
+    void smooth_keys(double strength, int what);
     void smooth_pass(double strength);
     // The primary model moved in the editor: the keys go with it.
     void follow_placement();
@@ -212,9 +225,9 @@ private:
 
     // ---- frames ----
     FrameSpec frame_spec(double t, int W, int H, bool photo);
-    bool fx_frame(Transition kind, bool camera, int source, const CameraState& cam, LayerFx& x);
+    bool fx_frame(Transition kind, bool camera, int source, const FrameSpec& f, LayerFx& x);
     void side_effect(FrameSpec& f, LayerSpec& l, Transition kind, double u, bool in,
-                     const float param[2], const float colour[3], bool camera);
+                     const float param[2], const float colour[3], bool camera, bool edge);
     void preview_size(float box_w, float box_h, int& W, int& H) const;
     void request_preview();
 
@@ -310,6 +323,7 @@ private:
     std::vector<uint8_t> _sel;           // one flag per key
     int _sel_anchor = -1;                // where a Shift-click range starts
     float _smooth_strength = 0.5f;
+    int _smooth_what = 0;
     // What several keys turn and scale about: 0 the origin, 1 their median,
     // 2 their mean.
     int _pivot = 1;

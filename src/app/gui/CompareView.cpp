@@ -148,6 +148,7 @@ void CompareView::move(int index, int dir) {
 
 void CompareView::close() {
     _render_when_ready = false;
+    _render_project.clear();
     end_render();
     _run_datasets.clear();
     end_edit(/*reload_panes=*/false);
@@ -359,6 +360,11 @@ void CompareView::poll() {
     if (_render_index >= 0) {
         feed_render();
         _render.poll();
+        // A project asked for with the model: now the render has its models.
+        if (!_render_project.empty()) {
+            _render.open_project(_render_project);
+            _render_project.clear();
+        }
     }
 }
 
@@ -688,7 +694,6 @@ void CompareView::feed_render() {
                 file_to_norm = spirula::Sim3::from_3x4(t);
                 v.cfg = m.src.render_config();
                 v.hooks = m.src.make_hooks();
-                v.primitive = m.panel.primitive();
                 v.file = m.src.file();
                 v.sh_max = m.src.sh_degree();
                 si.dataset = run_dataset(v.file);

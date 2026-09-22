@@ -32,10 +32,10 @@ struct SourceView {
     // project's world, and its file's coordinates into that frame.
     spirula::Sim3 norm_to_world;
     spirula::Sim3 file_to_norm;
-    // Splats: how the viewer renders them, and the file an effect reads back.
+    // Splats: how the viewer renders them (`cfg.primitive` is what they were
+    // trained as), and the file an effect reads back.
     ViewerRenderConfig cfg;
     ViewerHooks hooks;
-    std::string primitive;              // what the viewport renders it as
     std::string file;
     int sh_max = 0;
     // Splats being edited: which survive, or empty when all do.
@@ -96,6 +96,15 @@ struct SceneCore {
     double radius = 1.0;
 };
 
+// A camera's view, for quantiles of what it sees: `tx` and `ty` the tangents
+// of its half-angles, or for a lens past 90 degrees each way the half-angle
+// `cone` of what it takes in.
+struct FxView {
+    double pos[3] = {0, 0, 0}, fwd[3] = {0, 0, -1}, right[3] = {1, 0, 0}, up[3] = {0, 1, 0};
+    double tx = 1.0, ty = 1.0;
+    double cone = 0.0;                  // radians; > 0 replaces tx and ty
+};
+
 struct FrameSpec {
     CameraState cam;
     int width = 0, height = 0;
@@ -147,10 +156,12 @@ public:
     // the background. True once `source` has them (or needs none).
     bool effects_ready(int source);
     // SceneCore of `source`; false until its elements are read. Then the
-    // quantiles of its elements along a frame through `centre`, into `q`.
+    // quantiles of its elements along a frame through `centre`, into `q`:
+    // of those `view` sees, when given and it sees enough of them.
     bool scene_core(int source, SceneCore& out);
     bool scene_quantiles(int source, const double centre[3], const double up[3],
-                         const double e1[3], const double e2[3], FxGeo& q);
+                         const double e1[3], const double e2[3], FxGeo& q,
+                         const struct FxView* view = nullptr);
 
     std::string take_error();
     void destroy_gl();

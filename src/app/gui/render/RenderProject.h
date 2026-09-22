@@ -46,6 +46,15 @@ void lens_set_fov(Lens& l, double degrees);
 inline double lens_mm(const Lens& l) { return 36.0 * l.focal; }
 // Pixels for an image `w` x `h`: fx, fy, cx, cy.
 void lens_intrinsics(const Lens& l, int w, int h, float out[4]);
+// Whether splats seen through `l` at `w` x `h` want 3DGUT rather than 3DGS:
+// the whole sphere, or a distortion folding over itself (the engine's
+// is_valid_distortion failing) somewhere in the frame.
+bool lens_needs_ut(const Lens& l, int w, int h);
+// The primitive to render a model trained as `trained` with: `want`, or
+// with none chosen, 3DGUT where the lens needs it and else what it was
+// trained as, 3DGS for any but Mip.
+std::string resolve_primitive(const std::string& want, const std::string& trained, const Lens& l,
+                              int w, int h);
 
 enum class PointStyle { Square = 0, Circle, Gaussian, Sphere };
 constexpr int kNumPointStyles = 4;
@@ -58,7 +67,8 @@ struct SourceStyle {
     bool cameras = false;               // a reconstruction's own cameras
     bool shade = true, flat = false, colour = true;   // meshes
     int sh_degree = -1;                 // splats; < 0 = all the file has
-    // Splats: a `--primitive` name, or empty for what the viewport shows.
+    // Splats: a `--primitive` name, or empty for the automatic choice
+    // (resolve_primitive).
     std::string primitive;
 
     bool operator==(const SourceStyle& o) const;
@@ -107,9 +117,9 @@ inline bool transition_has_camera(Transition t) {
            t == Transition::Rain || t == Transition::Ripple;
 }
 
-// How a shot leaves when not simply as the next one arrives: a transition
-// of its own, starting `offset` seconds after the next shot does (before
-// it, when negative). Every kind but a dip, which is the whole picture's.
+// How a shot leaves when not as the next one arrives: its own transition,
+// starting `offset` seconds after the next shot does. The last shot's ends
+// `offset` after the video, and may be a dip: into the colour, a fade out.
 struct ShotExit {
     bool own = false;
     Transition transition = Transition::Crossfade;
@@ -139,15 +149,15 @@ void transition_defaults(Transition t, float param[2], float colour[3], bool& ca
 void shot_defaults(Shot& s);
 void exit_defaults(ShotExit& e);
 
-// The shots on screen at `t`, each through its way in or out: `in` the one
-// arriving or there, `out` the one going; `own` when `out` leaves its own
-// way, and each is then drawn on its own. -1 for none.
+// The shots on screen at `t` of a video ending at `end`, each through its
+// way in or out: `in` arriving or there, `out` going (-1 for none); `own`
+// when `out` leaves its own way, each then drawn on its own.
 struct ShotMix {
     int in = -1, out = -1;
     double u_in = 1.0, u_out = 1.0;
     bool own = false;
 };
-ShotMix shot_mix(const std::vector<Shot>& shots, double t);
+ShotMix shot_mix(const std::vector<Shot>& shots, double t, double end);
 
 struct Source {
     std::string path;                   // what was opened, as the viewer took it
@@ -242,6 +252,11 @@ void update_aim(Keyframe& k, const double up[3]);
 // rotations by its rotation. A model turned in the editor takes its camera
 // move with it this way.
 void transform_project(RenderProject& p, const spirula::Sim3& s);
+
+// A dip may only end the last shot. And the fades of a file from before the
+// shots had them, as the first shot's dip in and the last's dip out, where
+// those shots have neither yet.
+void settle_shots(RenderProject& p);
 
 // The output path's extension made to match what is written: none for a
 // folder of frames, .mp4 / .webm / .gif for a video, .png / .jpg for a photo.

@@ -160,7 +160,7 @@ void RenderSession::draw_timeline() {
         const float step_px = std::max(1.0f, px(2.0f));
         const float lh = lane1 - lane0;
         for (float x = x_of(0.0); x < x_of(T); x += step_px) {
-            const ShotMix m = shot_mix(shots, t_of(x + 0.5f * step_px));
+            const ShotMix m = shot_mix(shots, t_of(x + 0.5f * step_px), T);
             auto shown = [&](int i, double u, bool arriving) {
                 if (i < 0) return 0.0;
                 const Transition k = arriving ? shots[(size_t)i].transition
@@ -183,6 +183,12 @@ void RenderSession::draw_timeline() {
     // way out's start and end. In that order of reach when they meet, the
     // start before the way out that begins with it.
     int shot_hot = -1, shot_part = 0;
+    auto exit_start = [&](int i) {
+        const ShotExit& e = shots[(size_t)i].exit;
+        const double dur = e.transition == Transition::Cut ? 0.0 : e.duration;
+        return i + 1 < (int)shots.size() ? shots[(size_t)i + 1].start + e.offset
+                                         : T - dur + e.offset;
+    };
     const float grab = px(5.0f);
     auto handle = [&](int i, int part, double t_at, ImU32 col) {
         const float x = x_of(std::clamp(t_at, 0.0, T));
@@ -196,16 +202,13 @@ void RenderSession::draw_timeline() {
         const Shot& sh = shots[i];
         if (sh.transition != Transition::Cut && sh.duration > 1e-6)
             handle((int)i, 1, sh.start + sh.duration, IM_COL32(230, 230, 230, 150));
-        if (i + 1 < shots.size() && sh.exit.own) {
-            const double from = shots[i + 1].start + sh.exit.offset;
-            if (sh.exit.transition != Transition::Cut)
-                handle((int)i, 3, from + sh.exit.duration, IM_COL32(230, 230, 230, 150));
-        }
+        if (sh.exit.own && sh.exit.transition != Transition::Cut)
+            handle((int)i, 3, exit_start((int)i) + sh.exit.duration, IM_COL32(230, 230, 230, 150));
     }
     for (size_t i = 1; i < shots.size(); i++) handle((int)i, 0, shots[i].start, IM_COL32(20, 20, 24, 255));
-    for (size_t i = 0; i + 1 < shots.size(); i++)
+    for (size_t i = 0; i < shots.size(); i++)
         if (shots[i].exit.own)
-            handle((int)i, 2, shots[i + 1].start + shots[i].exit.offset, IM_COL32(230, 230, 230, 110));
+            handle((int)i, 2, exit_start((int)i), IM_COL32(230, 230, 230, 110));
     for (size_t i = 0; i < shots.size(); i++) {
         const std::string name = source_name(shots[i].source);
         const float x0 = x_of(std::min(shots[i].start, T));
@@ -265,8 +268,11 @@ void RenderSession::draw_timeline() {
         _drag_shot = shot_hot;
         _drag_shot_part = shot_part;
         const Shot& sh = shots[(size_t)shot_hot];
-        _drag_shot_from = shot_part == 0 ? sh.start : shot_part == 1 ? sh.duration
-                        : shot_part == 2 ? sh.exit.offset : sh.exit.duration;
+        // Where the handle was: each drag below works from times.
+        _drag_shot_from = shot_part == 0 ? sh.start
+                        : shot_part == 1 ? sh.start + sh.duration
+                        : shot_part == 2 ? exit_start(shot_hot)
+                                         : exit_start(shot_hot) + sh.exit.duration;
     } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         if (hot >= 0) {
             const ImGuiIO& io = ImGui::GetIO();
@@ -326,7 +332,9 @@ void RenderSession::draw_timeline() {
         const double v = std::round((_drag_shot_from + dt) / frame) * frame;
         const size_t i = (size_t)_drag_shot;
         Shot& sh = _project.shots[i];
-        const double next = i + 1 < shots.size() ? shots[i + 1].start : T;
+        const bool last = i + 1 >= shots.size();
+        const double next = last ? T : shots[i + 1].start;
+        ShotExit& e = sh.exit;
         switch (_drag_shot_part) {
             case 0: {
                 const double lo = i > 0 ? shots[i - 1].start + frame : 0.0;
@@ -334,14 +342,17 @@ void RenderSession::draw_timeline() {
                 break;
             }
             case 1:
-                sh.duration = std::clamp(v, frame, std::max(frame, next - sh.start));
+                sh.duration = std::clamp(v - sh.start, frame, std::max(frame, next - sh.start));
                 break;
             case 2:
-                // It may leave before the next one comes, not before it came.
-                sh.exit.offset = std::clamp(v, sh.start - next, T - next);
+                // It may leave before the next one comes, not before it came;
+                // the last one's way out keeps its end and so its length moves.
+                if (last) e.duration = std::clamp(T + e.offset - v, frame, std::max(frame, T));
+                else e.offset = std::clamp(v, sh.start, T) - next;
                 break;
             default:
-                sh.exit.duration = std::clamp(v, frame, std::max(frame, T));
+                if (last) e.offset = std::clamp(v - T, -T, 0.0);
+                else e.duration = std::clamp(v - exit_start((int)i), frame, std::max(frame, T));
                 break;
         }
         project_changed();

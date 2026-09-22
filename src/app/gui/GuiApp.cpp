@@ -219,6 +219,14 @@ GuiApp::GuiApp() {
     using RPick = gui::render::RenderSession::Pick;
     _compare.render().set_pick(
         [this](RPick kind, const std::string& start, const std::string& suggested) {
+            // The folder a render's files are suggested into may not be there
+            // yet, and a picker handed a missing folder opens somewhere else.
+            if (kind == RPick::SaveProject || kind == RPick::Output) {
+                std::error_code ec;
+                const fs::path d = fs::u8path(start);
+                if (!start.empty() && !fs::exists(d, ec) && fs::is_directory(d.parent_path(), ec))
+                    fs::create_directories(d, ec);
+            }
             switch (kind) {
                 case RPick::SaveProject:
                     open_pick(PickAction::RenderProjectSave, rmsg::pick_save_project.get(),
@@ -229,7 +237,7 @@ GuiApp::GuiApp() {
                               FileDialog::Mode::File, {".json"}, start);
                     break;
                 case RPick::Output:
-                    open_render_output_pick(start);
+                    open_render_output_pick(start, suggested);
                     break;
                 case RPick::AddModel:
                     open_pick(PickAction::RenderAddModel, msg::viewer_pick_file.get(),
@@ -240,11 +248,17 @@ GuiApp::GuiApp() {
 }
 
 // Where a render goes: a file for a photo or a video, a folder for frames.
-void GuiApp::open_render_output_pick(const std::string& start) {
+void GuiApp::open_render_output_pick(const std::string& start, const std::string& suggested) {
     using gui::render::OutputKind;
     const gui::render::Output& o = _compare.render().output();
     std::string dir = start;
-    if (!o.path.empty()) dir = fs::path(o.path).parent_path().string();
+    std::string name = suggested;
+    if (!o.path.empty()) {
+        gui::render::Output fitted = o;
+        gui::render::fit_output_path(fitted);
+        dir = fs::u8path(fitted.path).parent_path().string();
+        name = fs::u8path(fitted.path).filename().string();
+    }
     if (o.kind == OutputKind::Frames) {
         open_pick(PickAction::RenderOutput, rmsg::pick_output_folder.get(),
                   FileDialog::Mode::Folder, {}, dir);
@@ -255,9 +269,9 @@ void GuiApp::open_render_output_pick(const std::string& start) {
     const std::string ext = video ? (o.codec == Codec::Gif ? ".gif"
                                      : o.codec == Codec::Av1Webm ? ".webm" : ".mp4")
                             : o.format == gui::render::ImageFormat::Jpeg ? ".jpg" : ".png";
+    if (name.empty()) name = (video ? "render" : "photo") + ext;
     open_pick(PickAction::RenderOutput, rmsg::pick_output_file.get(),
-              FileDialog::Mode::Save, {ext}, dir, false,
-              (video ? "render" : "photo") + ext);
+              FileDialog::Mode::Save, {ext}, dir, false, name);
 }
 
 GuiApp::~GuiApp() = default;
@@ -1125,6 +1139,10 @@ void GuiApp::open_splat(std::string path) {
         _compare.render_first_when_ready();
         _render_after_open = false;
     }
+    if (!_render_project_after_open.empty()) {
+        _compare.render_project_when_ready(_render_project_after_open);
+        _render_project_after_open.clear();
+    }
     add_model_recent(path);
     remember_dir("model", path);
     save_settings();
@@ -1157,9 +1175,31 @@ void GuiApp::request_open_splat(std::string path) {
         // model opened later must not arrive in edit mode by surprise.
         _edit_after_open = false;
         _render_after_open = false;
+        _render_project_after_open.clear();
         return;
     }
     open_splat(std::move(path));
+}
+
+// A camera project dropped or picked: its first model opens on the viewer
+// screen, the render starts on it with the project, and the project opens
+// whatever other models it names. False when the file is not a project.
+bool GuiApp::open_render_project(const std::string& path) {
+    gui::render::RenderProject p;
+    try {
+        p = gui::render::load_project(path);
+    } catch (const std::exception&) {
+        return false;
+    }
+    std::error_code ec;
+    const std::string model = p.sources.empty() ? std::string() : p.sources[0].path;
+    if (model.empty() || !fs::exists(fs::u8path(model), ec)) {
+        log(i18n::format(rmsg::project_model_missing, {model.empty() ? path : model}));
+        return true;
+    }
+    _render_project_after_open = path;
+    request_open_splat(model);
+    return true;
 }
 
 // The engine is a process-global singleton and the viewer is holding it, so
@@ -1214,6 +1254,10 @@ void GuiApp::request_close() {
         _edit_exit_confirm = true;
         return;
     }
+    if (!_render_discarded && _compare.render().dirty()) {
+        _render_exit_confirm = true;
+        return;
+    }
     if (training_busy()) {
         _pending = Pending::Quit;
         _open_confirm = true;
@@ -1226,7 +1270,11 @@ void GuiApp::run_pending_if_stopped() {
     if (_pending == Pending::None || native_work_busy()) return;
     // Only fire once the user confirmed the stop (or training was never
     // busy); a dismissed modal must not leave a delayed action armed.
-    if (!_stop_confirmed) { _pending = Pending::None; return; }
+    if (!_stop_confirmed) {
+        _pending = Pending::None;
+        _render_project_after_open.clear();
+        return;
+    }
     _stop_confirmed = false;
     Pending p = _pending;
     _pending = Pending::None;
@@ -1825,6 +1873,9 @@ void GuiApp::handle_drop(const std::vector<std::string>& paths) {
             return;
         }
     }
+    // A camera project: its model on the viewer screen, and the render with it.
+    if (paths.size() == 1 && lower_ext(paths[0]) == ".json" && open_render_project(paths[0]))
+        return;
     // Dropping onto the batch screen extends the queue, which is how a
     // five-dataset run gets set up without typing five paths. What each path
     // is decides what its row does.
@@ -2608,9 +2659,16 @@ void GuiApp::frame() {
         _preset_save_reopen = false;
         _preset_save_open = true;
     }
+    // A camera move saved on the way out: once the picker is gone, out --
+    // unless it was cancelled and the move is still unsaved.
+    if (_quit_after_render_save && !_dialog.is_open()) {
+        _quit_after_render_save = false;
+        if (!_compare.render().dirty()) request_close();
+    }
     draw_preset_save_modal();
     draw_preset_delete_modal();
     draw_edit_exit_modal();
+    draw_render_exit_modal();
     draw_confirm_modal();
     draw_data_error_modal();
 
@@ -8699,6 +8757,42 @@ void GuiApp::draw_edit_exit_modal() {
     }
     ImGui::SameLine();
     if (ui::Button(emsg::discard_no)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+// An unsaved camera move at quit: saved over its project, saved somewhere
+// new, or let go.
+void GuiApp::draw_render_exit_modal() {
+    if (_render_exit_confirm) {
+        ui::OpenPopup(rmsg::quit_title);
+        _render_exit_confirm = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(px(440.0f), 0.0f), ImGuiCond_Appearing);
+    if (!ui::BeginPopupModal(rmsg::quit_title)) return;
+    gui::render::RenderSession& r = _compare.render();
+    const std::string& file = r.project_file();
+    if (file.empty()) ui::TextWrapped(rmsg::quit_body_new);
+    else ui::TextWrapped(rmsg::quit_body, {fs::u8path(file).filename().string()});
+    ImGui::BeginDisabled(file.empty());
+    if (ui::Button(rmsg::project_save)) {
+        ImGui::CloseCurrentPopup();
+        if (r.save_in_place()) request_close();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ui::Button(rmsg::project_save_as)) {
+        ImGui::CloseCurrentPopup();
+        r.ask_save_as();
+        _quit_after_render_save = true;
+    }
+    ImGui::SameLine();
+    if (ui::Button(rmsg::quit_discard)) {
+        ImGui::CloseCurrentPopup();
+        _render_discarded = true;
+        request_close();
+    }
+    ImGui::SameLine();
+    if (ui::Button(rmsg::render_cancel)) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 

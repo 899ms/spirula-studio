@@ -94,6 +94,11 @@ public:
     // pane, stays open behind it -- what it did shows in the render.
     void begin_render(int index);
     void render_first_when_ready() { _render_when_ready = true; }
+    // The same, then with this camera project open in the render.
+    void render_project_when_ready(const std::string& path) {
+        _render_when_ready = true;
+        _render_project = path;
+    }
     void end_render(bool switching = false);
     int rendering() const { return _render_index; }
     render::RenderSession& render() { return _render; }
@@ -212,6 +217,7 @@ private:
     int _render_index = -1;
     bool _render_allowed = false;
     bool _render_when_ready = false;
+    std::string _render_project;
     // The render panel is the one showing, when both are open on a pane.
     bool _render_on_top = false;
     // Which edit revision the splats' survivors were copied at.

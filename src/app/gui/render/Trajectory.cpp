@@ -656,4 +656,85 @@ std::vector<double> Trajectory::sample_path(int n) const {
     return out;
 }
 
+double motion_energy(const RenderProject& p, double unit) {
+    if (p.keys.size() < 2) return 0.0;
+    const Trajectory tr(p);
+    const double t0 = p.keys.front().time, t1 = p.duration();
+    if (!(t1 > t0)) return 0.0;
+    const int n = std::max(8, (int)std::ceil((t1 - t0) * 30.0));
+    const double dt = (t1 - t0) / n;
+    std::vector<double> x((size_t)(n + 1) * 7);
+    for (int k = 0; k <= n; k++) {
+        const CameraState c = tr.at(t0 + dt * k);
+        double* v = &x[(size_t)k * 7];
+        for (int d = 0; d < 3; d++) v[d] = c.pos[d];
+        double sign = 1.0;
+        if (k > 0) {
+            const double* w = &x[(size_t)(k - 1) * 7];
+            double dot = 0.0;
+            for (int d = 0; d < 4; d++) dot += c.rot[d] * w[3 + d];
+            if (dot < 0.0) sign = -1.0;
+        }
+        // Twice the quaternion is the angle, for small turns.
+        for (int d = 0; d < 4; d++) v[3 + d] = 2.0 * unit * sign * c.rot[d];
+    }
+    double e = 0.0;
+    for (int k = 1; k < n; k++)
+        for (int d = 0; d < 7; d++) {
+            const double a = x[(size_t)(k + 1) * 7 + d] - 2.0 * x[(size_t)k * 7 + d] +
+                             x[(size_t)(k - 1) * 7 + d];
+            e += a * a;
+        }
+    return e / (dt * dt * dt);
+}
+
+void smooth_key_speeds(RenderProject& p, const std::vector<uint8_t>& movable, double strength,
+                       double unit) {
+    std::vector<Keyframe>& k = p.keys;
+    const int n = (int)k.size();
+    if (n < 3) return;
+    const bool loop = p.looped();
+    const int m = loop ? n : n - 1;              // gaps
+    auto fixed = [&](int i) {
+        if (i == 0 || i >= n || (!loop && i == n - 1)) return true;
+        return k[(size_t)i].hold || (i < (int)movable.size() && !movable[(size_t)i]);
+    };
+    std::vector<double> t((size_t)n + 1), len((size_t)m), lv((size_t)m);
+    for (int i = 0; i < n; i++) t[(size_t)i] = k[(size_t)i].time;
+    t[(size_t)n] = p.duration();
+    for (int i = 0; i < m; i++) {
+        const Keyframe& a = k[(size_t)i];
+        const Keyframe& b = k[(size_t)((i + 1) % n)];
+        double d = 0.0, dot = 0.0;
+        for (int c = 0; c < 3; c++) d += (b.pos[c] - a.pos[c]) * (b.pos[c] - a.pos[c]);
+        for (int c = 0; c < 4; c++) dot += a.rot[c] * b.rot[c];
+        len[(size_t)i] = std::sqrt(d) + unit * 2.0 * std::acos(std::min(std::fabs(dot), 1.0)) +
+                         1e-6 * unit;
+        lv[(size_t)i] = std::log(len[(size_t)i] / std::max(t[(size_t)i + 1] - t[(size_t)i], 1e-6));
+    }
+    // A stop parts the gaps on either side of it.
+    std::vector<double> nv = lv;
+    for (int i = 0; i < m; i++) {
+        double sum = 0.0;
+        int count = 0;
+        const int prev = i > 0 ? i - 1 : (loop ? m - 1 : -1);
+        const int next = i + 1 < m ? i + 1 : (loop ? 0 : -1);
+        if (prev >= 0 && !k[(size_t)i].hold) { sum += lv[(size_t)prev]; count++; }
+        if (next >= 0 && !k[(size_t)((i + 1) % n)].hold) { sum += lv[(size_t)next]; count++; }
+        if (count) nv[(size_t)i] += strength * (sum / count - lv[(size_t)i]);
+    }
+    std::vector<double> dt((size_t)m);
+    for (int i = 0; i < m; i++) dt[(size_t)i] = len[(size_t)i] / std::exp(nv[(size_t)i]);
+    for (int a = 0; a < m;) {
+        int b = a + 1;
+        while (b < m && !fixed(b)) b++;
+        double have = 0.0;
+        for (int i = a; i < b; i++) have += dt[(size_t)i];
+        const double want = t[(size_t)b] - t[(size_t)a];
+        for (int i = a; i < b; i++) dt[(size_t)i] *= want / std::max(have, 1e-12);
+        for (int i = a + 1; i < b; i++) k[(size_t)i].time = k[(size_t)i - 1].time + dt[(size_t)i - 1];
+        a = b;
+    }
+}
+
 }  // namespace gui::render

@@ -2,6 +2,7 @@
 
 #include "app/gui/render/RenderProject.h"
 
+#include "data/CameraMath.h"
 #include "data/Json.h"
 #include "data/JsonWrite.h"
 
@@ -155,6 +156,7 @@ SourceStyle read_style(const JsonValue& o) {
     y.colour = get_bool(o, "colour", true);
     y.sh_degree = std::clamp((int)get_num(o, "sh_degree", -1), -1, 3);
     y.primitive = get_str(o, "primitive");
+    if (y.primitive == "auto") y.primitive.clear();   // the automatic choice, spelt out
     return y;
 }
 
@@ -205,6 +207,37 @@ void lens_intrinsics(const Lens& l, int w, int h, float out[4]) {
     }
     out[2] = 0.5f * (float)w;
     out[3] = 0.5f * (float)h;
+}
+
+
+bool lens_needs_ut(const Lens& l, int w, int h) {
+    if (l.projection == Projection::Equirect) return true;
+    const int tier = std::clamp(l.tier, 0, 2);
+    if (tier == 0 || !camhost::has_distortion(tier, l.dist)) return false;
+    float in[4];
+    lens_intrinsics(l, w, h, in);
+    // The lens's own coordinates across twice the frame, for a fold that
+    // lands inside it.
+    const double x0 = -2.0 * in[2] / in[0], x1 = 2.0 * (w - in[2]) / in[0];
+    const double y0 = -2.0 * in[3] / in[1], y1 = 2.0 * (h - in[3]) / in[1];
+    constexpr int n = 48;
+    for (int j = 0; j <= n; j++)
+        for (int i = 0; i <= n; i++) {
+            const double u = x0 + (x1 - x0) * i / n, v = y0 + (y1 - y0) * j / n;
+            if (camhost::valid_distortion(u, v, tier, l.dist)) continue;
+            double d[2];
+            camhost::distort_lens(u, v, tier, l.dist, d);
+            const double px = d[0] * in[0] + in[2], py = d[1] * in[1] + in[3];
+            if (px >= 0.0 && px < w && py >= 0.0 && py < h) return true;
+        }
+    return false;
+}
+
+std::string resolve_primitive(const std::string& want, const std::string& trained, const Lens& l,
+                              int w, int h) {
+    if (!want.empty() && want != "auto") return want;
+    if (lens_needs_ut(l, w, h)) return "3dgut";
+    return trained == "mip" ? "mip" : "3dgs";
 }
 
 
@@ -279,7 +312,7 @@ void shot_defaults(Shot& s) { transition_defaults(s.transition, s.param, s.colou
 
 void exit_defaults(ShotExit& e) { transition_defaults(e.transition, e.param, e.colour, e.camera); }
 
-ShotMix shot_mix(const std::vector<Shot>& shots, double t) {
+ShotMix shot_mix(const std::vector<Shot>& shots, double t, double end) {
     ShotMix m;
     const int n = (int)shots.size();
     if (!n) return m;
@@ -293,9 +326,14 @@ ShotMix shot_mix(const std::vector<Shot>& shots, double t) {
         p = std::min((t - sh.start) / sh.duration, 1.0);
     m.in = j;
     m.u_in = p;
+    auto from_of = [&](int i) {
+        const ShotExit& e = shots[(size_t)i].exit;
+        const double dur = e.transition == Transition::Cut ? 0.0 : e.duration;
+        return i + 1 < n ? shots[(size_t)i + 1].start + e.offset : end - dur + e.offset;
+    };
     auto leaving = [&](int i) {
         const ShotExit& e = shots[(size_t)i].exit;
-        const double from = shots[(size_t)i + 1].start + e.offset;
+        const double from = from_of(i);
         if (e.transition == Transition::Cut || e.duration <= 1e-6) return t >= from ? 1.0 : 0.0;
         return std::clamp((t - from) / e.duration, 0.0, 1.0);
     };
@@ -307,9 +345,9 @@ ShotMix shot_mix(const std::vector<Shot>& shots, double t) {
             m.u_out = u;
         }
     }
-    // Gone early, before the next one arrives.
-    if (m.out < 0 && j + 1 < n && shots[(size_t)j].exit.own &&
-        t >= shots[(size_t)j + 1].start + shots[(size_t)j].exit.offset) {
+    // Gone early, before the next one arrives; or the last, on its way out.
+    if (m.out < 0 && shots[(size_t)j].exit.own && t >= from_of(j) &&
+        (j + 1 < n ? t < shots[(size_t)j + 1].start : true)) {
         m.own = true;
         m.out = j;
         m.in = -1;
@@ -320,6 +358,34 @@ ShotMix shot_mix(const std::vector<Shot>& shots, double t) {
         m.u_out = p;
     }
     return m;
+}
+
+void settle_shots(RenderProject& p) {
+    for (size_t i = 0; i + 1 < p.shots.size(); i++)
+        if (p.shots[i].exit.transition == Transition::Dip) p.shots[i].exit.transition = Transition::Crossfade;
+    auto colour_of = [](const Fade& f, float out[3]) {
+        for (int k = 0; k < 3; k++) out[k] = f.colour == FadeColour::White ? 1.0f : 0.0f;
+    };
+    const bool have = p.fade_in.colour != FadeColour::None || p.fade_out.colour != FadeColour::None;
+    if (have && p.shots.empty()) p.shots.push_back(Shot{});
+    if (p.fade_in.colour != FadeColour::None && p.shots[0].transition == Transition::Cut) {
+        Shot& s = p.shots[0];
+        s.transition = Transition::Dip;
+        shot_defaults(s);
+        colour_of(p.fade_in, s.colour);
+        s.duration = std::max(p.fade_in.seconds, 0.05);
+        p.fade_in.colour = FadeColour::None;
+    }
+    if (p.fade_out.colour != FadeColour::None && !p.shots.back().exit.own) {
+        ShotExit& e = p.shots.back().exit;
+        e.own = true;
+        e.transition = Transition::Dip;
+        exit_defaults(e);
+        colour_of(p.fade_out, e.colour);
+        e.duration = std::max(p.fade_out.seconds, 0.05);
+        e.offset = 0.0;
+        p.fade_out.colour = FadeColour::None;
+    }
 }
 
 bool SourceStyle::operator==(const SourceStyle& o) const {
@@ -673,7 +739,6 @@ RenderProject project_from_json(const std::string& text) {
                 e.own = true;
                 e.transition = (Transition)name_index(kTransitionNames, get_str(*x, "transition"),
                                                       (int)Transition::Crossfade);
-                if (e.transition == Transition::Dip) e.transition = Transition::Crossfade;
                 exit_defaults(e);
                 read_vecf(*x, "params", e.param, 2);
                 read_vecf(*x, "colour", e.colour, 3);
@@ -686,6 +751,7 @@ RenderProject project_from_json(const std::string& text) {
         std::stable_sort(p.shots.begin(), p.shots.end(),
                          [](const Shot& a, const Shot& b) { return a.start < b.start; });
     }
+    settle_shots(p);
     if (const JsonValue* a = root.find("keyframes"); a && a->is_array()) {
         for (const JsonValue& o : a->arr) {
             Keyframe k;

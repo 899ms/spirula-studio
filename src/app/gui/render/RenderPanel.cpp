@@ -59,8 +59,9 @@ const Msg* const kCodecs[kNumCodecs] = {&msg::codec_h264, &msg::codec_h265, &msg
                                         &msg::codec_gif, &msg::codec_av1_webm};
 // As the list shows them: the WebM beside the other AV1.
 const int kCodecOrder[kNumCodecs] = {0, 1, 2, 4, 3};
-// The splat primitives a model can be rendered as, ViewportPanel's names.
-const char* const kPrimitives[3] = {"3dgs", "mip", "3dgut"};
+// The splat primitives a model can be rendered as: the automatic choice,
+// then ViewportPanel's names.
+const char* const kPrimitives[4] = {"", "3dgs", "mip", "3dgut"};
 
 // Keys the whole panel answers to, beside the viewport's own. A key is an
 // identifier, so it never gets translated.
@@ -107,7 +108,7 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
     }
     if (io.KeyCtrl && pressed(ImGuiKey_S)) {
         if (_project_path.empty()) {
-            if (_pick) _pick(Pick::SaveProject, default_project_dir(_sources.empty() ? "" : _sources[0].path), "camera.json");
+            if (_pick) _pick(Pick::SaveProject, default_project_dir(_sources.empty() ? "" : _sources[0].path), suggested_project_name());
         } else {
             save_to(_project_path);
         }
@@ -818,13 +819,19 @@ void RenderSession::draw_motion_section(float full) {
 
     // Ironing out kinks by moving the keys themselves.
     ImGui::BeginDisabled(_project.keys.size() < 3);
-    if (ui::Button(msg::smooth_keys)) smooth_keys(_smooth_strength);
+    if (ui::Button(msg::smooth_keys)) smooth_keys(_smooth_strength, _smooth_what);
     ui::help_on_hover(msg::smooth_keys_help);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(full * 0.3f);
     ui::SliderFloatRaw("##smooth", &_smooth_strength, 0.05f, 1.0f, "%.2f");
     ImGui::SameLine();
     ui::TextDisabled(msg::smooth_strength);
+    ImGui::SetNextItemWidth(full * 0.45f);
+    ui::ComboRaw("##smoothwhat", &_smooth_what,
+                 {&msg::smooth_poses, &msg::smooth_timing, &msg::smooth_both});
+    ImGui::SameLine();
+    ui::TextDisabled(msg::smooth_what);
+    ui::help_on_hover(msg::smooth_what_help);
     ImGui::EndDisabled();
 
     if (ui::Button(msg::up_from_view)) take_up_from_view();
@@ -943,8 +950,10 @@ void RenderSession::draw_effects_section(float full) {
         ui::Text(name);
         ImGui::PopID();
     };
-    fade(msg::fade_in, _project.fade_in, "fi", true);
-    fade(msg::fade_out, _project.fade_out, "fo", false);
+    // The shots fade in and out now; a fade of a file from before them that
+    // could not become one stays editable here until it is set to none.
+    if (_project.fade_in.colour != FadeColour::None) fade(msg::fade_in, _project.fade_in, "fi", true);
+    if (_project.fade_out.colour != FadeColour::None) fade(msg::fade_out, _project.fade_out, "fo", false);
     if (ui::ColorEdit3Raw("##bg", _project.background, ImGuiColorEditFlags_NoInputs))
         project_changed();
     ImGui::SameLine();
@@ -1047,18 +1056,18 @@ void RenderSession::draw_effects_section(float full) {
             if (ui::Checkbox(msg::mesh_colour, &y.colour)) project_changed();
         } else {
             // What it is rendered as: the viewport's choice unless set here.
+            // Automatic unless one is chosen; only that choice is a word, the
+            // rest are identifiers.
             int prim = 0;
-            for (int k = 0; k < 3; k++)
-                if (y.primitive == kPrimitives[k]) prim = k + 1;
-            std::vector<std::string> names = {format(msg::primitive_viewport,
-                                                     {s.view.primitive.empty() ? std::string("3dgs")
-                                                                               : s.view.primitive})};
-            for (const char* p : kPrimitives) names.push_back(p);
+            for (int k = 1; k < 4; k++)
+                if (y.primitive == kPrimitives[k]) prim = k;
+            std::vector<std::string> names = {msg::primitive_auto.get()};
+            for (int k = 1; k < 4; k++) names.push_back(kPrimitives[k]);
             ImGui::SetNextItemWidth(w);
             if (ui::BeginComboRaw("##prim", names[(size_t)prim].c_str())) {
                 for (int k = 0; k < 4; k++)
                     if (ui::SelectableRaw(names[(size_t)k], k == prim)) {
-                        y.primitive = k == 0 ? std::string() : kPrimitives[k - 1];
+                        y.primitive = kPrimitives[k];
                         project_changed();
                     }
                 ImGui::EndCombo();
@@ -1082,21 +1091,27 @@ void RenderSession::draw_effects_section(float full) {
     else if (view >= 0) view_source(view, false);
     else if (edit >= 0) view_source(edit, true);
     if (ui::Button(msg::model_add) && _pick)
-        _pick(Pick::AddModel, _sources.empty() ? std::string() : _sources[0].path, "");
+        _pick(Pick::AddModel,
+              _sources.empty() ? std::string()
+                               : fs::u8path(_sources[0].path).parent_path().string(), "");
     ui::help_on_hover(msg::model_add_help);
 
     // Shots: which model is shown from when, how it arrives and how it goes.
     ui::SeparatorText(msg::sec_shots);
     remove = -1;
     int swap = -1;
-    // A way out may be any transition but a dip, which is the whole picture's.
+    // A way out may be any transition but a dip, which is the whole picture's
+    // -- except the last, whose dip is the fade out.
     std::vector<const Msg*> exits = {&msg::shot_exit_as_next};
-    for (int k = 0; k < kNumTransitions; k++)
+    std::vector<const Msg*> exits_last = {&msg::shot_exit_stays};
+    for (int k = 0; k < kNumTransitions; k++) {
         if (k != (int)Transition::Dip) exits.push_back(kTransitions[k]);
-    auto exit_index = [](const ShotExit& e) {
+        exits_last.push_back(kTransitions[k]);
+    }
+    auto exit_index = [](const ShotExit& e, bool last) {
         if (!e.own) return 0;
         const int k = (int)e.transition;
-        return k < (int)Transition::Dip ? k + 1 : k;
+        return last || k < (int)Transition::Dip ? k + 1 : k;
     };
     const int nshots = (int)_project.shots.size();
     for (int i = 0; i < nshots; i++) {
@@ -1165,26 +1180,29 @@ void RenderSession::draw_effects_section(float full) {
             draw_transition_settings(s.transition, s.param, s.colour, s.camera, full);
             ImGui::PopID();
         }
-        // How it goes, when a shot comes after it.
-        if (i + 1 < nshots) {
+        // How it goes: as the next arrives, or its own way; the last one,
+        // at the end.
+        {
+            const bool last = i + 1 >= nshots;
             ShotExit& e = s.exit;
             ImGui::Indent();
-            int ex = exit_index(e);
+            int ex = exit_index(e, last);
             ImGui::SetNextItemWidth(w * 0.9f);
-            if (ui::ComboRaw("##exit", &ex, exits)) {
+            if (ui::ComboRaw("##exit", &ex, last ? exits_last : exits)) {
                 const bool was = e.own;
                 e.own = ex > 0;
                 if (e.own) {
-                    e.transition = (Transition)(ex - 1 < (int)Transition::Dip ? ex - 1 : ex);
+                    e.transition = (Transition)(last || ex - 1 < (int)Transition::Dip ? ex - 1 : ex);
                     exit_defaults(e);
                     // Taken up as the next arrival was: the same length.
-                    if (!was) e.duration = std::max(_project.shots[(size_t)i + 1].duration, 0.1);
+                    if (!was) e.duration = last ? 1.0 : std::max(_project.shots[(size_t)i + 1].duration, 0.1);
+                    if (!was && last) e.offset = 0.0;
                 }
                 project_changed();
             }
             ImGui::SameLine();
             ui::Text(msg::shot_exit);
-            ui::help_on_hover(msg::shot_exit_help);
+            ui::help_on_hover(last ? msg::shot_exit_last_help : msg::shot_exit_help);
             if (e.own) {
                 if (e.transition != Transition::Cut) {
                     float d = (float)e.duration;
@@ -1199,13 +1217,13 @@ void RenderSession::draw_effects_section(float full) {
                 }
                 float off = (float)e.offset;
                 ImGui::SetNextItemWidth(px(110.0f));
-                if (ui::SliderFloatRaw("##xoff", &off, -6.0f, 6.0f, "%+.1f s")) {
+                if (ui::SliderFloatRaw("##xoff", &off, -6.0f, last ? 0.0f : 6.0f, "%+.1f s")) {
                     e.offset = off;
                     project_changed();
                 }
                 ImGui::SameLine();
                 ui::TextDisabled(msg::shot_exit_offset);
-                ui::help_on_hover(msg::shot_exit_offset_help);
+                ui::help_on_hover(last ? msg::shot_exit_offset_last_help : msg::shot_exit_offset_help);
                 ImGui::PushID("out");
                 draw_transition_settings(e.transition, e.param, e.colour, e.camera, full);
                 ImGui::PopID();
@@ -1311,17 +1329,13 @@ void RenderSession::draw_project_section(float full) {
     const std::string dir = default_project_dir(_sources.empty() ? "" : _sources[0].path);
     if (ui::KeyButton(msg::project_save, third, "Ctrl+S")) {
         if (_project_path.empty()) {
-            if (_pick) _pick(Pick::SaveProject, dir, "camera.json");
+            if (_pick) _pick(Pick::SaveProject, dir, suggested_project_name());
         } else {
             save_to(_project_path);
         }
     }
     ImGui::SameLine();
-    if (ui::Button(msg::project_save_as, ImVec2(third, 0)) && _pick)
-        _pick(Pick::SaveProject, _project_path.empty() ? dir
-                                 : fs::u8path(_project_path).parent_path().string(),
-              _project_path.empty() ? "camera.json"
-                                    : fs::u8path(_project_path).filename().string());
+    if (ui::Button(msg::project_save_as, ImVec2(third, 0))) ask_save_as();
     ImGui::SameLine();
     if (ui::Button(msg::project_open, ImVec2(third, 0)) && _pick)
         _pick(Pick::OpenProject, dir, "");
@@ -1504,7 +1518,8 @@ void RenderSession::draw_output_section(float full) {
     ImGui::SameLine();
     if (ui::Button(msg::out_browse, ImVec2(px(90.0f), 0)) && _pick) {
         _export_after_pick = false;
-        _pick(Pick::Output, _sources.empty() ? "" : default_project_dir(_sources[0].path), "");
+        _pick(Pick::Output, _sources.empty() ? "" : default_project_dir(_sources[0].path),
+              suggested_output_name());
     }
     ImGui::EndDisabled();
 

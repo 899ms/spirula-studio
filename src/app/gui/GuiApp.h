@@ -160,7 +160,7 @@ private:
     // The comparison panes, with the editing panel beside them when a pane is
     // being edited. The viewer screen and the meshing preview share it.
     void draw_compare_panes();
-    void open_render_output_pick(const std::string& start);
+    void open_render_output_pick(const std::string& start, const std::string& suggested);
 
     // The viewer screen: a splat file (or a checkpoint / run directory) opened
     // for looking at. Takes the engine over, so it goes through the same
@@ -528,10 +528,16 @@ private:
     bool _edit_after_open = false;
     // The same, for a model opened in order to render it.
     bool _render_after_open = false;
+    std::string _render_project_after_open;
+    bool open_render_project(const std::string& path);
     // Quitting with unsaved edits: the question is asked before the training
     // one, because the answer decides whether anything is written at all.
     bool _edit_exit_confirm = false;
     void draw_edit_exit_modal();
+    // The same for the render's camera move; "discard" lets it go for good.
+    bool _render_exit_confirm = false, _render_discarded = false;
+    bool _quit_after_render_save = false;
+    void draw_render_exit_modal();
     bool _quit = false;
     bool _open_confirm = false;      // arm the stop-training modal
     bool _confirm_shown = false;     // modal currently expected open
