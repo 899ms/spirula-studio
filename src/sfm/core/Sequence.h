@@ -61,7 +61,7 @@ struct SequenceTable {
         if (!has(a) || !has(b) || seq[a] != seq[b]) return INT_MAX;
         return std::abs(pos[a] - pos[b]);
     }
-    bool near(uint32_t a, uint32_t b, int window) const { return distance(a, b) <= window; }
+    bool nearby(uint32_t a, uint32_t b, int window) const { return distance(a, b) <= window; }
 
     // The same sequences over a sub-database (map/Atoms.h): positions are kept,
     // so a window means the same thing inside an atom.

@@ -43,7 +43,7 @@ static void testTable() {
     check(t.length.size() == 2 && t.length[0] == 3 && t.length[1] == 2, "two sequences sized");
     check(t.pos[0] == 0 && t.pos[1] == 1 && t.pos[2] == 2, "positions follow the stems");
     check(t.pos[3] == 0 && t.pos[4] == 2 && t.member[3] == 1, "a rig-mate shares its position");
-    check(t.distance(0, 4) == 2 && t.near(0, 4, 2) && !t.near(0, 4, 1), "distance across lenses");
+    check(t.distance(0, 4) == 2 && t.nearby(0, 4, 2) && !t.nearby(0, 4, 1), "distance across lenses");
     check(t.distance(0, 5) == INT_MAX && t.seq[5] == 1, "no distance across sequences");
     check(t.has(6) && t.sequenceOf(6) == 1, "membership");
 

@@ -1561,7 +1561,7 @@ public:
         int n_cur = 0, n_alt = 0;
         for (uint32_t f = 0; f < feats_[img].count(); f++)
             for (const Correspondence& c : graph_.at(img, f)) {
-                if (!near(img, c.image_id)) continue;
+                if (!nearby(img, c.image_id)) continue;
                 const Image& oi = rec_.images.at(c.image_id);
                 if (!oi.registered) continue;
                 const uint64_t pid = oi.point3D_ids[c.feature_idx];
@@ -2725,7 +2725,7 @@ private:
                     !allowed(p.image2))
                     continue;
                 // Sequence neighbours seed first; the rest wait for phase 1.
-                (!seq_ || near(p.image1, p.image2) ? seed_cand_ : seed_cand_far_).push_back(&p);
+                (!seq_ || nearby(p.image1, p.image2) ? seed_cand_ : seed_cand_far_).push_back(&p);
             }
             auto by_inliers = [](auto* a, auto* b) {
                 if (a->matches.size() != b->matches.size())
@@ -3051,7 +3051,7 @@ private:
                 score_cache_[c.image_id]++;
                 pyramidSet(c.image_id, c.feature_idx);
             }
-            if (seq_ && near(img, c.image_id) && ++near_support_[c.image_id][c.feature_idx] == 1)
+            if (seq_ && nearby(img, c.image_id) && ++near_support_[c.image_id][c.feature_idx] == 1)
                 near_score_[c.image_id]++;
         }
     }
@@ -3059,8 +3059,8 @@ private:
     // ---- sequences (D79) --------------------------------------------------
     // A duplicate verifies against the wrong copy of itself; correspondences to
     // sequence neighbours cannot, so they come first (README, "Sequences").
-    bool near(uint32_t a, uint32_t b) const {
-        return seq_ && seq_->near(a, b, opt_.sequence_window);
+    bool nearby(uint32_t a, uint32_t b) const {
+        return seq_ && seq_->nearby(a, b, opt_.sequence_window);
     }
 
     // Whether a candidate's neighbours alone could register it: the near score
@@ -3186,7 +3186,7 @@ private:
                 if (!oi.registered || oi.point3D_ids[c.feature_idx] == kInvalidPoint3D) continue;
                 if (chosen == kInvalidPoint3D) chosen = oi.point3D_ids[c.feature_idx];
                 if (!seq_) break;
-                if (near(img, c.image_id)) {
+                if (nearby(img, c.image_id)) {
                     chosen = oi.point3D_ids[c.feature_idx];
                     from_near = true;
                     break;
