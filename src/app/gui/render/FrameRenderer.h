@@ -46,6 +46,17 @@ struct SourceView {
     float mesh_t2n[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
 };
 
+// A 3D transition acting on one layer's points, splats or vertices
+// (TransitionFx.h), with the scene it moves in the world frame.
+struct LayerFx {
+    int kind = 0;                       // a Transition from Dust on; 0 none
+    bool incoming = false;
+    float t = 0.0f;
+    float p[2] = {0.0f, 0.0f};
+    double centre[3] = {0, 0, 0}, up[3] = {0, 0, 1};
+    double radius = 1.0, h0 = -1.0, h1 = 1.0;
+};
+
 // One model in one frame, and what an effect is doing to it. A model whose
 // look changes between keyframes is drawn both ways and mixed on screen:
 // `style[1]` by `style_mix`, when `variants` is 2.
@@ -61,6 +72,16 @@ struct LayerSpec {
     int clip = 0;                       // 0 none, 1 keep below, 2 keep above
     double level = 0.0;
     float glow = 0.0f;
+    float glow_col[3] = {1.0f, 0.86f, 0.6f};
+    LayerFx fx;
+};
+
+// Where a model is, robust to what floats far from it: the per-axis median,
+// the 90th-percentile distance from it, and the 2nd / 98th-percentile heights
+// along up relative to it; world frame.
+struct SceneStats {
+    double centre[3] = {0, 0, 0};
+    double radius = 1.0, h0 = -1.0, h1 = 1.0;
 };
 
 struct FrameSpec {
@@ -69,11 +90,14 @@ struct FrameSpec {
     double up[3] = {0, 0, 1};
     LayerSpec a, b;                     // a under b
     // 0: mix(a, b) by `mix` through `mask` (0 all, 1 wipe, 2 iris);
-    // 1: b over a (a sweep, where each has cut itself to its side).
+    // 1: b over a (a 3D transition, where each has moved itself);
+    // 2: a zooms out of the picture as b zooms in, by `zoom`.
     int mode = 0;
     int mask = 0;
     float mix = 1.0f;
     float wipe_dir[2] = {1, 0};         // image space, y down
+    float soft = 0.01f;                 // of a wipe's or an iris's edge
+    float zoom = 0.0f;
     // Two tints over everything: a dip, then a fade; rgb + amount.
     float tint[2][4] = {};
     float background[3] = {0, 0, 0};
@@ -110,8 +134,8 @@ public:
     // Effects that rewrite splats need them host-side: read on demand, in
     // the background. True once `source` has them (or needs none).
     bool effects_ready(int source);
-    // World heights of the model along `up`: the 1st and 99th percentile.
-    bool height_range(int source, const double up[3], double out[2]);
+    // SceneStats of `source` along `up`; false until its elements are read.
+    bool scene_stats(int source, const double up[3], SceneStats& out);
 
     std::string take_error();
     void destroy_gl();

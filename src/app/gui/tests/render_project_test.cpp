@@ -8,6 +8,7 @@
 #include "app/gui/render/LensPresets.h"
 #include "app/gui/render/RenderProject.h"
 #include "app/gui/render/Trajectory.h"
+#include "app/gui/render/TransitionFx.h"
 #include "data/DatasetParser.h"
 
 #include <cmath>
@@ -486,6 +487,73 @@ void test_refit_after_delete() {
     check(error(p) < 0.5 * gap, "an orbit missing a key is refitted back toward its circle");
 }
 
+void test_transitions() {
+    // Settings survive the file; a file from before the dips and wipes each
+    // became one comes in as the same thing.
+    RenderProject p;
+    p.sources.resize(2);
+    Shot a;
+    a.transition = Transition::Spiral;
+    shot_defaults(a);
+    a.param[0] = 2.5f;
+    Shot b;
+    b.start = 3.0;
+    b.transition = Transition::Dip;
+    shot_defaults(b);
+    b.colour[0] = 0.25f;
+    p.shots = {a, b};
+    const RenderProject q = project_from_json(project_to_json(p));
+    check(q.shots.size() == 2 && q.shots[0].transition == Transition::Spiral &&
+              q.shots[0].param[0] == 2.5f && q.shots[1].transition == Transition::Dip &&
+              q.shots[1].colour[0] == 0.25f,
+          "a transition's settings survive the JSON round trip");
+    const RenderProject old = project_from_json(
+        R"({"format":"spirula-render","version":1,"shots":[)"
+        R"({"start":0,"source":0,"transition":"dip_white","duration":1},)"
+        R"({"start":2,"source":0,"transition":"wipe_right","duration":1}]})");
+    check(old.shots.size() == 2 && old.shots[0].transition == Transition::Dip &&
+              old.shots[0].colour[0] == 1.0f && old.shots[1].transition == Transition::Wipe &&
+              old.shots[1].param[0] == 180.0f,
+          "an older file's dip to white and wipe right read as a white dip and a 180-degree wipe");
+
+    // Every 3D transition starts with the old model as it was and ends with
+    // the new one as it is -- out to the scene's outliers too.
+    FxGeo g;
+    g.radius = 2.0f;
+    g.h0 = -1.0f;
+    g.h1 = 1.5f;
+    bool ends = true;
+    std::string bad;
+    for (int kind = (int)Transition::Dust; kind <= (int)Transition::Ripple; kind++) {
+        Shot sh;
+        sh.transition = (Transition)kind;
+        shot_defaults(sh);
+        for (uint32_t i = 0; i < 400; i++) {
+            float r1, r2;
+            fx_random(i, r1, r2);
+            const float reach = i % 10 == 0 ? 3.0f : 1.0f;
+            const float pos[3] = {(r1 - 0.5f) * 4.0f * reach, (r2 - 0.5f) * 4.0f * reach,
+                                  (r1 * r2 - 0.3f) * 3.0f};
+            float d[3], al, sz;
+            auto still = [&](float want_alpha) {
+                return std::fabs(d[0]) + std::fabs(d[1]) + std::fabs(d[2]) < 1e-3f &&
+                       std::fabs(al - want_alpha) < 1e-3f && (want_alpha == 0.0f || std::fabs(sz - 1.0f) < 1e-3f);
+            };
+            fx_apply(kind, false, 0.0f, sh.param, g, pos, r1, r2, d, al, sz);
+            bool ok = still(1.0f);
+            fx_apply(kind, true, 1.0f, sh.param, g, pos, r1, r2, d, al, sz);
+            ok = ok && still(1.0f);
+            fx_apply(kind, true, 0.0f, sh.param, g, pos, r1, r2, d, al, sz);
+            ok = ok && al < 1e-3f;
+            fx_apply(kind, false, 1.0f, sh.param, g, pos, r1, r2, d, al, sz);
+            ok = ok && al < 1e-3f;
+            if (!ok) { ends = false; bad = std::to_string(kind); }
+        }
+    }
+    check(ends, "every 3D transition begins and ends where the models rest" +
+                    (bad.empty() ? std::string() : " (fails: " + bad + ")"));
+}
+
 // ---- a GIF decoder, just enough to read back what GifWriter wrote ----
 
 struct Gif {
@@ -640,6 +708,7 @@ int main() {
     test_key_times();
     test_looks();
     test_refit_after_delete();
+    test_transitions();
     test_gif();
     if (g_failures) {
         std::printf("%d FAILED\n", g_failures);

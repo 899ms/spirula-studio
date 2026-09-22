@@ -152,6 +152,9 @@ public:
     bool wait_result(uint64_t id, ViewResult& out, double timeout_s);
     // Non-blocking: true when the result of request `id` is available.
     bool try_get_result(uint64_t id, ViewResult& out);
+    // The same, handing the result over rather than copying it -- a frame's
+    // pixels, for the one consumer that asked; 0 s does not wait.
+    bool take_result(uint64_t id, ViewResult& out, double timeout_s);
 
     const ViewerRenderConfig& config() const;
 

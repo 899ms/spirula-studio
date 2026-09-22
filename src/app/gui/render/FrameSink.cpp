@@ -293,7 +293,8 @@ const std::vector<std::string>& ffmpeg_encoders_for(Codec codec) {
     switch (codec) {
         case Codec::H264: return k264;
         case Codec::H265: return k265;
-        case Codec::Av1: return kAv1;
+        case Codec::Av1:
+        case Codec::Av1Webm: return kAv1;
         default: return kNone;
     }
 }
@@ -365,7 +366,8 @@ std::vector<std::string> encoder_argv(const Encoder& e, int width, int height,
     }
     add({"-pix_fmt", "yuv420p"});
     if (codec == Codec::H265) add({"-tag:v", "hvc1"});
-    add({"-movflags", "+faststart", path});
+    if (codec != Codec::Av1Webm) add({"-movflags", "+faststart"});
+    a.push_back(path);
     return a;
 }
 

@@ -76,6 +76,7 @@ struct RenderWorker::Impl {
     bool has_pending = false;
     PendingReq pending;
     ViewResult result;
+    std::vector<float> raw_rgb, raw_ts;   // the worker thread's own
     uint64_t next_id = 1;
 
     // Device scratch (worker thread only).
@@ -110,6 +111,17 @@ struct RenderWorker::Impl {
         std::lock_guard<std::mutex> lk(mu);
         if (result.id != id) return false;
         out = result;
+        return true;
+    }
+
+    bool take_result(uint64_t id, ViewResult& out, double timeout_s) {
+        std::unique_lock<std::mutex> lk(mu);
+        if (timeout_s > 0.0)
+            cv_result.wait_for(lk, std::chrono::duration<double>(timeout_s),
+                               [&] { return result.id == id; });
+        if (result.id != id) return false;
+        out = std::move(result);
+        result = ViewResult{};
         return true;
     }
 
@@ -202,7 +214,11 @@ struct RenderWorker::Impl {
         std::memcpy(dist, q.dist, sizeof dist);
         const int sh_deg = q.sh_degree >= 0 ? q.sh_degree : 100;
         const std::string& primitive = q.primitive.empty() ? cfg.primitive : q.primitive;
-        std::vector<float> rgb((size_t)npx * 3), depth((size_t)npx), Ts((size_t)npx);
+        // Kept between frames: an export asks for hundreds at one size.
+        std::vector<float>& rgb = raw_rgb;
+        std::vector<float>& Ts = raw_ts;
+        rgb.resize((size_t)npx * 3);
+        Ts.resize((size_t)npx);
         {
             std::lock_guard<std::mutex> lk(*hooks.engine_mutex);
             if (cfg.scene_slot >= 0) engine_scene_activate(cfg.scene_slot);
@@ -217,15 +233,15 @@ struct RenderWorker::Impl {
                               tvp(intr, 4, {1, 4}),
                               tvp(dist, 4, {1, 8}));
             forward_3dgs(primitive, sh_deg, cfg.packed, false, 0);
-            engine_copy_render_to_host(tvp(rgb.data(), 4, {1, H, W, 3}),
-                                       tvp(depth.data(), 4, {1, H, W, 1}),
+            engine_copy_render_to_host(tvp(rgb.data(), 4, {1, H, W, 3}), tv_null(),
                                        tvp(Ts.data(), 4, {1, H, W, 1}),
                                        tv_null(), tv_null());
         }
         std::vector<uint8_t> out((size_t)npx * 4);
         auto to8 = [](float v) {
-            return (uint8_t)std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f);
+            return (uint8_t)(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
         };
+#pragma omp parallel for schedule(static)
         for (int64_t i = 0; i < npx; i++) {
             const float a = std::clamp(1.0f - Ts[(size_t)i], 0.0f, 1.0f);
             // Premultiplied: a colour brighter than its coverage is clamped
@@ -557,6 +573,10 @@ bool RenderWorker::wait_result(uint64_t id, ViewResult& out, double timeout_s) {
 
 bool RenderWorker::try_get_result(uint64_t id, ViewResult& out) {
     return _impl->try_get_result(id, out);
+}
+
+bool RenderWorker::take_result(uint64_t id, ViewResult& out, double timeout_s) {
+    return _impl->take_result(id, out, timeout_s);
 }
 
 const ViewerRenderConfig& RenderWorker::config() const { return _impl->cfg; }

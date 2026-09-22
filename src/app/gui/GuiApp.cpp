@@ -250,8 +250,10 @@ void GuiApp::open_render_output_pick(const std::string& start) {
                   FileDialog::Mode::Folder, {}, dir);
         return;
     }
+    using gui::render::Codec;
     const bool video = o.kind == OutputKind::Video;
-    const std::string ext = video ? ".mp4"
+    const std::string ext = video ? (o.codec == Codec::Gif ? ".gif"
+                                     : o.codec == Codec::Av1Webm ? ".webm" : ".mp4")
                             : o.format == gui::render::ImageFormat::Jpeg ? ".jpg" : ".png";
     open_pick(PickAction::RenderOutput, rmsg::pick_output_file.get(),
               FileDialog::Mode::Save, {ext}, dir, false,

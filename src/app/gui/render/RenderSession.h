@@ -44,9 +44,11 @@ struct SourceInfo {
     // Which way is up in the model's file frame, when a dataset says.
     bool has_up = false;
     double up[3] = {0, 0, 1};
-    // Changes each time the file is read again, and which pane shows it.
+    // Changes each time the file is read again, and which pane shows it and
+    // its uid, which lasts as long as the pane.
     uint64_t load_id = 0;
     int pane = -1;
+    uint64_t uid = 0;
 };
 
 class RenderSession : public ViewportInteractor {
@@ -78,9 +80,12 @@ public:
     void picked(Pick kind, const std::string& path);
     // Asked of the owner: go to the editor with this pane.
     void set_switch_to_edit(std::function<void()> f) { _to_edit = std::move(f); }
-    void set_leave(std::function<void()> f) { _leave = std::move(f); }
-    // Asked of the owner: close this pane, a model no longer wanted.
+    void set_leave(std::function<void()> f) { _on_leave = std::move(f); }
+    // Asked of the owner: close this pane, a model no longer wanted; open
+    // this file as another model; show (and edit) this pane's model.
     void set_remove_model(std::function<void(int pane)> f) { _remove_model = std::move(f); }
+    void set_add_model(std::function<void(const std::string&)> f) { _add_model = std::move(f); }
+    void set_view_model(std::function<void(int pane, bool edit)> f) { _view_model = std::move(f); }
     // The editor wrote `placement` (file coordinates) into `saved`: when the
     // primary model is read back from there, the keys are already where the
     // model went and must not be moved again.
@@ -121,8 +126,12 @@ private:
     // ---- the project and its history ----
     void new_project();
     void commit_history();
+    void reset_history();
+    void goto_step(int i);
     void undo();
     void redo();
+    const spirula::i18n::Msg* change_label(const std::string& before,
+                                           const std::string& after) const;
     void project_changed();
     const Trajectory& trajectory();
     void save_to(const std::string& path);
@@ -148,7 +157,14 @@ private:
     void smooth_pass(double strength);
     // The primary model moved in the editor: the keys go with it.
     void follow_placement();
+    // `index` is the project's; see _rt.
     void remove_source(int index);
+    void view_source(int index, bool edit);
+    void reconcile_sources();
+    int rt(int i) const { return i >= 0 && i < (int)_rt.size() ? _rt[(size_t)i] : -1; }
+    int project_source_of(int runtime) const;
+    std::string source_name(int i) const;
+    void draw_history_section(float full);
     void update_key_from_view(int index);
     void look_through(double time);
     // `fit`: the keys left move to keep the path as it was.
@@ -195,6 +211,7 @@ private:
         bool photo = false;
         bool builtin = false;            // the GPU encoder, which may hand over to ffmpeg
         int frame = 0, frames = 0;
+        bool queued = false;             // `frame` already asked of the renderers
         std::unique_ptr<FrameSink> sink;
         std::thread finisher;
         std::atomic<bool> finished{false};
@@ -206,6 +223,7 @@ private:
             photo = false;
             builtin = false;
             frame = frames = 0;
+            queued = false;
             sink.reset();
             finished = false;
             ok = true;
@@ -214,7 +232,9 @@ private:
             started = 0.0;
         }
     };
-    void start_export(bool no_builtin = false);
+    // `confirmed`: replacing what is at the output path was agreed to.
+    void start_export(bool no_builtin = false, bool confirmed = false);
+    void draw_overwrite_popup();
     void cancel_export();
     void poll_export();
     Encoder pick_encoder();
@@ -228,6 +248,7 @@ private:
     void draw_lens_section(float full);
     void draw_motion_section(float full);
     void draw_effects_section(float full);
+    void draw_shot_settings(Shot& s, float full);
     void draw_project_section(float full);
     void note(const std::string& s);
 
@@ -246,8 +267,25 @@ private:
     spirula::Sim3 _w2s;
     std::string _project_path;
     std::string _saved_json;             // what _project_path holds
-    std::string _stable_json;            // the last committed state
-    std::vector<std::string> _undo, _redo;
+    // Every state the project has been in, `_head` the one it is in: undo
+    // and redo walk it, the history list jumps along it.
+    struct Step {
+        std::string json;
+        const spirula::i18n::Msg* label = nullptr;
+        std::vector<uint64_t> uids;
+    };
+    std::vector<Step> _hist;
+    int _head = 0;
+    bool _hist_scroll = false;           // the list follows a new step
+    // The project's sources against the open ones (_sources, the owner's
+    // order, [0] shown): the pane uid each was last matched to, and its
+    // index in _sources, -1 while it is not open.
+    std::vector<uint64_t> _src_uid;
+    std::vector<int> _rt;
+    // 1: open what the project lists and is not open; 2: close the rest too.
+    int _sync_models = 0;
+    std::vector<std::string> _asked_open;
+    std::vector<uint64_t> _asked_close;
     uint64_t _revision = 1;
     std::unique_ptr<Trajectory> _traj;
     uint64_t _traj_rev = 0;
@@ -306,6 +344,10 @@ private:
     // Timeline.
     int _drag_key = -1;
     double _drag_key_from = 0.0;
+    // A shot's start, or with `_drag_shot_end` its transition's end, in hand.
+    int _drag_shot = -1;
+    bool _drag_shot_end = false;
+    double _drag_shot_from = 0.0;
     bool _scrubbing = false;
     bool _timeline_hovered = false;
     float _timeline_zoom = 1.0f;
@@ -318,6 +360,8 @@ private:
     std::vector<std::string> _ffmpeg_encoders;
     bool _fallback_tried = false;        // the GPU encoder failed; ffmpeg next
     bool _export_after_pick = false;     // the render button asked where to
+    bool _ask_overwrite = false;
+    int _overwrite_frames = 0;           // frame files in the folder, or 0 for a file
     bool builtin_encodes(Codec codec, int width, int height) const;
     std::thread _probe;
     std::string _ffmpeg = "ffmpeg";
@@ -334,8 +378,10 @@ private:
     std::string _dataset_lenses_key;
 
     std::function<void(Pick, const std::string&, const std::string&)> _pick;
-    std::function<void()> _to_edit, _leave;
+    std::function<void()> _to_edit, _on_leave;
     std::function<void(int)> _remove_model;
+    std::function<void(const std::string&)> _add_model;
+    std::function<void(int, bool)> _view_model;
     std::vector<std::string> _log;
     std::string _status;
     bool _status_err = false;

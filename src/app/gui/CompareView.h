@@ -123,6 +123,7 @@ private:
         const spirula::i18n::Msg* title = nullptr;
         int slot = -1;              // engine scene slot
         uint64_t load_id = 0;       // a new one each time the file is read
+        uint64_t uid = 0;           // the pane's own, for as long as it is open
         bool attached = false;
         // Placement in the shared frame. `align` puts the model in the FIRST
         // model's frame rather than in its own; the rest is the hand
@@ -167,6 +168,17 @@ private:
     // Pane-menu actions, applied by the next poll(): a pane cannot remove or
     // reorder itself while its own popup is being drawn inside it.
     int _pending_remove = -1;
+    // Asked for by the render, by pane uid: one a frame, since each can move
+    // the render to another pane.
+    std::vector<uint64_t> _pending_remove_uids;
+    int _pending_view = -1;
+    bool _pending_view_edit = false;
+    uint64_t _uids = 0;
+    // The editor's placement copied onto the other panes (EditSession's
+    // "move the others with it"), so that they go back when it ends.
+    bool _synced = false;
+    void sync_placements();
+    spirula::Sim3 file_to_norm_of(Model& m);
     int _pending_move = 0;
     int _pending_move_index = -1;
     // Tallest control block across the panes on the last draw; the shorter

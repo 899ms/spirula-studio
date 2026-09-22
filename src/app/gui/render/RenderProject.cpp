@@ -25,14 +25,14 @@ constexpr int kVersion = 1;
 const char* const kProjectionNames[kNumProjections] = {
     "perspective", "fisheye", "equisolid", "equirectangular"};
 const char* const kTransitionNames[kNumTransitions] = {
-    "cut", "crossfade", "dip_black", "dip_white", "wipe_left", "wipe_right",
-    "wipe_up", "wipe_down", "iris", "sweep", "grow"};
+    "cut", "crossfade", "dip", "wipe", "iris", "zoom", "sweep", "grow", "dust",
+    "spiral", "scatter", "rain", "dissolve", "ripple"};
 const char* const kPointStyleNames[kNumPointStyles] = {
     "square", "circle", "gaussian", "sphere"};
 const char* const kOutputNames[3] = {"photo", "video", "frames"};
 const char* const kFadeNames[3] = {"none", "black", "white"};
 const char* const kImageFormatNames[kNumImageFormats] = {"png", "png_alpha", "jpeg"};
-const char* const kCodecNames[kNumCodecs] = {"h264", "h265", "av1", "gif"};
+const char* const kCodecNames[kNumCodecs] = {"h264", "h265", "av1", "gif", "av1_webm"};
 const char* const kCurveNames[kNumCurves] = {"spline", "catmull_rom", "linear"};
 
 template <int N>
@@ -249,6 +249,29 @@ Lens RenderProject::lens_at(int i) const {
     return l;
 }
 
+void shot_defaults(Shot& s) {
+    float p0 = 0.0f, p1 = 0.0f, c[3] = {0.0f, 0.0f, 0.0f};
+    switch (s.transition) {
+        case Transition::Wipe: p0 = 0.0f; p1 = 0.03f; break;       // direction, degrees; softness
+        case Transition::Iris: p1 = 0.03f; break;                  // softness
+        case Transition::Zoom: p0 = 0.5f; break;                   // strength
+        case Transition::Sweep:                                    // down (1) or up; glow
+            p1 = 0.6f;
+            c[0] = 1.0f; c[1] = 0.86f; c[2] = 0.6f;
+            break;
+        case Transition::Dust: p1 = 0.5f; break;                   // fall, rise or blow; turbulence
+        case Transition::Spiral: p0 = 1.25f; p1 = 1.0f; break;     // turns; spread
+        case Transition::Scatter: p0 = 1.0f; p1 = 0.5f; break;     // distance; randomness
+        case Transition::Rain: p0 = 1.2f; p1 = 0.7f; break;        // height; stagger
+        case Transition::Dissolve: p0 = 0.6f; break;               // sparkle
+        case Transition::Ripple: p0 = 0.25f; p1 = 0.3f; break;     // height; width
+        default: break;
+    }
+    s.param[0] = p0;
+    s.param[1] = p1;
+    for (int k = 0; k < 3; k++) s.colour[k] = c[k];
+}
+
 bool SourceStyle::operator==(const SourceStyle& o) const {
     return point_style == o.point_style && point_px == o.point_px &&
            sphere_radius == o.sphere_radius && cameras == o.cameras && shade == o.shade &&
@@ -373,6 +396,28 @@ void transform_project(RenderProject& p, const spirula::Sim3& s) {
 }
 
 
+void fit_output_path(Output& o) {
+    if (o.path.empty()) return;
+    fs::path p = fs::u8path(o.path);
+    const std::string ext = p.extension().string();
+    if (o.kind == OutputKind::Frames) {
+        if (!ext.empty()) p.replace_extension();
+    } else if (o.kind == OutputKind::Video && o.codec == Codec::Gif) {
+        if (ext != ".gif") p.replace_extension(".gif");
+    } else if (o.kind == OutputKind::Video && o.codec == Codec::Av1Webm) {
+        if (ext != ".webm") p.replace_extension(".webm");
+    } else if (o.kind == OutputKind::Video) {
+        if (ext != ".mp4" && ext != ".h264" && ext != ".h265" && ext != ".obu")
+            p.replace_extension(".mp4");
+    } else {
+        const char* want = o.format == ImageFormat::Jpeg ? ".jpg" : ".png";
+        if (ext != want && !(o.format == ImageFormat::Jpeg && ext == ".jpeg"))
+            p.replace_extension(want);
+    }
+    o.path = p.string();
+}
+
+
 // ===========================================================================
 // JSON
 // ===========================================================================
@@ -437,6 +482,8 @@ std::string project_to_json(const RenderProject& p) {
         w.field("source", s.source);
         w.field("transition", kTransitionNames[(int)s.transition]);
         w.key("duration").raw(json_number_exact(s.duration));
+        write_vecf(w, "params", s.param, 2);
+        write_vecf(w, "colour", s.colour, 3);
         w.end();
     }
     w.end();
@@ -538,8 +585,25 @@ RenderProject project_from_json(const std::string& text) {
             Shot s;
             s.start = std::max(0.0, get_num(o, "start", 0.0));
             s.source = std::max(-1, (int)get_num(o, "source", 0));
-            s.transition = (Transition)name_index(kTransitionNames,
-                                                  get_str(o, "transition"), 0);
+            // Files from before the dips and wipes each became one with a
+            // setting: their colour and direction carry over.
+            const std::string tr = get_str(o, "transition");
+            struct Old { const char* name; Transition t; float p0; float colour; };
+            static const Old kOld[] = {
+                {"dip_black", Transition::Dip, 0.0f, 0.0f}, {"dip_white", Transition::Dip, 0.0f, 1.0f},
+                {"wipe_left", Transition::Wipe, 0.0f, 0.0f}, {"wipe_right", Transition::Wipe, 180.0f, 0.0f},
+                {"wipe_up", Transition::Wipe, 270.0f, 0.0f}, {"wipe_down", Transition::Wipe, 90.0f, 0.0f}};
+            s.transition = (Transition)name_index(kTransitionNames, tr, 0);
+            for (const Old& od : kOld)
+                if (tr == od.name) s.transition = od.t;
+            shot_defaults(s);
+            for (const Old& od : kOld)
+                if (tr == od.name) {
+                    if (od.t == Transition::Wipe) s.param[0] = od.p0;
+                    for (float& c : s.colour) c = od.t == Transition::Dip ? od.colour : c;
+                }
+            read_vecf(o, "params", s.param, 2);
+            read_vecf(o, "colour", s.colour, 3);
             s.duration = std::clamp(get_num(o, "duration", 1.0), 0.0, 3600.0);
             p.shots.push_back(s);
         }

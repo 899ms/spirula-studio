@@ -92,6 +92,10 @@ public:
     // Off while another panel is showing -- the render's, over this same
     // pane -- whose keys G, X and Ctrl+A are then.
     void set_keys(bool on) { _keys_on = on; }
+    // Other models open beside this one; then the Transform tab offers to
+    // move them along (CompareView applies it).
+    void set_others_open(bool on) { _others_open = on; }
+    bool sync_others() const { return _others_open && _sync_others; }
     // The editing panel: tools, options, selection, actions, history.
     void draw_panel();
     // One line under the viewport: the active tool and its keys.
@@ -338,6 +342,8 @@ private:
     // clears it when it is answered.
     bool _ask_overwrite = false;
     bool _keys_on = true;
+    bool _others_open = false;
+    bool _sync_others = true;
 };
 
 }  // namespace gui

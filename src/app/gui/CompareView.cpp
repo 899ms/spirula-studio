@@ -100,6 +100,7 @@ void CompareView::add(const std::string& path,
     m->title = title;
     m->slot = claim_slot();
     m->load_id = ++_loads;
+    m->uid = ++_uids;
     m->src.open(path, m->slot, &_engine_mutex);
     _models.push_back(std::move(m));
 }
@@ -305,6 +306,21 @@ void CompareView::poll() {
         move(_pending_move_index, _pending_move);
         _pending_move = 0;
     }
+    if (_pending_remove < 0 && !_pending_remove_uids.empty()) {
+        const uint64_t uid = _pending_remove_uids.front();
+        _pending_remove_uids.erase(_pending_remove_uids.begin());
+        for (int i = 0; i < count(); i++)
+            if (_models[(size_t)i]->uid == uid) _pending_remove = i;
+    }
+    if (_pending_view >= 0) {
+        const int to = _pending_view;
+        const bool edit = _pending_view_edit;
+        _pending_view = -1;
+        if (to < count() && _models[(size_t)to]->attached) {
+            if (to != _render_index) begin_render(to);
+            if (edit && _render_index == to) begin_edit(to);
+        }
+    }
     if (_pending_remove >= 0) {
         const int gone = _pending_remove;
         _pending_remove = -1;
@@ -337,7 +353,9 @@ void CompareView::poll() {
     }
     finish_edit_load();
     _edit.set_keys(_render_index < 0);
+    _edit.set_others_open(count() > 1);
     if (_edit.active()) _edit.poll();
+    sync_placements();
     if (_render_index >= 0) {
         feed_render();
         _render.poll();
@@ -386,6 +404,14 @@ void CompareView::end_edit(bool reload_panes) {
     const int index = _edit_index;
     const bool stale = _edit.active() && _edit.saved_over_source();
     const bool linked = stale && _edit.doc()->linked_count() > 0;
+    // The others followed a placement that is now only in memory, unless it
+    // went into the file they were aligned with.
+    if (_synced && !stale) {
+        static const float kIdentity[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        for (int i = 0; i < count(); i++)
+            if (i != index) _models[(size_t)i]->panel.set_edit_transform(kIdentity);
+    }
+    _synced = false;
     _edit.close();
     _edit_index = -1;
     // Closing the editor let go of the pane; a render on it takes it back.
@@ -510,7 +536,14 @@ void CompareView::begin_render(int index) {
     });
     _render.set_leave([this] { end_render(); });
     _render.set_remove_model([this](int pane) {
-        if (pane >= 0 && pane < count()) _pending_remove = pane;
+        if (pane >= 0 && pane < count()) _pending_remove_uids.push_back(_models[(size_t)pane]->uid);
+    });
+    _render.set_add_model([this](const std::string& path) {
+        if (!full()) add(path);
+    });
+    _render.set_view_model([this](int pane, bool edit) {
+        _pending_view = pane;
+        _pending_view_edit = edit;
     });
     if (index < 0 || index >= count() || !_models[(size_t)index]->attached) return;
     // An edit on another pane would be left drawing nowhere.
@@ -521,7 +554,7 @@ void CompareView::begin_render(int index) {
         });
         return;
     }
-    if (_render_index >= 0 && _render_index != index) end_render();
+    if (_render_index >= 0 && _render_index != index) end_render(true);
     _render_index = index;
     feed_render();
     _render.open(&_models[(size_t)index]->panel);
@@ -620,6 +653,7 @@ void CompareView::feed_render() {
         render::SourceInfo si;
         si.path = m.path;
         si.load_id = m.load_id;
+        si.uid = m.uid;
         si.pane = i;
         si.name = display_name(m.src.file().empty() ? m.path : m.src.file());
         render::SourceView& v = si.view;
@@ -690,6 +724,55 @@ void CompareView::feed_render() {
     _models[(size_t)_render_index]->panel.base_transform(base);
     _render.set_world_to_shared(spirula::Sim3::from_3x4(base) * out[0].view.file_to_norm);
     _render.set_sources(std::move(out));
+}
+
+spirula::Sim3 CompareView::file_to_norm_of(Model& m) {
+    switch (m.src.kind()) {
+        case SplatViewer::Kind::Points: {
+            double T[16], A[16], a[12];
+            for (int k = 0; k < 16; k++) T[k] = m.src.points().train_to_normalized[k];
+            dsparse::invert_affine4x4(T, A);
+            for (int k = 0; k < 12; k++) a[k] = A[k];
+            return spirula::Sim3::from_3x4(a);
+        }
+        case SplatViewer::Kind::Mesh:
+            return spirula::Sim3::from_3x4(m.src.mesh_to_normalized());
+        default: {
+            float t[12];
+            m.src.to_view_frame(t);
+            return spirula::Sim3::from_3x4(t);
+        }
+    }
+}
+
+// The edited model's placement, in the file coordinates every open model is
+// taken to share, shown on the others too while the editor asks for it.
+void CompareView::sync_placements() {
+    static const float kIdentity[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+    const bool want = _edit.active() && _edit.sync_others() && _edit_index >= 0 &&
+                      _edit_index < count();
+    if (!want) {
+        if (_synced)
+            for (int i = 0; i < count(); i++)
+                if (i != _edit_index) _models[(size_t)i]->panel.set_edit_transform(kIdentity);
+        _synced = false;
+        return;
+    }
+    Model& a = *_models[(size_t)_edit_index];
+    if (!a.attached) return;
+    float e[12];
+    a.panel.edit_transform(e);
+    const spirula::Sim3 fa = file_to_norm_of(a);
+    const spirula::Sim3 placement = fa.inverse() * spirula::Sim3::from_3x4(e) * fa;
+    for (int i = 0; i < count(); i++) {
+        Model& m = *_models[(size_t)i];
+        if (i == _edit_index || !m.attached) continue;
+        const spirula::Sim3 f = file_to_norm_of(m);
+        float out[12];
+        (f * placement * f.inverse()).to_3x4(out);
+        m.panel.set_edit_transform(out);
+    }
+    _synced = true;
 }
 
 // Every other mesh pane, filtered by the same face set. They keep their own

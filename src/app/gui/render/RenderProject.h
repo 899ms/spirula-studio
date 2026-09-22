@@ -91,13 +91,15 @@ struct Keyframe {
     std::vector<KeyLook> looks;
 };
 
-// How the picture passes from one shot to the next. Wipe, iris and sweep
-// are shapes; grow is the model assembling itself (docs/notes/render-video.md).
+// How the picture passes from one shot to the next. Up to Zoom they work on
+// the picture; from Sweep on they move the models' own points, splats and
+// vertices in 3D (docs/notes/render-video.md).
 enum class Transition {
-    Cut = 0, Crossfade, DipBlack, DipWhite, WipeLeft, WipeRight, WipeUp,
-    WipeDown, Iris, Sweep, Grow
+    Cut = 0, Crossfade, Dip, Wipe, Iris, Zoom,
+    Sweep, Grow, Dust, Spiral, Scatter, Rain, Dissolve, Ripple
 };
-constexpr int kNumTransitions = 11;
+constexpr int kNumTransitions = 14;
+inline bool transition_in_3d(Transition t) { return t >= Transition::Sweep; }
 
 // From `start` on, `source` is what is shown, entering by `transition` over
 // `duration` seconds. Source -1 is the background alone.
@@ -106,7 +108,12 @@ struct Shot {
     int source = 0;
     Transition transition = Transition::Cut;
     double duration = 1.0;
+    // The transition's own settings; what each means is in shot_defaults.
+    float param[2] = {0.0f, 0.0f};
+    float colour[3] = {0.0f, 0.0f, 0.0f};
 };
+// `s.transition`'s settings as they look best untouched.
+void shot_defaults(Shot& s);
 
 struct Source {
     std::string path;                   // what was opened, as the viewer took it
@@ -117,9 +124,10 @@ enum class OutputKind { Photo = 0, Video, Frames };
 // Photos and frames; PngAlpha keeps what is not the model transparent.
 enum class ImageFormat { Png = 0, PngAlpha, Jpeg };
 constexpr int kNumImageFormats = 3;
-// Videos: an MP4 in one of three codecs, or an animated GIF.
-enum class Codec { H264 = 0, H265, Av1, Gif };
-constexpr int kNumCodecs = 4;
+// Videos: an MP4 in one of three codecs, AV1 in WebM, or an animated GIF.
+// The first three are also what the GPU encoder knows, in its order.
+enum class Codec { H264 = 0, H265, Av1, Gif, Av1Webm };
+constexpr int kNumCodecs = 5;
 
 struct Output {
     OutputKind kind = OutputKind::Video;
@@ -200,6 +208,10 @@ void update_aim(Keyframe& k, const double up[3]);
 // rotations by its rotation. A model turned in the editor takes its camera
 // move with it this way.
 void transform_project(RenderProject& p, const spirula::Sim3& s);
+
+// The output path's extension made to match what is written: none for a
+// folder of frames, .mp4 / .webm / .gif for a video, .png / .jpg for a photo.
+void fit_output_path(Output& o);
 
 std::string project_to_json(const RenderProject& p);
 // Throws std::runtime_error on a file that is not a project.

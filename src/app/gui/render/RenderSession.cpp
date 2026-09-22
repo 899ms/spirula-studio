@@ -18,12 +18,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 namespace msg = spirula::i18n::msg::render;
 using spirula::Sim3;
 using spirula::i18n::format;
+using spirula::i18n::Msg;
 
 namespace gui::render {
 
@@ -162,12 +164,74 @@ void RenderSession::set_sources(std::vector<SourceInfo> sources) {
     }
     if (!_have_project) return;
     follow_placement();
-    // The project's list follows what is open, by position; a style set for
-    // a model that has gone stays for the one that takes its place.
-    if (_project.sources.size() < _sources.size())
-        _project.sources.resize(_sources.size());
-    for (size_t i = 0; i < _sources.size(); i++)
-        _project.sources[i].path = _sources[i].path;
+    reconcile_sources();
+}
+
+// The project's models against the open ones, by pane, else by path (a file,
+// an undo). Open and unlisted joins the list -- or, after an undo, is closed,
+// as listed and not open is opened.
+void RenderSession::reconcile_sources() {
+    const int n = (int)_project.sources.size(), m = (int)_sources.size();
+    _src_uid.resize((size_t)n, 0);
+    _rt.assign((size_t)n, -1);
+    std::vector<uint8_t> taken((size_t)m, 0);
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < m && _rt[(size_t)i] < 0; j++)
+            if (!taken[(size_t)j] && _src_uid[(size_t)i] && _sources[(size_t)j].uid == _src_uid[(size_t)i]) {
+                _rt[(size_t)i] = j;
+                taken[(size_t)j] = 1;
+            }
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < m && _rt[(size_t)i] < 0; j++)
+            if (!taken[(size_t)j] && _sources[(size_t)j].path == _project.sources[(size_t)i].path) {
+                _rt[(size_t)i] = j;
+                taken[(size_t)j] = 1;
+                _src_uid[(size_t)i] = _sources[(size_t)j].uid;
+            }
+    bool settled = true;
+    for (int j = 0; j < m; j++) {
+        if (taken[(size_t)j]) continue;
+        const SourceInfo& s = _sources[(size_t)j];
+        if (_sync_models == 2) {
+            settled = false;
+            if (std::find(_asked_close.begin(), _asked_close.end(), s.uid) == _asked_close.end()) {
+                _asked_close.push_back(s.uid);
+                if (_remove_model) _remove_model(s.pane);
+            }
+            continue;
+        }
+        Source src;
+        src.path = s.path;
+        _project.sources.push_back(src);
+        _src_uid.push_back(s.uid);
+        _rt.push_back(j);
+    }
+    for (int i = 0; i < n; i++) {
+        if (_rt[(size_t)i] >= 0 || !_sync_models) continue;
+        const std::string& path = _project.sources[(size_t)i].path;
+        if (std::find(_asked_open.begin(), _asked_open.end(), path) != _asked_open.end()) continue;
+        _asked_open.push_back(path);
+        if (_add_model && !path.empty()) _add_model(path);
+    }
+    for (int i = 0; i < n; i++) settled = settled && _rt[(size_t)i] >= 0;
+    if (settled) {
+        _sync_models = 0;
+        _asked_open.clear();
+        _asked_close.clear();
+    }
+}
+
+int RenderSession::project_source_of(int runtime) const {
+    for (int i = 0; i < (int)_rt.size(); i++)
+        if (_rt[(size_t)i] == runtime) return i;
+    return -1;
+}
+
+std::string RenderSession::source_name(int i) const {
+    const int r = rt(i);
+    if (r >= 0) return _sources[(size_t)r].name;
+    if (i < 0 || i >= (int)_project.sources.size()) return {};
+    return fs::u8path(_project.sources[(size_t)i].path).filename().string();
 }
 
 
@@ -178,12 +242,16 @@ void RenderSession::set_sources(std::vector<SourceInfo> sources) {
 void RenderSession::new_project() {
     _project = RenderProject();
     _have_project = true;
+    _src_uid.clear();
     for (const SourceInfo& s : _sources) {
         Source src;
         src.path = s.path;
         if (s.view.kind == SourceView::Points) src.style.point_style = PointStyle::Circle;
         _project.sources.push_back(src);
+        _src_uid.push_back(s.uid);
     }
+    _sync_models = 0;
+    reconcile_sources();
     // Up is the dataset's when one says, else whatever the pane shows as up.
     const Sim3 s2w = _w2s.inverse();
     const double z[3] = {0, 0, 1};
@@ -207,9 +275,7 @@ void RenderSession::new_project() {
     _baked_path.clear();
     _project_path.clear();
     _saved_json = project_to_json(_project);
-    _stable_json = _saved_json;
-    _undo.clear();
-    _redo.clear();
+    reset_history();
     _time = 0.0;
     project_changed();
 }
@@ -227,48 +293,114 @@ const Trajectory& RenderSession::trajectory() {
     return *_traj;
 }
 
+void RenderSession::reset_history() {
+    _hist.assign(1, Step{project_to_json(_project), &msg::hist_start, _src_uid});
+    _head = 0;
+}
+
 void RenderSession::commit_history() {
-    if (!_have_project) return;
+    if (!_have_project || _hist.empty()) return;
     const std::string cur = project_to_json(_project);
-    if (cur == _stable_json) return;
+    if (cur == _hist[(size_t)_head].json) return;
     // Mid-gesture: a drag is one step, taken when it lets go.
     if (ImGui::IsAnyItemActive() || _xform.active() || _drag_key >= 0 || _scrubbing)
         return;
-    if (!_stable_json.empty()) {
-        _undo.push_back(_stable_json);
-        if (_undo.size() > 200) _undo.erase(_undo.begin());
-        _redo.clear();
-    }
-    _stable_json = cur;
+    const Msg* label = change_label(_hist[(size_t)_head].json, cur);
+    _hist.resize((size_t)_head + 1);
+    _hist.push_back(Step{cur, label, _src_uid});
+    if (_hist.size() > 200) _hist.erase(_hist.begin());
+    _head = (int)_hist.size() - 1;
+    _hist_scroll = true;
     project_changed();
 }
 
-void RenderSession::undo() {
-    if (_undo.empty()) return;
-    _redo.push_back(project_to_json(_project));
+// What a step did, from the project before and after it, as the history
+// lists it. Both sides come through the JSON, which is what a step keeps.
+const Msg* RenderSession::change_label(const std::string& before, const std::string& after) const {
+    RenderProject a, b;
     try {
-        _project = project_from_json(_undo.back());
+        a = project_from_json(before);
+        b = project_from_json(after);
     } catch (const std::exception&) {
+        return &msg::hist_change;
     }
-    _undo.pop_back();
-    _stable_json = project_to_json(_project);
+    if (a.sources.size() != b.sources.size())
+        return a.sources.size() < b.sources.size() ? &msg::hist_model_add : &msg::hist_model_remove;
+    if (a.keys.size() != b.keys.size())
+        return a.keys.size() < b.keys.size() ? &msg::hist_keys_add : &msg::hist_keys_delete;
+    if (a.shots.size() != b.shots.size())
+        return a.shots.size() < b.shots.size() ? &msg::hist_shot_add : &msg::hist_shot_remove;
+    bool pose = false, time = false, lens = false, looks = false, other = false;
+    for (size_t i = 0; i < a.keys.size(); i++) {
+        const Keyframe& x = a.keys[i];
+        const Keyframe& y = b.keys[i];
+        for (int d = 0; d < 3; d++)
+            pose = pose || x.pos[d] != y.pos[d] || x.target[d] != y.target[d];
+        for (int d = 0; d < 4; d++) pose = pose || x.rot[d] != y.rot[d];
+        pose = pose || x.roll != y.roll;
+        time = time || x.time != y.time;
+        lens = lens || x.own_lens != y.own_lens || (x.own_lens && x.lens != y.lens);
+        looks = looks || x.looks.size() != y.looks.size();
+        for (size_t k = 0; k < x.looks.size() && k < y.looks.size(); k++)
+            looks = looks || x.looks[k].source != y.looks[k].source || x.looks[k].style != y.looks[k].style;
+        other = other || x.hold != y.hold || x.aim != y.aim;
+    }
+    if (pose) return &msg::hist_keys_move;
+    if (time) return &msg::hist_keys_time;
+    if (lens) return &msg::hist_lens;
+    if (looks) return &msg::hist_looks;
+    if (other) return &msg::hist_key_settings;
+    const Motion& ma = a.motion;
+    const Motion& mb = b.motion;
+    if (ma.curve != mb.curve || ma.ease != mb.ease || ma.constant_speed != mb.constant_speed ||
+        ma.loop != mb.loop || ma.tension != mb.tension || a.end != b.end)
+        return &msg::hist_motion;
+    for (size_t i = 0; i < a.sources.size(); i++)
+        if (a.sources[i].style != b.sources[i].style || a.sources[i].path != b.sources[i].path)
+            return &msg::hist_model_style;
+    for (size_t i = 0; i < a.shots.size(); i++) {
+        const Shot& x = a.shots[i];
+        const Shot& y = b.shots[i];
+        if (x.start != y.start || x.source != y.source || x.transition != y.transition ||
+            x.duration != y.duration || std::memcmp(x.param, y.param, sizeof x.param) != 0 ||
+            std::memcmp(x.colour, y.colour, sizeof x.colour) != 0)
+            return &msg::hist_shots;
+    }
+    if (a.fade_in.colour != b.fade_in.colour || a.fade_in.seconds != b.fade_in.seconds ||
+        a.fade_out.colour != b.fade_out.colour || a.fade_out.seconds != b.fade_out.seconds ||
+        std::memcmp(a.background, b.background, sizeof a.background) != 0)
+        return &msg::hist_fades;
+    const Output& oa = a.output;
+    const Output& ob = b.output;
+    if (oa.kind != ob.kind || oa.width != ob.width || oa.height != ob.height || oa.fps != ob.fps ||
+        oa.format != ob.format || oa.jpeg_quality != ob.jpeg_quality || oa.codec != ob.codec ||
+        oa.quality != ob.quality || oa.path != ob.path)
+        return &msg::hist_output;
+    if (std::memcmp(a.up, b.up, sizeof a.up) != 0) return &msg::hist_up;
+    return &msg::hist_change;
+}
+
+void RenderSession::goto_step(int i) {
+    if (i < 0 || i >= (int)_hist.size() || i == _head) return;
+    try {
+        _project = project_from_json(_hist[(size_t)i].json);
+    } catch (const std::exception&) {
+        return;
+    }
+    _head = i;
+    _src_uid = _hist[(size_t)i].uids;
+    // The models open are brought back to the ones this step had.
+    _sync_models = 2;
+    _asked_open.clear();
+    _asked_close.clear();
+    reconcile_sources();
     // Same keys, same selection: undoing a move leaves the camera in hand.
     if (_sel.size() != _project.keys.size()) _sel.assign(_project.keys.size(), 0);
     project_changed();
 }
 
-void RenderSession::redo() {
-    if (_redo.empty()) return;
-    _undo.push_back(project_to_json(_project));
-    try {
-        _project = project_from_json(_redo.back());
-    } catch (const std::exception&) {
-    }
-    _redo.pop_back();
-    _stable_json = project_to_json(_project);
-    if (_sel.size() != _project.keys.size()) _sel.assign(_project.keys.size(), 0);
-    project_changed();
-}
+void RenderSession::undo() { goto_step(_head - 1); }
+void RenderSession::redo() { goto_step(_head + 1); }
 
 // The primary model's placement now, file coordinates: what the poses are
 // laid out against.
@@ -303,16 +435,16 @@ void RenderSession::open_from(const std::string& path) {
         _have_project = true;
         _tracked_load = _sources.empty() ? 0 : _sources[0].load_id;
         _baked_path.clear();
-        // The models are whatever is open now, in the order it is open.
-        if (_project.sources.size() < _sources.size())
-            _project.sources.resize(_sources.size());
-        for (size_t i = 0; i < _sources.size(); i++)
-            _project.sources[i].path = _sources[i].path;
+        // Its models by path: what it names and is not open is opened, and
+        // what is open besides joins it.
+        _src_uid.assign(_project.sources.size(), 0);
+        _sync_models = 1;
+        _asked_open.clear();
+        _asked_close.clear();
+        reconcile_sources();
         _project_path = path;
         _saved_json = project_to_json(_project);
-        _stable_json = _saved_json;
-        _undo.clear();
-        _redo.clear();
+        reset_history();
         _sel.assign(_project.keys.size(), 0);
         _time = 0.0;
         project_changed();
@@ -331,6 +463,7 @@ void RenderSession::picked(Pick kind, const std::string& path) {
         case Pick::OpenProject: open_from(path); break;
         case Pick::Output:
             _project.output.path = path;
+            fit_output_path(_project.output);
             project_changed();
             // Asked for by the render button: it goes ahead now.
             if (_export_after_pick) {
@@ -584,7 +717,12 @@ void RenderSession::space_evenly(double total) {
     const int gaps = _project.motion.loop ? n : n - 1;
     total = std::max(total, 0.1 * gaps);
     for (int i = 0; i < n; i++) _project.keys[(size_t)i].time = total * i / gaps;
-    if (_project.motion.loop) _project.end = total;
+    _project.end = _project.motion.loop ? total : 0.0;
+    // At constant speed the path, not the times, says when a key is passed.
+    if (_project.motion.constant_speed) {
+        _project.motion.constant_speed = false;
+        note(msg::space_evenly_speed.get());
+    }
     project_changed();
 }
 
@@ -684,19 +822,20 @@ void RenderSession::follow_placement() {
     }
     // Not a step anyone takes back: every snapshot records its own placement
     // and comes back through here.
-    const bool stable = project_to_json(_project) == _stable_json;
+    const bool stable = !_hist.empty() && project_to_json(_project) == _hist[(size_t)_head].json;
     const bool saved = project_to_json(_project) == _saved_json;
     transform_project(_project, move);
     _project.placement = now;
-    if (stable) _stable_json = project_to_json(_project);
+    if (stable) _hist[(size_t)_head].json = project_to_json(_project);
     if (saved) _saved_json = project_to_json(_project);
     _preview_key.clear();
     project_changed();
 }
 
 void RenderSession::remove_source(int index) {
-    if (index < 0 || index >= (int)_sources.size() || _sources.size() < 2) return;
-    const int pane = _sources[(size_t)index].pane;
+    if (index < 0 || index >= (int)_project.sources.size() || _project.sources.size() < 2) return;
+    const int r = rt(index);
+    const int pane = r >= 0 ? _sources[(size_t)r].pane : -1;
     for (Shot& sh : _project.shots) {
         if (sh.source == index) sh.source = 0;
         else if (sh.source > index) sh.source--;
@@ -710,16 +849,28 @@ void RenderSession::remove_source(int index) {
         }
         k.looks = std::move(kept);
     }
-    if (index < (int)_project.sources.size())
-        _project.sources.erase(_project.sources.begin() + index);
-    // The next model becomes the primary one: the keys cross from the old
-    // one's placement to its, not to wherever it was read from.
-    if (index == 0) {
+    _project.sources.erase(_project.sources.begin() + index);
+    if (index < (int)_src_uid.size()) _src_uid.erase(_src_uid.begin() + index);
+    // The model shown goes: the next one open is shown instead, and the keys
+    // cross from the old one's placement to its, not to wherever it was read.
+    if (r == 0 && _sources.size() >= 2) {
         _tracked_load = _sources[1].load_id;
         _baked_path.clear();
     }
+    reconcile_sources();
     project_changed();
     if (_remove_model && pane >= 0) _remove_model(pane);
+}
+
+void RenderSession::view_source(int index, bool edit) {
+    const int r = rt(index);
+    if (r < 0 || !_view_model) return;
+    // Shown from another model: the keys cross to its placement as above.
+    if (r != 0) {
+        _tracked_load = _sources[(size_t)r].load_id;
+        _baked_path.clear();
+    }
+    _view_model(_sources[(size_t)r].pane, edit);
 }
 
 // The view's own up, for a model no dataset levels: turn the view until the
@@ -1439,8 +1590,10 @@ FrameSpec RenderSession::frame_spec(double t, int W, int H, bool photo) {
     for (int i = 0; i < (int)shots.size(); i++)
         if (shots[(size_t)i].start <= t) j = i;
     const Shot& sh = shots[(size_t)j];
-    const int B = sh.source < (int)_sources.size() ? sh.source : -1;
-    const int A = j > 0 ? std::min(shots[(size_t)j - 1].source, (int)_sources.size() - 1) : -1;
+    // Shots name the project's models; the layers are the open ones. With no
+    // shots it is the model on screen throughout.
+    const int B = _project.shots.empty() ? (_sources.empty() ? -1 : 0) : rt(sh.source);
+    const int A = j > 0 ? rt(shots[(size_t)j - 1].source) : -1;
     double p = sh.duration > 1e-6 ? (t - sh.start) / sh.duration : 1.0;
     if (t < sh.start) p = 1.0;
     if (photo && sh.transition != Transition::Cut) p = std::clamp(p, 0.0, 1.0);
@@ -1448,79 +1601,101 @@ FrameSpec RenderSession::frame_spec(double t, int W, int H, bool photo) {
     f.mix = 1.0f;
     if (p < 1.0 && sh.transition != Transition::Cut) {
         const double u = std::clamp(p, 0.0, 1.0);
+        const float su = (float)smooth(u);
         switch (sh.transition) {
             case Transition::Crossfade:
                 f.a.source = A;
-                f.mix = (float)smooth(u);
+                f.mix = su;
                 break;
-            case Transition::DipBlack:
-            case Transition::DipWhite: {
-                const float c = sh.transition == Transition::DipWhite ? 1.0f : 0.0f;
-                f.tint[0][0] = f.tint[0][1] = f.tint[0][2] = c;
+            case Transition::Dip:
+                for (int k = 0; k < 3; k++) f.tint[0][k] = sh.colour[k];
                 if (u < 0.5) { f.b.source = A; f.tint[0][3] = (float)smooth(u * 2.0); }
                 else f.tint[0][3] = (float)(1.0 - smooth(u * 2.0 - 1.0));
                 break;
-            }
-            case Transition::WipeLeft:
-            case Transition::WipeRight:
-            case Transition::WipeUp:
-            case Transition::WipeDown: {
-                static const float dirs[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-                const int d = (int)sh.transition - (int)Transition::WipeLeft;
+            case Transition::Wipe: {
+                // The edge travels this way across the picture, y down.
+                const double ang = sh.param[0] * kPi / 180.0;
                 f.a.source = A;
                 f.mask = 1;
                 f.mix = (float)u;
-                f.wipe_dir[0] = -dirs[d][0];
-                f.wipe_dir[1] = -dirs[d][1];
+                f.wipe_dir[0] = (float)std::cos(ang);
+                f.wipe_dir[1] = (float)-std::sin(ang);
+                f.soft = std::max(sh.param[1], 0.002f);
                 break;
             }
             case Transition::Iris:
                 f.a.source = A;
                 f.mask = 2;
-                f.mix = (float)smooth(u);
+                f.mix = su;
+                f.soft = std::max(sh.param[1], 0.002f);
                 break;
-            case Transition::Sweep: {
-                // Swept over the model coming in: it is the one the cut
-                // should be seen to travel up.
-                double r[2], lo = 0.0, hi = 0.0;
-                bool have = false;
-                if ((B >= 0 && _frames.height_range(B, _project.up, r)) ||
-                    (A >= 0 && _frames.height_range(A, _project.up, r))) {
-                    lo = r[0];
-                    hi = r[1];
-                    have = true;
-                }
-                if (!have) {
-                    f.a.source = A;
-                    f.mix = (float)smooth(u);
-                    break;
-                }
-                const double span = hi - lo, margin = 0.08 * span;
-                const double level = lo - margin + (span + 2.0 * margin) * smooth(u);
-                f.mode = 1;
+            case Transition::Zoom:
                 f.a.source = A;
-                f.a.clip = 2;
-                f.b.clip = 1;
-                f.a.level = f.b.level = level;
-                f.a.glow = f.b.glow = (float)(0.04 * span);
+                f.mode = 2;
+                f.mix = (float)u;
+                f.zoom = std::clamp(sh.param[0], 0.05f, 2.0f);
                 break;
-            }
             case Transition::Grow:
                 f.a.source = A;
                 f.mix = (float)smooth(std::min(1.0, u * 1.5));
                 f.b.grow = (float)(0.02 + 0.98 * smooth(u));
                 f.b.fade_in = (float)std::min(1.0, u * 2.5);
                 break;
-            default:
+            default: {
+                // In 3D: the incoming model's scene, or the outgoing one's
+                // when nothing comes in. Until it is read, a crossfade.
+                SceneStats st;
+                const int S = B >= 0 ? B : A;
+                if (S < 0 || !_frames.scene_stats(S, _project.up, st)) {
+                    f.a.source = A;
+                    f.mix = su;
+                    break;
+                }
+                f.mode = 1;
+                f.a.source = A;
+                const double centre_h = st.centre[0] * _project.up[0] +
+                                        st.centre[1] * _project.up[1] +
+                                        st.centre[2] * _project.up[2];
+                if (sh.transition == Transition::Sweep) {
+                    // A level along up; the new model on one side of it, the
+                    // old on the other, the band at the cut lit.
+                    const bool down = sh.param[0] >= 0.5f;
+                    const double lo = centre_h + st.h0, hi = centre_h + st.h1;
+                    const double span = hi - lo, margin = 0.08 * span;
+                    const double k = smooth(down ? 1.0 - u : u);
+                    const double level = lo - margin + (span + 2.0 * margin) * k;
+                    f.a.clip = down ? 1 : 2;
+                    f.b.clip = down ? 2 : 1;
+                    f.a.level = f.b.level = level;
+                    f.a.glow = f.b.glow = (float)(0.07 * span * std::clamp(sh.param[1], 0.0f, 1.0f));
+                    for (int k2 = 0; k2 < 3; k2++) f.a.glow_col[k2] = f.b.glow_col[k2] = sh.colour[k2];
+                    break;
+                }
+                for (int layer = 0; layer < 2; layer++) {
+                    LayerFx& x = layer ? f.b.fx : f.a.fx;
+                    x.kind = (int)sh.transition;
+                    x.incoming = layer == 1;
+                    x.t = (float)u;
+                    x.p[0] = sh.param[0];
+                    x.p[1] = sh.param[1];
+                    for (int k = 0; k < 3; k++) {
+                        x.centre[k] = st.centre[k];
+                        x.up[k] = _project.up[k];
+                    }
+                    x.radius = st.radius;
+                    x.h0 = st.h0;
+                    x.h1 = st.h1;
+                }
                 break;
+            }
         }
     }
 
     // Each model as the keys around this moment have it.
     for (LayerSpec* l : {&f.a, &f.b}) {
         if (l->source < 0) continue;
-        _project.look_at(l->source, t, trajectory().key_times(), l->style[0], l->style[1],
-                         l->style_mix);
+        _project.look_at(project_source_of(l->source), t, trajectory().key_times(), l->style[0],
+                         l->style[1], l->style_mix);
         l->variants = l->style_mix > 0.0f ? 2 : 1;
     }
 
@@ -1689,7 +1864,9 @@ void RenderSession::probe_encoder() {
 }
 
 bool RenderSession::builtin_encodes(Codec codec, int width, int height) const {
-    if (codec == Codec::Gif || _encoder_probe.load() != 2) return false;
+    // WebM is ffmpeg's; the GPU encoder writes MP4 only.
+    if (codec == Codec::Gif || codec == Codec::Av1Webm || _encoder_probe.load() != 2)
+        return false;
     const int c = (int)codec;
     return (_encoder_codecs.load() & (1 << c)) && width <= _encoder_max[c][0] &&
            height <= _encoder_max[c][1];
@@ -1741,7 +1918,7 @@ int RenderSession::frame_count() const {
     return (int)std::max(1L, _project.looped() ? n : n + 1);
 }
 
-void RenderSession::start_export(bool no_builtin) {
+void RenderSession::start_export(bool no_builtin, bool confirmed) {
     if (_job.state != Job::Idle || _project.keys.empty()) return;
     Output& o = _project.output;
     const bool photo = o.kind == OutputKind::Photo;
@@ -1755,6 +1932,25 @@ void RenderSession::start_export(bool no_builtin) {
         note(msg::need_two_keys.get());
         _status_err = true;
         return;
+    }
+    // Something already there: asked first, and started again on a yes.
+    if (!confirmed) {
+        std::error_code ec;
+        const fs::path out = fs::u8path(o.path);
+        _overwrite_frames = 0;
+        if (o.kind == OutputKind::Frames) {
+            if (fs::is_directory(out, ec))
+                for (const auto& e : fs::directory_iterator(out, ec)) {
+                    const std::string name = e.path().filename().string();
+                    const std::string ext = e.path().extension().string();
+                    if (name.rfind("frame_", 0) == 0 && (ext == ".png" || ext == ".jpg"))
+                        _overwrite_frames++;
+                }
+            _ask_overwrite = _overwrite_frames > 0;
+        } else {
+            _ask_overwrite = fs::exists(out, ec);
+        }
+        if (_ask_overwrite) return;
     }
     _playing = false;
     if (_job.finisher.joinable()) _job.finisher.join();
@@ -1835,14 +2031,20 @@ void RenderSession::poll_export() {
     if (j.state == Job::Rendering) {
         const double budget = now_s() + 0.035;
         const double first = _project.keys.front().time;
+        auto time_of = [&](int frame) {
+            return j.photo ? _time
+                           : std::min(first + frame / std::max(o.fps, 1.0), _project.duration());
+        };
         do {
-            if (!_frames.busy()) {
-                const double t = j.photo ? _time
-                                         : std::min(first + j.frame / std::max(o.fps, 1.0),
-                                                    _project.duration());
-                _frames.request(frame_spec(t, W, H, j.photo));
-            }
+            if (!_frames.busy() && !j.queued) _frames.request(frame_spec(time_of(j.frame), W, H, j.photo));
+            j.queued = false;
             if (!_frames.poll(0.02)) continue;
+            // The next one goes to the renderers before this one is read back
+            // and written, and while the window draws: they overlap.
+            if (j.frame + 1 < j.frames) {
+                _frames.request(frame_spec(time_of(j.frame + 1), W, H, j.photo));
+                j.queued = true;
+            }
             std::vector<uint8_t> px;
             _frames.read(px, j.sink->channels() == 4);
             if (!j.sink->push(std::move(px))) {
@@ -1877,7 +2079,7 @@ void RenderSession::poll_export() {
         if (!j.ok && j.builtin && command_exists(_ffmpeg)) {
             // The GPU would not do it after all: ffmpeg, from the first frame.
             note(format(msg::encoder_fallback, {j.error.substr(0, j.error.find('\n'))}));
-            start_export(true);
+            start_export(true, true);
             return;
         }
         if (j.ok) {

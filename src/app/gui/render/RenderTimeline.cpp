@@ -41,7 +41,7 @@ void axis_rotate(const double axis[3], double angle, const double v[3], double o
 }  // namespace
 
 float RenderSession::timeline_height() const {
-    return ImGui::GetFrameHeightWithSpacing() + px(58.0f) + ImGui::GetStyle().ItemSpacing.y;
+    return ImGui::GetFrameHeightWithSpacing() + px(66.0f) + ImGui::GetStyle().ItemSpacing.y;
 }
 
 void RenderSession::draw_timeline() {
@@ -115,7 +115,7 @@ void RenderSession::draw_timeline() {
 
     // ---- the track ----
     const float w = ImGui::GetContentRegionAvail().x;
-    const float h = px(58.0f);
+    const float h = px(66.0f);
     const ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + w, a.y + h);
     ui::InvisibleButtonRaw("##track", ImVec2(w, h),
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
@@ -142,28 +142,56 @@ void RenderSession::draw_timeline() {
         dl->AddText(ImVec2(x + px(3.0f), a.y), IM_COL32(150, 150, 160, 255), b2);
     }
 
-    // Shots: what is on screen when, and where each one arrives.
-    const float lane0 = b.y - px(16.0f), lane1 = b.y - px(4.0f);
+    // Shots: what is on screen when, and how each arrives -- its transition
+    // as a ramp from the colour before to its own. A boundary and a ramp's
+    // end drag.
+    const float lane0 = b.y - px(20.0f), lane1 = b.y - px(3.0f);
     const std::vector<Shot>& shots = _project.shots;
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const bool in_lane = hovered && mouse.y >= lane0 - px(3.0f) && mouse.y <= lane1 + px(3.0f);
+    int shot_hot = -1;
+    bool shot_hot_end = false;
+    auto shot_col = [&](int i) {
+        if (i < 0) return IM_COL32(40, 40, 44, 255);
+        const int src = shots[(size_t)i].source;
+        return src < 0 ? IM_COL32(50, 50, 55, 255) : kShotCols[(size_t)src % 4];
+    };
     for (size_t i = 0; i < shots.size(); i++) {
         const double s0 = shots[i].start;
         const double s1 = i + 1 < shots.size() ? shots[i + 1].start : T;
         const float x0 = x_of(std::min(s0, T)), x1 = x_of(std::min(s1, T));
         if (x1 <= x0) continue;
-        const ImU32 col = shots[i].source < 0 ? IM_COL32(50, 50, 55, 255)
-                                              : kShotCols[(size_t)std::max(0, shots[i].source) % 4];
-        dl->AddRectFilled(ImVec2(x0, lane0), ImVec2(x1, lane1), col, px(2.0f));
-        if (shots[i].transition != Transition::Cut) {
-            const float xt = x_of(std::min(s0 + shots[i].duration, T));
-            dl->AddRectFilledMultiColor(ImVec2(x0, lane0), ImVec2(xt, lane1),
-                                        IM_COL32(255, 255, 255, 90), IM_COL32(255, 255, 255, 0),
-                                        IM_COL32(255, 255, 255, 0), IM_COL32(255, 255, 255, 90));
+        dl->AddRectFilled(ImVec2(x0, lane0), ImVec2(x1, lane1), shot_col((int)i), px(2.0f));
+        const float grab = px(5.0f);
+        if (shots[i].transition != Transition::Cut && shots[i].duration > 1e-6) {
+            const float xt = x_of(std::min(s0 + shots[i].duration, s1));
+            dl->AddRectFilled(ImVec2(x0, lane0), ImVec2(xt, lane1), shot_col((int)i - 1));
+            dl->AddTriangleFilled(ImVec2(x0, lane1), ImVec2(xt, lane0), ImVec2(xt, lane1),
+                                  shot_col((int)i));
+            dl->AddLine(ImVec2(x0, lane1), ImVec2(xt, lane0), IM_COL32(255, 255, 255, 170),
+                        px(1.0f));
+            const bool hot = (_drag_shot == (int)i && _drag_shot_end) ||
+                             (_drag_shot < 0 && in_lane && std::fabs(mouse.x - xt) < grab);
+            if (hot) { shot_hot = (int)i; shot_hot_end = true; }
+            dl->AddLine(ImVec2(xt, lane0 - px(2.0f)), ImVec2(xt, lane1 + px(1.0f)),
+                        hot ? IM_COL32(255, 235, 90, 255) : IM_COL32(230, 230, 230, 150),
+                        px(hot ? 2.0f : 1.0f));
         }
-        const int src = shots[i].source;
-        if (src >= 0 && src < (int)_sources.size())
-            dl->AddText(ImVec2(x0 + px(4.0f), lane0 - px(1.0f)), IM_COL32(230, 230, 230, 220),
-                        _sources[(size_t)src].name.c_str());
+        if (i > 0) {
+            const bool hot = (_drag_shot == (int)i && !_drag_shot_end) ||
+                             (_drag_shot < 0 && shot_hot < 0 && in_lane &&
+                              std::fabs(mouse.x - x0) < grab);
+            if (hot) { shot_hot = (int)i; shot_hot_end = false; }
+            dl->AddLine(ImVec2(x0, lane0 - px(3.0f)), ImVec2(x0, lane1 + px(2.0f)),
+                        hot ? IM_COL32(255, 235, 90, 255) : IM_COL32(20, 20, 24, 255),
+                        px(hot ? 2.5f : 1.5f));
+        }
+        const std::string name = source_name(shots[i].source);
+        if (!name.empty())
+            dl->AddText(ImVec2(x0 + px(4.0f), lane0 + px(1.0f)), IM_COL32(235, 235, 235, 230),
+                        name.c_str());
     }
+    if (shot_hot >= 0) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
     // Fades, as the ramps an editor draws them as.
     if (_project.fade_in.colour != FadeColour::None) {
         const float x1 = x_of(first + _project.fade_in.seconds);
@@ -178,7 +206,6 @@ void RenderSession::draw_timeline() {
 
     // Keys.
     const float key_y = (ruler_y + lane0) * 0.5f;
-    const ImVec2 mouse = ImGui::GetIO().MousePos;
     int hot = -1;
     for (int i = 0; i < (int)_project.keys.size(); i++) {
         const float x = x_of(visits[(size_t)i]);
@@ -212,7 +239,12 @@ void RenderSession::draw_timeline() {
 
     // Input: a key is picked and dragged in time; anywhere else scrubs.
     const double frame = 1.0 / fps;
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && shot_hot >= 0) {
+        _drag_shot = shot_hot;
+        _drag_shot_end = shot_hot_end;
+        const Shot& sh = shots[(size_t)shot_hot];
+        _drag_shot_from = shot_hot_end ? sh.duration : sh.start;
+    } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         if (hot >= 0) {
             const ImGuiIO& io = ImGui::GetIO();
             // A plain click on a selected key keeps the group, to drag it.
@@ -265,12 +297,28 @@ void RenderSession::draw_timeline() {
             project_changed();
         }
     }
+    if (active && _drag_shot >= 0 && _drag_shot < (int)shots.size() &&
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.0f)) {
+        const double dt = t_of(mouse.x) - t_of(ImGui::GetIO().MouseClickedPos[0].x);
+        const double v = std::round((_drag_shot_from + dt) / frame) * frame;
+        const size_t i = (size_t)_drag_shot;
+        Shot& sh = _project.shots[i];
+        const double next = i + 1 < shots.size() ? shots[i + 1].start : T;
+        if (_drag_shot_end) {
+            sh.duration = std::clamp(v, frame, std::max(frame, next - sh.start));
+        } else {
+            const double lo = i > 0 ? shots[i - 1].start + frame : 0.0;
+            sh.start = std::clamp(v, lo, std::max(lo, next - frame));
+        }
+        project_changed();
+    }
     if (_scrubbing && active) _time = std::round(t_of(mouse.x) / frame) * frame;
     if (!active) {
         _drag_key = -1;
+        _drag_shot = -1;
         _scrubbing = false;
     }
-    if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && hot < 0)
+    if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && hot < 0 && shot_hot < 0)
         add_key(std::round(t_of(mouse.x) / frame) * frame, true);
     if (hovered && hot >= 0 && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         if (!selected(hot)) select_only(hot);
@@ -335,11 +383,14 @@ void RenderSession::draw_preview_pane() {
     if (io.MouseDelta.x == 0.0f && io.MouseDelta.y == 0.0f && wheel == 0.0f) return;
 
     // The key at the playhead, or a new one there holding what is seen now.
+    // Only a drag makes one: a wheel turned over the picture is too easy to
+    // turn by accident.
     const double frame = 1.0 / std::max(_project.output.fps, 1.0);
     int k = -1;
     const std::vector<double> visits = trajectory().key_times();
     for (int i = 0; i < (int)visits.size(); i++)
         if (std::fabs(visits[(size_t)i] - _time) < 0.5 * frame) k = i;
+    if (k < 0 && !turn && !slide) return;
     if (k < 0) {
         const CameraState c = trajectory().at(_time);
         Keyframe nk;

@@ -720,6 +720,10 @@ void EditSession::draw_transform_tab(float full) {
         if (_pivot == (int)Pivot::Selection && d.sel().empty())
             _pivot = (int)Pivot::Median;
     }
+    if (_others_open) {
+        ui::Checkbox(xmsg::sync_others, &_sync_others);
+        ui::help_on_hover(xmsg::sync_others_help);
+    }
 
     // A model that came in lying on its side is the commonest complaint, and
     // it is one click: no dragging a ring to "about ninety".

@@ -45,9 +45,9 @@ const Msg* const kProjections[kNumProjections] = {
     &msg::proj_perspective, &msg::proj_fisheye, &msg::proj_equisolid,
     &msg::proj_equirect};
 const Msg* const kTransitions[kNumTransitions] = {
-    &msg::tr_cut, &msg::tr_crossfade, &msg::tr_dip_black, &msg::tr_dip_white,
-    &msg::tr_wipe_left, &msg::tr_wipe_right, &msg::tr_wipe_up, &msg::tr_wipe_down,
-    &msg::tr_iris, &msg::tr_sweep, &msg::tr_grow};
+    &msg::tr_cut, &msg::tr_crossfade, &msg::tr_dip, &msg::tr_wipe, &msg::tr_iris, &msg::tr_zoom,
+    &msg::tr_sweep, &msg::tr_grow, &msg::tr_dust, &msg::tr_spiral, &msg::tr_scatter,
+    &msg::tr_rain, &msg::tr_dissolve, &msg::tr_ripple};
 const Msg* const kPointStyles[kNumPointStyles] = {
     &msg::pt_square, &msg::pt_circle, &msg::pt_gaussian, &msg::pt_sphere};
 const Msg* const kCurves[kNumCurves] = {&msg::curve_spline, &msg::curve_catmull,
@@ -55,7 +55,9 @@ const Msg* const kCurves[kNumCurves] = {&msg::curve_spline, &msg::curve_catmull,
 const Msg* const kImageFormats[kNumImageFormats] = {&msg::format_png, &msg::format_png_alpha,
                                                     &msg::format_jpeg};
 const Msg* const kCodecs[kNumCodecs] = {&msg::codec_h264, &msg::codec_h265, &msg::codec_av1,
-                                        &msg::codec_gif};
+                                        &msg::codec_gif, &msg::codec_av1_webm};
+// As the list shows them: the WebM beside the other AV1.
+const int kCodecOrder[kNumCodecs] = {0, 1, 2, 4, 3};
 // The splat primitives a model can be rendered as, ViewportPanel's names.
 const char* const kPrimitives[3] = {"3dgs", "mip", "3dgut"};
 
@@ -71,27 +73,6 @@ std::string seconds(double t) {
     char b[32];
     std::snprintf(b, sizeof b, "%.2f s", t);
     return b;
-}
-
-// One path serves all three outputs; it follows the kind so a photo is never
-// written under a video's name.
-void fit_output_path(Output& o) {
-    if (o.path.empty()) return;
-    fs::path p = fs::u8path(o.path);
-    const std::string ext = p.extension().string();
-    if (o.kind == OutputKind::Frames) {
-        if (!ext.empty()) p.replace_extension();
-    } else if (o.kind == OutputKind::Video && o.codec == Codec::Gif) {
-        if (ext != ".gif") p.replace_extension(".gif");
-    } else if (o.kind == OutputKind::Video) {
-        if (ext != ".mp4" && ext != ".h264" && ext != ".h265" && ext != ".obu")
-            p.replace_extension(".mp4");
-    } else {
-        const char* want = o.format == ImageFormat::Jpeg ? ".jpg" : ".png";
-        if (ext != want && !(o.format == ImageFormat::Jpeg && ext == ".jpeg"))
-            p.replace_extension(want);
-    }
-    o.path = p.string();
 }
 
 bool combo_msgs(const char* id, int* cur, const Msg* const* items, int n) {
@@ -236,8 +217,30 @@ void RenderSession::draw_status() {
     ui::TextDisabled(any ? msg::hint_selected : msg::hint_idle);
 }
 
+void RenderSession::draw_overwrite_popup() {
+    if (_ask_overwrite) {
+        ui::OpenPopup(msg::overwrite_title);
+        _ask_overwrite = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(px(480.0f), 0.0f), ImGuiCond_Appearing);
+    if (!ui::BeginPopupModal(msg::overwrite_title)) return;
+    const std::string path = _project.output.path;
+    if (_overwrite_frames > 0)
+        ui::TextWrapped(msg::overwrite_frames, {path, (long long)_overwrite_frames});
+    else
+        ui::TextWrapped(msg::overwrite_file, {path});
+    if (ui::Button(msg::overwrite_replace)) {
+        ImGui::CloseCurrentPopup();
+        start_export(false, true);
+    }
+    ImGui::SameLine();
+    if (ui::Button(msg::render_cancel)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void RenderSession::draw_panel() {
     if (!_panel) return;
+    draw_overwrite_popup();
     {
         const ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
         _panel_rect[0] = wp.x;
@@ -304,6 +307,7 @@ void RenderSession::draw_panel() {
         draw_motion_section(full);
     if (ui::CollapsingHeader(msg::sec_effects)) draw_effects_section(full);
     if (ui::CollapsingHeader(msg::sec_project)) draw_project_section(full);
+    if (ui::CollapsingHeader(msg::sec_history)) draw_history_section(full);
     ImGui::EndDisabled();
     if (ui::CollapsingHeader(msg::sec_output, ImGuiTreeNodeFlags_DefaultOpen))
         draw_output_section(full);
@@ -315,7 +319,7 @@ void RenderSession::draw_panel() {
     if (ui::Button(msg::to_edit, ImVec2(half, 0)) && _to_edit) _to_edit();
     ui::help_on_hover(msg::to_edit_help);
     ImGui::SameLine();
-    if (ui::Button(msg::leave, ImVec2(half, 0)) && _leave) _leave();
+    if (ui::Button(msg::leave, ImVec2(half, 0)) && _on_leave) _on_leave();
     ImGui::EndDisabled();
     if (!_status.empty()) {
         // One line; the whole of it is in the log and on hover.
@@ -761,6 +765,83 @@ void RenderSession::draw_motion_section(float full) {
     ui::TextDisabled(msg::motion_length, {std::string(len), seconds(_project.duration())});
 }
 
+// Under a shot, what its transition can be told: a colour, a direction, a
+// strength. Nothing for the few that need nothing.
+void RenderSession::draw_shot_settings(Shot& s, float full) {
+    const float w = full * 0.5f;
+    bool changed = false;
+    ImGui::Indent();
+    auto slider = [&](const char* id, float* v, float lo, float hi, const char* fmt, const Msg& name) {
+        ImGui::SetNextItemWidth(w);
+        changed = ui::SliderFloatRaw(id, v, lo, hi, fmt) || changed;
+        ImGui::SameLine();
+        ui::Text(name);
+    };
+    auto colour = [&]() {
+        changed = ui::ColorEdit3Raw("##col", s.colour, ImGuiColorEditFlags_NoInputs) || changed;
+        ImGui::SameLine();
+        ui::Text(msg::tp_colour);
+    };
+    switch (s.transition) {
+        case Transition::Dip: colour(); break;
+        case Transition::Wipe:
+            slider("##p0", &s.param[0], 0.0f, 360.0f, "%.0f\xc2\xb0", msg::tp_direction);
+            slider("##p1", &s.param[1], 0.0f, 0.3f, "%.2f", msg::tp_softness);
+            break;
+        case Transition::Iris:
+            slider("##p1", &s.param[1], 0.0f, 0.3f, "%.2f", msg::tp_softness);
+            break;
+        case Transition::Zoom:
+            slider("##p0", &s.param[0], 0.1f, 1.5f, "%.2f", msg::tp_strength);
+            break;
+        case Transition::Sweep: {
+            bool down = s.param[0] >= 0.5f;
+            if (ui::Checkbox(msg::tp_downward, &down)) {
+                s.param[0] = down ? 1.0f : 0.0f;
+                changed = true;
+            }
+            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_glow);
+            colour();
+            break;
+        }
+        case Transition::Dust: {
+            int mode = std::clamp((int)(s.param[0] + 0.5f), 0, 2);
+            ImGui::SetNextItemWidth(w);
+            if (ui::ComboRaw("##p0", &mode, {&msg::tp_fall, &msg::tp_rise, &msg::tp_blow})) {
+                s.param[0] = (float)mode;
+                changed = true;
+            }
+            ImGui::SameLine();
+            ui::Text(msg::tp_direction);
+            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_turbulence);
+            break;
+        }
+        case Transition::Spiral:
+            slider("##p0", &s.param[0], 0.25f, 4.0f, "%.2f", msg::tp_turns);
+            slider("##p1", &s.param[1], 0.0f, 3.0f, "%.2f", msg::tp_spread);
+            break;
+        case Transition::Scatter:
+            slider("##p0", &s.param[0], 0.2f, 3.0f, "%.2f", msg::tp_distance);
+            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_randomness);
+            break;
+        case Transition::Rain:
+            slider("##p0", &s.param[0], 0.2f, 3.0f, "%.2f", msg::tp_height);
+            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_stagger);
+            break;
+        case Transition::Dissolve:
+            slider("##p0", &s.param[0], 0.0f, 1.0f, "%.2f", msg::tp_sparkle);
+            break;
+        case Transition::Ripple:
+            slider("##p0", &s.param[0], 0.0f, 1.0f, "%.2f", msg::tp_height);
+            slider("##p1", &s.param[1], 0.05f, 1.0f, "%.2f", msg::tp_width);
+            break;
+        default:
+            break;
+    }
+    ImGui::Unindent();
+    if (changed) project_changed();
+}
+
 void RenderSession::draw_effects_section(float full) {
     const ImGuiStyle& st = ImGui::GetStyle();
     const float w = full * 0.5f;
@@ -799,20 +880,40 @@ void RenderSession::draw_effects_section(float full) {
     ui::SeparatorText(msg::sec_models);
     int remove = -1;
     const int one = single_selected();
-    for (int i = 0; i < (int)_sources.size(); i++) {
-        const SourceInfo& s = _sources[(size_t)i];
-        if (i >= (int)_project.sources.size()) break;
+    int view = -1, edit = -1;
+    for (int i = 0; i < (int)_project.sources.size(); i++) {
         ImGui::PushID(i);
+        const int r = rt(i);
+        if (r < 0) {
+            // Asked for, still being read.
+            ui::TextDisabled(msg::model_opening, {(long long)(i + 1), source_name(i)});
+            ImGui::PopID();
+            continue;
+        }
+        const SourceInfo& s = _sources[(size_t)r];
         const Msg& kind = s.view.kind == SourceView::Points ? msg::model_points
                           : s.view.kind == SourceView::Mesh ? msg::model_mesh
                                                             : msg::model_splats;
         ui::TextRaw(format(msg::model_line, {(long long)(i + 1), kind.get(), s.name}));
         if (ImGui::IsItemHovered()) ui::SetTooltipRaw(s.path);
-        if (_sources.size() > 1) {
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), full - px(24.0f)));
-            if (ui::ButtonRaw("x##rm", ImVec2(px(24.0f), 0))) remove = i;
-            ui::help_on_hover(msg::model_remove_help);
-        }
+        // Shown in the viewport, edited there, or closed.
+        const ImGuiStyle& gst = ImGui::GetStyle();
+        auto bw = [&](const Msg& m) { return ImGui::CalcTextSize(m.get()).x + 2.0f * gst.FramePadding.x; };
+        const float xw = px(24.0f);
+        const float row = bw(msg::model_view) + bw(msg::model_edit) + xw + 2.0f * gst.ItemSpacing.x;
+        ImGui::SameLine(std::max(ImGui::GetCursorPosX(), full - row));
+        ImGui::BeginDisabled(r == 0);
+        if (ui::Button(msg::model_view)) view = i;
+        ImGui::EndDisabled();
+        ui::help_on_hover_disabled(r == 0 ? msg::model_viewing : msg::model_view_help);
+        ImGui::SameLine();
+        if (ui::Button(msg::model_edit)) edit = i;
+        ui::help_on_hover(msg::model_edit_help);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(_project.sources.size() < 2);
+        if (ui::ButtonRaw("x##rm", ImVec2(xw, 0))) remove = i;
+        ImGui::EndDisabled();
+        ui::help_on_hover(msg::model_remove_help);
         ImGui::Indent();
         // The look from the start, or the one a selected key changes it to.
         SourceStyle* yp = &_project.sources[(size_t)i].style;
@@ -904,6 +1005,8 @@ void RenderSession::draw_effects_section(float full) {
         ImGui::PopID();
     }
     if (remove >= 0) remove_source(remove);
+    else if (view >= 0) view_source(view, false);
+    else if (edit >= 0) view_source(edit, true);
     if (ui::Button(msg::model_add) && _pick)
         _pick(Pick::AddModel, _sources.empty() ? std::string() : _sources[0].path, "");
     ui::help_on_hover(msg::model_add_help);
@@ -924,15 +1027,19 @@ void RenderSession::draw_effects_section(float full) {
         ImGui::SameLine();
         std::vector<std::string> names;
         names.push_back(msg::model_nothing.get());
-        for (const SourceInfo& src : _sources) names.push_back(src.name);
+        for (int k = 0; k < (int)_project.sources.size(); k++) names.push_back(source_name(k));
         int src = s.source + 1;
         ImGui::SetNextItemWidth(full - px(70.0f) - px(28.0f) - 3.0f * st.ItemSpacing.x - w * 0.9f);
         if (ui::BeginComboRaw("##src", names[(size_t)std::clamp(src, 0, (int)names.size() - 1)].c_str())) {
-            for (int j = 0; j < (int)names.size(); j++)
+            // Two copies of one file have one name.
+            for (int j = 0; j < (int)names.size(); j++) {
+                ImGui::PushID(j);
                 if (ui::SelectableRaw(names[(size_t)j], j == src)) {
                     s.source = j - 1;
                     project_changed();
                 }
+                ImGui::PopID();
+            }
             ImGui::EndCombo();
         }
         ImGui::SameLine();
@@ -940,8 +1047,10 @@ void RenderSession::draw_effects_section(float full) {
         ImGui::SetNextItemWidth(w * 0.9f);
         if (combo_msgs("##tr", &tr, kTransitions, kNumTransitions)) {
             s.transition = (Transition)tr;
+            shot_defaults(s);
             project_changed();
         }
+        ui::help_on_hover(msg::tr_help);
         ImGui::SameLine();
         if (ui::ButtonRaw("x##del", ImVec2(px(28.0f), 0))) remove = i;
         // Earlier or later: the models trade places, the times stay.
@@ -954,8 +1063,8 @@ void RenderSession::draw_effects_section(float full) {
         if (ui::ArrowButtonRaw("##down", ImGuiDir_Down)) swap = i;
         ImGui::EndDisabled();
         ui::help_on_hover(msg::shot_move_help);
-        if (s.transition != Transition::Cut) ImGui::SameLine();
         if (s.transition != Transition::Cut) {
+            ImGui::SameLine();
             float d = (float)s.duration;
             ImGui::SetNextItemWidth(px(120.0f));
             if (ui::SliderFloatRaw("##dur", &d, 0.1f, 6.0f, "%.1f s")) {
@@ -964,6 +1073,7 @@ void RenderSession::draw_effects_section(float full) {
             }
             ImGui::SameLine();
             ui::TextDisabled(msg::shot_transition_time);
+            draw_shot_settings(s, full);
         }
         ImGui::PopID();
     }
@@ -984,6 +1094,7 @@ void RenderSession::draw_effects_section(float full) {
         s.start = _time;
         s.source = _project.shots.empty() ? 0 : _project.shots.back().source;
         s.transition = Transition::Crossfade;
+        shot_defaults(s);
         if (_project.shots.empty() && _time > 0.0) _project.shots.push_back(Shot{});
         _project.shots.push_back(s);
         std::stable_sort(_project.shots.begin(), _project.shots.end(),
@@ -996,8 +1107,8 @@ void RenderSession::draw_effects_section(float full) {
     // reconstruction tells, each arriving the way that suits it.
     std::vector<int> order;
     for (SourceView::Kind k : {SourceView::Points, SourceView::Splats, SourceView::Mesh})
-        for (int i = 0; i < (int)_sources.size(); i++)
-            if (_sources[(size_t)i].view.kind == k) order.push_back(i);
+        for (int i = 0; i < (int)_project.sources.size(); i++)
+            if (rt(i) >= 0 && _sources[(size_t)rt(i)].view.kind == k) order.push_back(i);
     const bool can = order.size() >= 2;
     ImGui::BeginDisabled(!can || _project.duration() <= 0.0);
     if (ui::Button(msg::story_button, ImVec2(full, 0))) {
@@ -1008,19 +1119,53 @@ void RenderSession::draw_effects_section(float full) {
             Shot sh;
             sh.start = t0 + each * (double)j;
             sh.source = order[j];
-            const SourceView::Kind k = _sources[(size_t)order[j]].view.kind;
-            const SourceView::Kind before = j ? _sources[(size_t)order[j - 1]].view.kind : k;
+            const SourceView::Kind k = _sources[(size_t)rt(order[j])].view.kind;
+            const SourceView::Kind before = j ? _sources[(size_t)rt(order[j - 1])].view.kind : k;
             sh.transition = j == 0 ? Transition::Cut
                             : k == SourceView::Splats && before == SourceView::Points ? Transition::Grow
                             : k == SourceView::Mesh ? Transition::Sweep
                                                     : Transition::Crossfade;
             sh.duration = j == 0 ? 0.0 : std::min(each * 0.6, 3.0);
+            shot_defaults(sh);
             _project.shots.push_back(sh);
         }
         project_changed();
     }
     ImGui::EndDisabled();
     ui::help_on_hover_disabled(can ? msg::story_help : msg::story_needs);
+}
+
+// Every step back to where the project was opened: one click goes back ten.
+void RenderSession::draw_history_section(float full) {
+    const float half = (full - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    ImGui::BeginDisabled(_head <= 0);
+    if (ui::KeyButton(msg::hist_undo, half, "Ctrl+Z")) undo();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(_head + 1 >= (int)_hist.size());
+    if (ui::KeyButton(msg::hist_redo, half, "Ctrl+Y")) redo();
+    ImGui::EndDisabled();
+    const int n = (int)_hist.size();
+    const float rows = (float)std::clamp(n, 3, 8);
+    ImGui::BeginChild("##hist", ImVec2(0, rows * ImGui::GetTextLineHeightWithSpacing()),
+                      ImGuiChildFlags_Borders);
+    int go = -1;
+    for (int i = 0; i < n; i++) {
+        ImGui::PushID(i);
+        // Greyed past the current step: those are a redo away.
+        const bool ahead = i > _head;
+        if (ahead) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+        const Msg& label = i == 0 ? msg::hist_start : *_hist[(size_t)i].label;
+        if (ui::Selectable(label, i == _head)) go = i;
+        if (ahead) ImGui::PopStyleColor();
+        if (i == _head && _hist_scroll) {
+            ImGui::SetScrollHereY(1.0f);
+            _hist_scroll = false;
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    if (go >= 0) goto_step(go);
 }
 
 void RenderSession::draw_project_section(float full) {
@@ -1148,10 +1293,15 @@ void RenderSession::draw_output_section(float full) {
         ui::Text(msg::out_fps);
     }
     if (o.kind == OutputKind::Video) {
-        int codec = (int)o.codec;
+        const Msg* shown[kNumCodecs];
+        int codec = 0;
+        for (int i = 0; i < kNumCodecs; i++) {
+            shown[i] = kCodecs[kCodecOrder[i]];
+            if (kCodecOrder[i] == (int)o.codec) codec = i;
+        }
         ImGui::SetNextItemWidth(w);
-        if (combo_msgs("##codec", &codec, kCodecs, kNumCodecs)) {
-            o.codec = (Codec)codec;
+        if (combo_msgs("##codec", &codec, shown, kNumCodecs)) {
+            o.codec = (Codec)kCodecOrder[codec];
             fit_output_path(o);
             project_changed();
         }
@@ -1173,7 +1323,8 @@ void RenderSession::draw_output_section(float full) {
             const int W = o.width + (o.width & 1), H = o.height + (o.height & 1);
             const Encoder e = pick_encoder();
             const int c = std::min((int)o.codec, 2);
-            const bool gpu_codec = (_encoder_codecs.load() & (1 << c)) != 0;
+            const bool gpu_codec = o.codec != Codec::Av1Webm &&
+                                   (_encoder_codecs.load() & (1 << c)) != 0;
             if (e.kind == Encoder::BuiltIn) {
                 ui::TextDisabledWrapped(msg::encoder_builtin);
             } else if (gpu_codec && !builtin_encodes(o.codec, W, H)) {

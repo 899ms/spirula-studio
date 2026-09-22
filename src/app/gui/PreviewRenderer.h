@@ -16,6 +16,7 @@
 // seamless -- and a splat render and a mesh render of the same scene, shown
 // side by side, are the same view.
 
+#include "app/gui/render/TransitionFx.h"
 #include "data/DatasetParser.h"
 #include "mesh/MeshExport.h"   // meshing::MeshData
 
@@ -51,6 +52,15 @@ struct PreviewStyle {
     bool clip = false;
     float plane[4] = {0, 0, 1, 0};
     float glow = 0.0f;
+    float glow_col[3] = {1.0f, 0.86f, 0.6f};
+    // A 3D transition moving the cloud's points or the mesh's vertices
+    // (render/TransitionFx.h): its kind, side, time, settings and scene, the
+    // scene in the normalized frame.
+    int fx = 0;
+    bool fx_in = false;
+    float fx_t = 0.0f;
+    float fx_p[2] = {0.0f, 0.0f};
+    gui::render::FxGeo fx_geo;
 };
 
 class PreviewRenderer {
@@ -128,8 +138,11 @@ private:
     int _u_model = -1, _u_s = -1, _u_zrange = -1, _u_vp = -1;
     // Style uniforms, one set per program: [0] lines and points, [1] mesh.
     struct StyleLoc {
-        int tier = -1, dist = -1, clip_on = -1, clip = -1, glow = -1;
+        int tier = -1, dist = -1, clip_on = -1, clip = -1, glow = -1, glow_col = -1;
+        int fx = -1, fx_in = -1, fx_t = -1, fx_p = -1, fx_c = -1, fx_up = -1, fx_e1 = -1,
+            fx_e2 = -1, fx_geo = -1;
     } _sloc[2];
+    void style_locations(int program, unsigned prog);
     int _u_points = -1, _u_psize = -1, _u_pradius = -1;
     void set_style_uniforms(int program, const PreviewStyle& st);
 

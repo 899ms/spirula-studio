@@ -67,12 +67,25 @@ vec2 lens(vec2 gl) {
     }
     return vec2(cv.x, -cv.y);
 }
+// The engine's is_valid_distortion: where the lens folds over itself, which
+// it does not draw either. The y flip leaves the determinant, the diagonal
+// and the dot product as they are.
+bool lens_valid(vec2 gl) {
+    if (u_tier == 0) return true;
+    const float e = 1e-3;
+    vec2 f = lens(gl);
+    vec2 jx = (lens(gl + vec2(e, 0.0)) - f) / e, jy = (lens(gl + vec2(0.0, e)) - f) / e;
+    float jd = min(jx.x * jy.y - jy.x * jx.y, min(jx.x, jy.y));
+    return jd > 0.25 && jd < 4.0 && dot(gl, f) >= 0.0;
+}
 vec2 project_ndc(vec3 v, out bool clipped) {
     float dist = max(length(v), 1e-9);
     clipped = false;
     if (u_model == 0) {                     // pinhole
         if (v.z > -1e-6) clipped = true;
-        return u_s * lens(v.xy / -v.z);
+        vec2 q = v.xy / -v.z;
+        if (!lens_valid(q)) clipped = true;
+        return u_s * lens(q);
     } else if (u_model == 3) {              // equirectangular
         float lon = atan(v.x, -v.z);
         float lat = asin(clamp(v.y / dist, -1.0, 1.0));
@@ -82,6 +95,7 @@ vec2 project_ndc(vec3 v, out bool clipped) {
     float rlen = length(v.xy);
     vec2 dir2 = rlen > 1e-9 ? v.xy / rlen : vec2(0.0);
     float r = (u_model == 1) ? theta : 2.0 * sin(0.5 * theta);
+    if (!lens_valid(dir2 * r)) clipped = true;
     return u_s * lens(dir2 * r);
 }
 )";
@@ -93,12 +107,13 @@ const char* kClip = R"(
 uniform int u_clip_on;
 uniform vec4 u_clip;
 uniform float u_glow;
+uniform vec3 u_glow_col;
 vec3 clip_colour(vec3 col, vec3 world) {
     if (u_clip_on == 0) return col;
     float s = dot(u_clip.xyz, world) - u_clip.w;
     if (s > 0.0) discard;
     if (u_glow > 0.0 && s > -u_glow)
-        col = mix(col, vec3(1.0, 0.86, 0.6), 0.85 * (1.0 + s / u_glow));
+        col = mix(col, u_glow_col, 0.85 * (1.0 + s / u_glow));
     return col;
 }
 )";
@@ -115,12 +130,25 @@ uniform vec2 u_zrange;
 uniform vec2 u_vp;
 uniform float u_psize;      // screen size of a point, pixels
 uniform float u_pradius;    // > 0: a sphere of this radius instead
+uniform int u_points;
 out vec4 v_col;
 out vec3 v_view;
 out vec3 v_world;
 out float v_kill;
+out float v_fxa;
+out float v_fxr;
 void main() {
     vec3 p = a_pos + u_scale * a_aux;
+    float fxs = 1.0;
+    v_fxa = 1.0;
+    v_fxr = 0.0;
+    if (u_fx != 0 && u_points > 0) {
+        float r1 = fx_hashu(uint(gl_VertexID)), r2 = fx_hashu(uint(gl_VertexID) ^ 0x9E3779B9u);
+        vec3 dd;
+        fx_apply(p, r1, r2, dd, v_fxa, fxs);
+        p += dd;
+        v_fxr = fract(r1 * 7.31 + r2);
+    }
     vec3 v = (u_view * vec4(p, 1.0)).xyz;
     float dist = max(length(v), 1e-9);
     bool clipped;
@@ -130,8 +158,12 @@ void main() {
     v_col = (u_color.a > 0.0) ? u_color : vec4(a_aux, 1.0);
     v_view = v;
     v_world = p;
+    // A soft point's half-maximum spans the size asked for, as wide as a
+    // hard one looks: exp(-4 r^2) halves at r = 0.42 of the sprite's radius.
     gl_PointSize = u_pradius > 0.0
-        ? clamp(u_pradius * u_s.x * u_vp.x / dist, 1.0, 256.0) : u_psize;
+        ? clamp(u_pradius * u_s.x * u_vp.x / dist, 1.0, 256.0)
+        : u_points == 3 ? min(u_psize * 2.4, 256.0) : u_psize;
+    gl_PointSize = clamp(gl_PointSize * fxs, 1.0, 256.0);
     // Whole-segment equirect seam kill (see the comment above kProj). Both
     // vertices of a segment compute the same flag, so it interpolates flat.
     v_kill = 0.0;
@@ -151,6 +183,8 @@ in vec4 v_col;
 in vec3 v_view;
 in vec3 v_world;
 in float v_kill;
+in float v_fxa;
+in float v_fxr;
 uniform vec2 u_vp;
 uniform vec2 u_zrange;
 uniform int u_points;       // drawing the cloud: 0 square, 1 circle, 2 gaussian, 3 sphere
@@ -166,10 +200,13 @@ void main() {
         float r2 = dot(c, c);
         int shape = u_points - 1;
         if (shape != 0 && r2 > 1.0) discard;
+        // A transition's opacity: a soft point fades, a hard one is there
+        // or not, each at its own moment.
+        if (v_fxa <= 0.0 || (shape != 2 && v_fxa < v_fxr)) discard;
         vec3 col = clip_colour(v_col.rgb, v_world);
         if (shape == 2) {
             // Premultiplied, for the blend the cloud is drawn with.
-            float a = exp(-4.0 * r2);
+            float a = exp(-4.0 * r2) * v_fxa;
             frag = vec4(col * a, a);
         } else if (shape == 3) {
             float nz = sqrt(max(1.0 - r2, 0.0));
@@ -213,8 +250,17 @@ out vec3 v_col;
 out vec2 v_uv;
 out vec3 v_view;
 out vec3 v_world;
+out float v_fxa;
 void main() {
-    vec3 v = (u_view * vec4(a_pos, 1.0)).xyz;
+    vec3 pos = a_pos;
+    v_fxa = 1.0;
+    if (u_fx != 0) {
+        float s = 3.0 / u_fx_geo.x, fs;
+        vec3 dd;
+        fx_apply(a_pos, fx_noise(a_pos * s), fx_noise(a_pos * s + 17.3), dd, v_fxa, fs);
+        pos += dd;
+    }
+    vec3 v = (u_view * vec4(pos, 1.0)).xyz;
     float dist = max(length(v), 1e-9);
     float z = (dist - u_zrange.x) / (u_zrange.y - u_zrange.x) * 2.0 - 1.0;
     v_nrm = mat3(u_view) * a_nrm;
@@ -248,6 +294,7 @@ in vec3 v_col;
 in vec2 v_uv;
 in vec3 v_view;
 in vec3 v_world;
+in float v_fxa;
 uniform vec2 u_vp;
 uniform int u_mode;          // 0 flat, 1 vertex color, 2 texture
 uniform int u_color_on;      // show vertex/texture color
@@ -256,14 +303,10 @@ uniform int u_flat;          // face normals instead of interpolated ones
 uniform sampler2D u_tex;
 out vec4 frag;
 void main() {
-    if (u_model == 0 && u_tier != 0) {
-        // A distorted pinhole has no clip space: what is behind the camera
-        // has to be thrown out here.
-        bool behind;
-        project_ndc(v_view, behind);
-        if (behind) discard;
-    }
-    if (u_model != 0) {
+    // A transition fading a mesh drops it grain by grain, a grain being a
+    // cell of the surface where it rests.
+    if (u_fx != 0 && v_fxa < fx_h3(floor(v_world * (60.0 / u_fx_geo.x)))) discard;
+    if (u_model != 0 || u_tier != 0) {
         // Reject fragments of a triangle that crosses a projection
         // discontinuity (the equirect +-180-degree seam, the fisheye backward
         // point). Two tests, because either alone leaves artifacts:
@@ -361,7 +404,7 @@ constexpr int M_PINHOLE = 0;
 bool PreviewRenderer::ensure_program() {
     if (_prog) return true;
     if (!glx::init()) return false;
-    std::string vs_src = std::string("#version 150\n") + kProj + kVertMain;
+    std::string vs_src = std::string("#version 150\n") + kProj + render::fx_glsl() + kVertMain;
     std::string fs_src = std::string("#version 150\n") + kProj + kClip + kFragMain;
     GLuint vs = compile(GL_VERTEX_SHADER, vs_src.c_str());
     GLuint fs = compile(GL_FRAGMENT_SHADER, fs_src.c_str());
@@ -396,12 +439,16 @@ bool PreviewRenderer::ensure_program() {
     _u_points = glx::GetUniformLocation(_prog, "u_points");
     _u_psize = glx::GetUniformLocation(_prog, "u_psize");
     _u_pradius = glx::GetUniformLocation(_prog, "u_pradius");
-    _sloc[0] = {glx::GetUniformLocation(_prog, "u_tier"),
-                glx::GetUniformLocation(_prog, "u_dist"),
-                glx::GetUniformLocation(_prog, "u_clip_on"),
-                glx::GetUniformLocation(_prog, "u_clip"),
-                glx::GetUniformLocation(_prog, "u_glow")};
+    style_locations(0, _prog);
     return true;
+}
+
+void PreviewRenderer::style_locations(int program, unsigned prog) {
+    StyleLoc& l = _sloc[program];
+    auto at = [&](const char* name) { return glx::GetUniformLocation(prog, name); };
+    l = {at("u_tier"), at("u_dist"), at("u_clip_on"), at("u_clip"), at("u_glow"),
+         at("u_glow_col"), at("u_fx"), at("u_fx_in"), at("u_fx_t"), at("u_fx_p"), at("u_fx_c"),
+         at("u_fx_up"), at("u_fx_e1"), at("u_fx_e2"), at("u_fx_geo")};
 }
 
 void PreviewRenderer::set_style_uniforms(int program, const PreviewStyle& st) {
@@ -411,13 +458,25 @@ void PreviewRenderer::set_style_uniforms(int program, const PreviewStyle& st) {
     glx::Uniform1i(l.clip_on, st.clip ? 1 : 0);
     glx::Uniform4f(l.clip, st.plane[0], st.plane[1], st.plane[2], st.plane[3]);
     glx::Uniform1f(l.glow, st.glow);
+    glx::Uniform3f(l.glow_col, st.glow_col[0], st.glow_col[1], st.glow_col[2]);
+    const render::FxGeo& g = st.fx_geo;
+    glx::Uniform1i(l.fx, st.fx);
+    glx::Uniform1i(l.fx_in, st.fx_in ? 1 : 0);
+    glx::Uniform1f(l.fx_t, st.fx_t);
+    glx::Uniform2f(l.fx_p, st.fx_p[0], st.fx_p[1]);
+    glx::Uniform3f(l.fx_c, g.c[0], g.c[1], g.c[2]);
+    glx::Uniform3f(l.fx_up, g.up[0], g.up[1], g.up[2]);
+    glx::Uniform3f(l.fx_e1, g.e1[0], g.e1[1], g.e1[2]);
+    glx::Uniform3f(l.fx_e2, g.e2[0], g.e2[1], g.e2[2]);
+    glx::Uniform3f(l.fx_geo, std::max(g.radius, 1e-6f), g.h0, g.h1);
 }
 
 bool PreviewRenderer::ensure_mesh_program() {
     if (_mprog) return true;
     if (!glx::init()) return false;
-    std::string vs_src = std::string("#version 150\n") + kProj + kMeshVert;
-    std::string fs_src = std::string("#version 150\n") + kProj + kClip + kMeshFrag;
+    std::string vs_src = std::string("#version 150\n") + kProj + render::fx_glsl() + kMeshVert;
+    std::string fs_src = std::string("#version 150\n") + kProj + kClip + render::fx_glsl() +
+                         kMeshFrag;
     GLuint vs = compile(GL_VERTEX_SHADER, vs_src.c_str());
     GLuint fs = compile(GL_FRAGMENT_SHADER, fs_src.c_str());
     if (!vs || !fs) return false;
@@ -451,11 +510,7 @@ bool PreviewRenderer::ensure_mesh_program() {
     _mu_color_on = glx::GetUniformLocation(_mprog, "u_color_on");
     _mu_shade = glx::GetUniformLocation(_mprog, "u_shade");
     _mu_flat = glx::GetUniformLocation(_mprog, "u_flat");
-    _sloc[1] = {glx::GetUniformLocation(_mprog, "u_tier"),
-                glx::GetUniformLocation(_mprog, "u_dist"),
-                glx::GetUniformLocation(_mprog, "u_clip_on"),
-                glx::GetUniformLocation(_mprog, "u_clip"),
-                glx::GetUniformLocation(_mprog, "u_glow")};
+    style_locations(1, _mprog);
     return true;
 }
 

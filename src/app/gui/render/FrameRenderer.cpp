@@ -2,6 +2,8 @@
 
 #include "app/gui/render/FrameRenderer.h"
 
+#include "app/gui/render/TransitionFx.h"
+
 #include "app/gui/GlLoader.h"
 #include "checkpoint/SplatPly.h"
 #include "engine/Engine.h"
@@ -84,12 +86,24 @@ uniform float u_aspect;
 uniform vec4 u_bg;
 uniform vec4 u_tint0;
 uniform vec4 u_tint1;
+uniform float u_soft;
+uniform float u_zoom;
 out vec4 frag;
 vec4 fetch(sampler2D t, int flip, vec2 uv) {
     if (flip == 1) uv.y = 1.0 - uv.y;
     return texture(t, uv);
 }
 vec4 over(vec4 top, vec4 under) { return top + (1.0 - top.a) * under; }
+// Magnified `scale` times about the middle and smeared outward by `blur`.
+vec4 zoomed(sampler2D t, int flip, vec2 uv, float scale, float blur) {
+    vec4 acc = vec4(0.0);
+    for (int i = 0; i < 12; i++) {
+        vec2 p = 0.5 + (uv - 0.5) / (scale * (1.0 + blur * float(i) / 11.0));
+        if (all(greaterThanEqual(p, vec2(0.0))) && all(lessThanEqual(p, vec2(1.0))))
+            acc += fetch(t, flip, p);
+    }
+    return acc / 12.0;
+}
 vec4 tint(vec4 c, vec4 t) {
     return t.a > 0.0 ? mix(c, vec4(t.rgb, 1.0), t.a) : c;
 }
@@ -99,10 +113,18 @@ void main() {
     vec4 c;
     if (u_mode == 1) {
         c = over(over(b, a), u_bg);
+    } else if (u_mode == 2) {
+        // The old picture rushes past the camera, the new one arrives from far.
+        float m = u_mix;
+        float za = 1.0 + 2.0 * u_zoom * m * m;
+        float zb = 1.0 / (1.0 + 2.0 * u_zoom * (1.0 - m) * (1.0 - m));
+        vec4 ca = u_has_a == 1 ? zoomed(u_a, u_flip_a, v_uv, za, u_zoom * m) : vec4(0.0);
+        vec4 cb = u_has_b == 1 ? zoomed(u_b, u_flip_b, v_uv, zb, u_zoom * (1.0 - m)) : vec4(0.0);
+        c = mix(over(ca, u_bg), over(cb, u_bg), smoothstep(0.3, 0.7, m));
     } else {
         float m = u_mix;
         vec2 img = vec2(v_uv.x, 1.0 - v_uv.y);
-        const float e = 0.01;
+        float e = max(u_soft, 0.001);
         if (u_mask == 1) {
             // Along the wipe: 0 where it starts, 1 where it ends.
             float s = dot(img - 0.5, u_dir) + 0.5;
@@ -139,6 +161,36 @@ void main() {
 }
 )";
 
+// A transition's scene carried into a frame whose points reach the world
+// through `to_world`.
+FxGeo fx_geo_in(const LayerFx& fx, const spirula::Sim3& to_world) {
+    FxGeo g;
+    const spirula::Sim3 inv = to_world.inverse();
+    double c[3], u[3];
+    inv.apply(fx.centre, c);
+    inv.rotate(fx.up, u);
+    const double un = std::sqrt(u[0]*u[0] + u[1]*u[1] + u[2]*u[2]);
+    for (double& v : u) v /= std::max(un, 1e-12);
+    // Any two across up; which two only turns a spiral's start.
+    double a[3] = {1, 0, 0};
+    if (std::fabs(u[0]) > 0.9) { a[0] = 0; a[1] = 1; }
+    double e1[3] = {a[1]*u[2] - a[2]*u[1], a[2]*u[0] - a[0]*u[2], a[0]*u[1] - a[1]*u[0]};
+    const double n1 = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+    for (double& v : e1) v /= std::max(n1, 1e-12);
+    const double e2[3] = {u[1]*e1[2] - u[2]*e1[1], u[2]*e1[0] - u[0]*e1[2], u[0]*e1[1] - u[1]*e1[0]};
+    const double k = 1.0 / std::max(to_world.s, 1e-12);
+    for (int i = 0; i < 3; i++) {
+        g.c[i] = (float)c[i];
+        g.up[i] = (float)u[i];
+        g.e1[i] = (float)e1[i];
+        g.e2[i] = (float)e2[i];
+    }
+    g.radius = (float)(fx.radius * k);
+    g.h0 = (float)(fx.h0 * k);
+    g.h1 = (float)(fx.h1 * k);
+    return g;
+}
+
 double now_s() {
     return std::chrono::duration<double>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -169,7 +221,7 @@ GLuint compile_shader(GLenum type, const char* src) {
 struct FrameRenderer::SplatHost {
     int64_t n = 0;
     std::vector<float> means, scales, opacities;
-    std::vector<float> op, sc;          // what one frame uploads
+    std::vector<float> op, sc, mn;      // what one frame uploads
     std::vector<float> base_op;         // what is put back after it
 };
 
@@ -182,7 +234,8 @@ struct FrameRenderer::Slot {
     std::thread loader;
     std::atomic<int> load_state{0};     // 0 not asked, 1 reading, 2 ready, 3 failed
     std::shared_ptr<const std::vector<uint8_t>> masked_for;
-    double h_up[3] = {0, 0, 0}, h_range[2] = {0, 0};
+    double h_up[3] = {0, 0, 0};
+    SceneStats stats;
     bool h_valid = false;
 
     ~Slot() {
@@ -274,72 +327,77 @@ bool FrameRenderer::effects_ready(int source) {
     return false;
 }
 
-bool FrameRenderer::height_range(int source, const double up[3], double out[2]) {
+bool FrameRenderer::scene_stats(int source, const double up[3], SceneStats& out) {
     if (source < 0 || source >= (int)_slots.size()) return false;
     Slot& s = *_slots[(size_t)source];
     if (s.h_valid && s.h_up[0] == up[0] && s.h_up[1] == up[1] && s.h_up[2] == up[2]) {
-        out[0] = s.h_range[0];
-        out[1] = s.h_range[1];
+        out = s.stats;
         return true;
     }
     const spirula::Sim3 file_to_world = s.view.norm_to_world * s.view.file_to_norm;
-    std::vector<double> h;
-    // Only the model's core: a trained scene keeps floaters and a distant
-    // sky far outside what the camera frames, and a range stretched over
-    // them sweeps past the subject in a few frames.
-    auto add = [&](const auto* p, int64_t n, const spirula::Sim3& to_world) {
+    std::vector<double> w;
+    auto add = [&](const auto* p, int64_t n) {
         const int64_t step = std::max<int64_t>(1, n / 200000);
-        std::vector<double> w;
         for (int64_t i = 0; i < n; i += step) {
             const double x[3] = {(double)p[i*3], (double)p[i*3+1], (double)p[i*3+2]};
             double q[3];
-            to_world.apply(x, q);
+            file_to_world.apply(x, q);
             w.insert(w.end(), q, q + 3);
         }
-        const size_t m = w.size() / 3;
-        if (!m) return;
-        double c[3];
-        std::vector<double> tmp(m);
-        for (int d = 0; d < 3; d++) {
-            for (size_t i = 0; i < m; i++) tmp[i] = w[i * 3 + d];
-            std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t)(m / 2), tmp.end());
-            c[d] = tmp[m / 2];
-        }
-        std::vector<double> dist(m);
-        for (size_t i = 0; i < m; i++) {
-            const double dx = w[i*3] - c[0], dy = w[i*3+1] - c[1], dz = w[i*3+2] - c[2];
-            dist[i] = dx*dx + dy*dy + dz*dz;
-        }
-        tmp = dist;
-        std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t)(m / 2), tmp.end());
-        const double reach = 4.0 * tmp[m / 2];   // twice the median distance, squared
-        for (size_t i = 0; i < m; i++)
-            if (dist[i] <= reach)
-                h.push_back(up[0]*w[i*3] + up[1]*w[i*3+1] + up[2]*w[i*3+2]);
     };
     switch (s.view.kind) {
         case SourceView::Splats:
             if (!effects_ready(source) || !s.host) return false;
-            add(s.host->means.data(), s.host->n, file_to_world);
+            add(s.host->means.data(), s.host->n);
             break;
         case SourceView::Points:
             if (!s.view.ds) return false;
-            add(s.view.ds->points.xyz.data(), s.view.ds->points.num(), file_to_world);
+            add(s.view.ds->points.xyz.data(), s.view.ds->points.num());
             break;
         case SourceView::Mesh:
             if (!s.view.mesh || s.view.mesh->V.empty()) return false;
-            add(s.view.mesh->V[0].data(), (int64_t)s.view.mesh->V.size(), file_to_world);
+            add(s.view.mesh->V[0].data(), (int64_t)s.view.mesh->V.size());
             break;
     }
-    if (h.empty()) return false;
-    const size_t lo = h.size() / 50, hi = h.size() - 1 - h.size() / 50;
-    std::nth_element(h.begin(), h.begin() + (ptrdiff_t)lo, h.end());
-    const double a = h[lo];
-    std::nth_element(h.begin(), h.begin() + (ptrdiff_t)hi, h.end());
-    const double b = h[hi];
+    const size_t m = w.size() / 3;
+    if (!m) return false;
+    // Every point counts the same, whatever its size or opacity: the centre
+    // is the median, and what floats past four median distances is not the
+    // scene. A trained scene keeps floaters and a sky far outside it.
+    SceneStats st;
+    std::vector<double> tmp(m);
+    for (int d = 0; d < 3; d++) {
+        for (size_t i = 0; i < m; i++) tmp[i] = w[i * 3 + d];
+        std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t)(m / 2), tmp.end());
+        st.centre[d] = tmp[m / 2];
+    }
+    std::vector<double> dist(m);
+    for (size_t i = 0; i < m; i++) {
+        const double dx = w[i*3] - st.centre[0], dy = w[i*3+1] - st.centre[1],
+                     dz = w[i*3+2] - st.centre[2];
+        dist[i] = std::sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    tmp = dist;
+    std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t)(m / 2), tmp.end());
+    const double reach = 4.0 * tmp[m / 2];
+    std::vector<double> core, h;
+    for (size_t i = 0; i < m; i++) {
+        if (dist[i] > reach) continue;
+        core.push_back(dist[i]);
+        h.push_back(up[0] * (w[i*3] - st.centre[0]) + up[1] * (w[i*3+1] - st.centre[1]) +
+                    up[2] * (w[i*3+2] - st.centre[2]));
+    }
+    if (core.empty()) return false;
+    auto pct = [](std::vector<double>& v, double f) {
+        const size_t k = std::min(v.size() - 1, (size_t)(f * (double)(v.size() - 1)));
+        std::nth_element(v.begin(), v.begin() + (ptrdiff_t)k, v.end());
+        return v[k];
+    };
+    st.radius = std::max(pct(core, 0.9), 1e-9);
+    st.h0 = pct(h, 0.02);
+    st.h1 = std::max(pct(h, 0.98), st.h0 + 1e-9);
     for (int k = 0; k < 3; k++) s.h_up[k] = up[k];
-    s.h_range[0] = out[0] = a;
-    s.h_range[1] = out[1] = std::max(b, a + 1e-9);
+    s.stats = out = st;
     s.h_valid = true;
     return true;
 }
@@ -397,7 +455,7 @@ void FrameRenderer::submit(Pass& p) {
     q.primitive = style.primitive.empty() ? s.view.primitive : style.primitive;
     q.sh_degree = style.sh_degree;
 
-    const bool effect = l.grow != 1.0f || l.fade_in < 1.0f || l.clip != 0;
+    const bool effect = l.grow != 1.0f || l.fade_in < 1.0f || l.clip != 0 || l.fx.kind != 0;
     if (effect && effects_ready(l.source) && s.host) {
         std::shared_ptr<SplatHost> h = s.host;
         const int slot = s.view.cfg.scene_slot;
@@ -412,12 +470,15 @@ void FrameRenderer::submit(Pass& p) {
         const float fade = std::clamp(l.fade_in, 0.0f, 1.0f);
         const int clip = l.clip;
         const double band = std::max((double)l.glow, 1e-9);
+        const LayerFx fx = l.fx;
+        const FxGeo geo = fx_geo_in(fx, s.view.norm_to_world * s.view.file_to_norm);
         q.before_render = [h, slot, alive, n0 = n[0], n1 = n[1], n2 = n[2], d,
-                           log_grow, fade, clip, band] {
+                           log_grow, fade, clip, band, fx, geo] {
             const int64_t N = h->n;
             h->op.resize((size_t)N);
             h->sc.resize((size_t)N * 3);
             h->base_op.resize((size_t)N);
+            if (fx.kind) h->mn.resize((size_t)N * 3);
             const uint8_t* live = alive && (int64_t)alive->size() == N ? alive->data() : nullptr;
 #pragma omp parallel for schedule(static)
             for (int64_t i = 0; i < N; i++) {
@@ -431,19 +492,31 @@ void FrameRenderer::submit(Pass& p) {
                     // Soft over a band: a splat straddling the cut fades.
                     keep *= (float)std::clamp(-sgn / band, 0.0, 1.0);
                 }
+                float grow = log_grow;
+                if (fx.kind) {
+                    const float* p = &h->means[(size_t)i * 3];
+                    float r1, r2, dp[3], a, sz;
+                    fx_random((uint32_t)i, r1, r2);
+                    fx_apply(fx.kind, fx.incoming, fx.t, fx.p, geo, p, r1, r2, dp, a, sz);
+                    for (int k = 0; k < 3; k++) h->mn[(size_t)i * 3 + k] = p[k] + dp[k];
+                    keep *= std::clamp(a, 0.0f, 1.0f);
+                    grow += std::log(std::max(sz, 1e-3f));
+                }
                 h->op[(size_t)i] = dead || keep <= 0.0f
                                        ? kDeadOpacity
                                        : (keep >= 1.0f ? o : logit(sigmoid(o) * keep));
                 for (int k = 0; k < 3; k++)
-                    h->sc[(size_t)i * 3 + k] = h->scales[(size_t)i * 3 + k] + log_grow;
+                    h->sc[(size_t)i * 3 + k] = h->scales[(size_t)i * 3 + k] + grow;
             }
             engine_scene_update(slot, "opacities", tv(h->op, {N, 1}));
             engine_scene_update(slot, "scales", tv(h->sc, {N, 3}));
+            if (fx.kind) engine_scene_update(slot, "means", tv(h->mn, {N, 3}));
         };
-        q.after_render = [h, slot] {
+        q.after_render = [h, slot, moved = fx.kind != 0] {
             const int64_t N = h->n;
             engine_scene_update(slot, "opacities", tv(h->base_op, {N, 1}));
             engine_scene_update(slot, "scales", tv(h->scales, {N, 3}));
+            if (moved) engine_scene_update(slot, "means", tv(h->means, {N, 3}));
         };
     }
     p.id = s.worker->submit(q);
@@ -500,6 +573,15 @@ unsigned FrameRenderer::draw_gl_layer(Slot& s, const LayerSpec& l,
         ps.clip = true;
         ps.glow = l.glow;
     }
+    for (int k = 0; k < 3; k++) ps.glow_col[k] = l.glow_col[k];
+    if (l.fx.kind) {
+        ps.fx = l.fx.kind;
+        ps.fx_in = l.fx.incoming;
+        ps.fx_t = l.fx.t;
+        ps.fx_p[0] = l.fx.p[0];
+        ps.fx_p[1] = l.fx.p[1];
+        ps.fx_geo = fx_geo_in(l.fx, s.view.norm_to_world);
+    }
     s.gl->set_mesh_display(style.shade, style.flat, style.colour);
     const float dist = (float)std::sqrt(c2w[3]*c2w[3] + c2w[7]*c2w[7] + c2w[11]*c2w[11]);
     const float target[3] = {0, 0, 0};
@@ -546,8 +628,7 @@ bool FrameRenderer::poll(double wait) {
         if (p.ready) continue;
         if (!p.id) { waiting = true; continue; }
         ViewResult res;
-        const bool got = wait > 0.0 ? s.worker->wait_result(p.id, res, wait)
-                                    : s.worker->try_get_result(p.id, res);
+        const bool got = s.worker->take_result(p.id, res, wait);
         if (!got) {
             // A render that never comes back would hold the frame forever.
             if (now_s() - p.sent > 60.0) {
@@ -667,8 +748,8 @@ bool FrameRenderer::ensure_compositor() {
     }
     const char* names[] = {"u_a", "u_b", "u_has_a", "u_has_b", "u_flip_a",
                            "u_flip_b", "u_mode", "u_mask", "u_mix", "u_dir",
-                           "u_aspect", "u_bg", "u_tint0", "u_tint1"};
-    for (int i = 0; i < 14; i++) _u[i] = glx::GetUniformLocation(_prog, names[i]);
+                           "u_aspect", "u_bg", "u_tint0", "u_tint1", "u_soft", "u_zoom"};
+    for (int i = 0; i < 16; i++) _u[i] = glx::GetUniformLocation(_prog, names[i]);
     GLuint vao = 0;
     glx::GenVertexArrays(1, &vao);
     _vao = vao;
@@ -744,6 +825,8 @@ void FrameRenderer::composite() {
                    _spec.tint[0][3]);
     glx::Uniform4f(_u[13], _spec.tint[1][0], _spec.tint[1][1], _spec.tint[1][2],
                    _spec.tint[1][3]);
+    glx::Uniform1f(_u[14], _spec.soft);
+    glx::Uniform1f(_u[15], _spec.zoom);
     glx::BindVertexArray(_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glx::BindVertexArray(0);

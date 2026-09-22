@@ -82,7 +82,8 @@ overshoot, and time is warped by arc length (a 48-samples-per-segment
 table). The keys between the ends are then passed when the path says, not at
 their own times: `Trajectory::key_times` runs the warp backwards, and the
 timeline, a click on a key and the per-key looks all use those times; the
-interior keys' own times are shown read-only. A **closed loop** adds a knot back at the first key and solves the
+interior keys' own times are shown read-only. *Space evenly* is about times,
+so it turns constant speed off (and says so). A **closed loop** adds a knot back at the first key and solves the
 spline cyclically (Sherman-Morrison); a rotation that makes a full turn comes
 back as -q, which the cyclic system carries as a sign. A loop's video leaves
 out its last frame, which would be its first again.
@@ -123,7 +124,11 @@ at the output size:
 - **points and meshes**: `PreviewRenderer` into its own FBO, cleared
   transparent, with the render styles (`PreviewStyle`): square, circle,
   Gaussian or sphere points, lens distortion in the vertex projection, and a
-  clip plane for the sweep.
+  clip plane for the sweep. Nothing is drawn where the lens folds over itself:
+  the shader runs the engine's `is_valid_distortion` test (`lens_valid`), per
+  point and per mesh fragment, as the splats already are. A soft point's
+  sprite is 2.4 times its size, so that its half-maximum -- how wide it looks
+  -- spans the size asked for.
 
 Two layers at most meet in one GLSL compositing pass: a mix through a mask
 (crossfade, wipe, iris), or one over the other (the sweep, where each layer
@@ -178,23 +183,72 @@ A **shot** is a start time, a model (or nothing) and how it arrives:
 
 | | |
 |---|---|
-| cut, crossfade, dip to black / white | what every editor has |
-| wipe left / right / up / down, iris | a moving mask in picture space |
-| sweep upward | a level rises along *up*, the new model below it, the old above, the band at the cut lit |
+| cut, crossfade, dip through a colour | what every editor has |
+| wipe (any direction, softness), iris | a moving mask in picture space |
+| zoom blur | the old picture rushes past the camera, the new one arrives from far, both smeared radially |
+| sweep (up or down, glow and its colour) | a level moves along *up*, one model on each side of it, the band at the cut lit |
 | grow in | the new model's splats swell out of points while the old one fades |
+| falling dust (fall, rise, blow away; turbulence) | the old model crumbles from one side, the new one settles out of the air |
+| spiral in (turns, spread) | the old model spirals up and out, the new one swirls down into place |
+| scatter (distance, randomness) | one bursts outward from the middle, the other gathers in |
+| rain down (height, stagger) | the new model's elements drop into place with a small hop |
+| dissolve (sparkle) | element by element, each at its own moment, with a pop |
+| ripple (height, width) | a wave rolls out from the middle, swapping the models as it passes |
+
+Each transition keeps two settings and a colour in its shot, reset to the
+kind's own defaults when the kind changes (`shot_defaults`); files from before
+the dips and wipes were one each read their colour and direction across.
+
+The 3D ones (sweep on) move the models' own elements: one set of formulas in
+`TransitionFx.h`, run on the host per splat (means, opacities and scales
+rewritten in `before_render`, as the reveal effects are) and in the point and
+mesh vertex shaders. They act on a scene measured robustly -- the per-axis
+median of the elements, unweighted, the 90th-percentile distance from it
+past four median distances left out, and the 2nd / 98th-percentile heights
+along up (`FrameRenderer::scene_stats`) -- so a sky or a floater far away
+does not stretch them. Every one begins with the old model exactly as it was
+and ends with the new one exactly as it is, outliers included
+(`render_project_test`). Points take a random number of their own from their
+index; a mesh's vertices take a smooth noise of where they are, since shared
+vertices must move together, and a mesh fades by losing world-space grains.
+Both layers are then drawn one over the other.
+
+On the timeline a shot's transition is a ramp from the colour before to its
+own; its start and the ramp's end drag.
 
 *Show each model in turn* splits the video into one shot per model -- points,
 then splats, then meshes -- with the transition that suits each; shots can
 then be reordered (models and transitions trade places, times stay). Fade in
 and fade out are separate from the shots, as in an editor, and a photo has
-none. Any model can be closed, the first one included: the next becomes the
-primary one, and the keys cross from the old one's placement to its own.
+none.
+
+## Models
+
+The project lists its models by path and remembers which open pane each one
+is (`_src_uid`); shots and looks name the project's list, the renderers the
+panes that are open (`RenderSession::rt`). So the model shown in the viewport
+can be any of them -- *Show* switches the viewport to it and *Edit* opens it in
+the editor -- and the camera move crosses from one model's placement to the
+other's, all of them taken to share the file frame. Closing the one shown
+shows the next. Adding and closing models are steps in the history like any
+other: going back to before one was added closes it, and back past a close
+opens it again. In the editor, *Move the other open models with it* shows the
+placement on every other pane too, so a render of them together stays lined
+up; they go back when the editor is left without saving over the file.
+
+## History
+
+Every state the project has been in is kept (200 of them), named by what
+changed between it and the one before -- found by comparing the two, so no
+action has to name itself -- and listed under *History*, where a click goes
+to any of them. A drag is one step, taken when it lets go.
 
 ## Output
 
 A photo, a video, or a folder of numbered frames. Photos and frames are PNG,
 PNG with transparency, or JPEG, written by `stb_image_write` on a few threads
-(`FrameSink.cpp`). A video is an MP4 (H.264, H.265 or AV1) or an animated GIF.
+(`FrameSink.cpp`). A video is an MP4 (H.264, H.265 or AV1), AV1 in WebM
+(ffmpeg's alone; the GPU encoder writes MP4), or an animated GIF.
 GIF is written here (`GifWriter.cpp`): a median-cut palette per frame, an 8x8
 ordered dither that does not crawl between frames as error diffusion would,
 and frames dropped where a delay would fall under 2/100 s, which players
@@ -214,8 +268,16 @@ stretch. An MP4 is raw RGB piped into an encoder process, chosen per size:
 
 An equirectangular video is tagged as 360 (Spherical Video V1 and V2). Its
 sizes are listed as 2:1, and the panel warns when a key's lens is
-equirectangular and the size is not. *Render* with no file chosen asks for one
-and then goes ahead.
+equirectangular and the size is not. *Render* with no file chosen asks for one,
+gives it the extension the output needs, and then goes ahead; a file, or a
+folder of frames, already there is replaced only after asking.
+
+An export keeps the renderers busy: the next frame is asked for as soon as one
+comes back, before that one is read back, handed to the encoder and the window
+drawn, so the render of one overlaps the rest of the other. The splat worker's
+raw path keeps its buffers between frames, skips the depth read back and turns
+floats into bytes on every core. 1080p splats went from 22 to 68 frames a
+second (RTX 5070, H.264 on the GPU).
 
 ## The file
 
@@ -225,8 +287,8 @@ folder beside the model when that already has a `renders/` -- with an
 (quietly on a switch to the editor, where the move is still in memory). The
 format is `"format": "spirula-render"`, `"version": 1`; unknown keys are
 ignored and missing ones take their defaults, so it can grow without a
-version bump. Sources are listed by path but matched by position: a project
-opened with a different set of models shows whatever is open in each slot.
+version bump. Sources are listed by path: opening a project opens the ones
+it names that are not open, and those open besides join it.
 
 ## Testing
 
@@ -237,8 +299,9 @@ the seam), rigid transforms of the path, aim and roll, the lens arithmetic,
 JSON round trips including older files, moved-project copies, dataset lens
 clustering, the lens glide between keys, when each key is passed at
 constant speed, per-key looks and their JSON, the refit after a deletion (an
-orbit missing a key comes back to within a third of its gap), and a GIF read
-back through a decoder of its own. The rest was
+orbit missing a key comes back to within a third of its gap), transition
+settings and the older names they replaced, every 3D transition starting and
+ending exactly at rest, and a GIF read back through a decoder of its own. The rest was
 driven through the GUI automation surface ([gui-automation.md](gui-automation.md))
 on a trained scene with a mesh: orbit loops, insertion, deletion, R, the
 lens-aware gizmos, the three preview layouts, keys following a turned model,
