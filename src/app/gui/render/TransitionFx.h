@@ -11,14 +11,24 @@
 
 namespace gui::render {
 
-// The scene a transition moves, in the frame of the positions it is given:
-// a centre, an orthonormal (up, e1, e2), the 90th-percentile distance from
-// the centre and the 2nd / 98th-percentile heights along up.
+// Quantiles every 1/32 of the elements, least to most.
+constexpr int kFxQuantiles = 33;
+
+// The frame a transition moves in -- a centre, an orthonormal (up, e1, e2),
+// the 90th-percentile distance -- and the quantiles, from c, of the height
+// along up, the distance along e1 and from the up axis, which it orders by.
 struct FxGeo {
     float c[3] = {0, 0, 0};
     float up[3] = {0, 0, 1}, e1[3] = {1, 0, 0}, e2[3] = {0, 1, 0};
     float radius = 1.0f;
-    float h0 = -1.0f, h1 = 1.0f;
+    float qh[kFxQuantiles], qa[kFxQuantiles], qr[kFxQuantiles];
+    FxGeo() {
+        for (int i = 0; i < kFxQuantiles; i++) {
+            const float f = (float)i / (kFxQuantiles - 1);
+            qh[i] = qa[i] = 2.0f * f - 1.0f;
+            qr[i] = f;
+        }
+    }
 };
 
 // Two uniform numbers in [0, 1) of an element's own.
@@ -30,6 +40,29 @@ inline void fx_random(uint32_t i, float& r1, float& r2) {
     };
     r1 = h(i);
     r2 = h(i ^ 0x9E3779B9u);
+}
+
+// The share of elements below `v`, from their quantiles `q`.
+inline float fx_cdf(const float* q, float v) {
+    constexpr int n = kFxQuantiles - 1;
+    if (!(v > q[0])) return 0.0f;
+    if (v >= q[n]) return 1.0f;
+    int lo = 0, hi = n;
+    while (hi - lo > 1) {
+        const int m = (lo + hi) / 2;
+        if (v < q[m]) hi = m;
+        else lo = m;
+    }
+    const float span = q[hi] - q[lo];
+    return ((float)lo + (span > 0.0f ? (v - q[lo]) / span : 0.5f)) / (float)n;
+}
+
+// Where a share `f` of the elements lies, the other way.
+inline float fx_quantile(const float* q, float f) {
+    constexpr int n = kFxQuantiles - 1;
+    const float x = f <= 0.0f ? 0.0f : f >= 1.0f ? (float)n : f * (float)n;
+    const int i = x >= (float)n ? n - 1 : (int)x;
+    return q[i] + (q[i + 1] - q[i]) * (x - (float)i);
 }
 
 namespace fxd {
@@ -57,7 +90,6 @@ inline void fx_apply(int kind, bool in, float t, const float prm[2], const FxGeo
     auto dot = [&](const float* v) { return q[0] * v[0] + q[1] * v[1] + q[2] * v[2]; };
     const float h = dot(g.up), x1 = dot(g.e1), x2 = dot(g.e2);
     const float R = g.radius;
-    const float hn = sat((h - g.h0) / std::fmax(g.h1 - g.h0, 1e-6f * R));
     // A direction of the element's own, uniform on the sphere.
     const float za = 2.0f * r1 - 1.0f, sa = std::sqrt(std::fmax(0.0f, 1.0f - za * za));
     const float ca = std::cos(kTau * r2) * sa, cb = std::sin(kTau * r2) * sa;
@@ -69,8 +101,8 @@ inline void fx_apply(int kind, bool in, float t, const float prm[2], const FxGeo
     switch (kind) {
         case 8: {                                   // Dust: fall, rise, blow away
             const int mode = (int)(prm[0] + 0.5f);
-            const float along = sat(x1 / (2.0f * R) + 0.5f);
-            const float order = mode == 0 ? 1.0f - hn : mode == 1 ? hn : along;
+            const float order = mode == 2 ? fx_cdf(g.qa, x1)
+                                : mode == 1 ? fx_cdf(g.qh, h) : 1.0f - fx_cdf(g.qh, h);
             const float s0 = order * 0.85f + r1 * 0.15f;
             float dir[3];
             for (int k = 0; k < 3; k++)
@@ -91,6 +123,7 @@ inline void fx_apply(int kind, bool in, float t, const float prm[2], const FxGeo
             break;
         }
         case 9: {                                   // Spiral: turns, spread
+            const float hn = fx_cdf(g.qh, h);
             float tau, u, turn;
             if (in) {
                 tau = local(phase(t, 0.3f, 1.0f), hn * 0.6f + r1 * 0.25f, 0.45f);
@@ -158,10 +191,12 @@ inline void fx_apply(int kind, bool in, float t, const float prm[2], const FxGeo
             break;
         }
         case 13: {                                  // Ripple: height, width
-            // From below the middle to past every outlier by the end.
-            const float rn = std::sqrt(x1 * x1 + x2 * x2) / R;
-            const float front = t * 2.1f - 0.6f + 1e3f * smooth(0.9f, 1.0f, t);
-            const float phi = (front - rn) / std::fmax(prm[1], 0.02f);
+            // The front runs through the elements' quantiles, clear of them
+            // at either end.
+            const float rn = fx_cdf(g.qr, std::sqrt(x1 * x1 + x2 * x2));
+            const float w = std::fmax(prm[1], 0.02f);
+            const float front = -2.0f * w + t * (1.0f + 4.0f * w);
+            const float phi = (front - rn) / w;
             add(g.up, R * prm[0] * std::exp(-2.5f * phi * phi));
             const float passed = smooth(-0.15f, 0.15f, phi);
             alpha = in ? passed : 1.0f - passed;
@@ -184,7 +219,10 @@ uniform vec3 u_fx_c;
 uniform vec3 u_fx_up;
 uniform vec3 u_fx_e1;
 uniform vec3 u_fx_e2;
-uniform vec3 u_fx_geo;      // radius, h0, h1
+uniform float u_fx_radius;
+uniform float u_fx_qh[33];
+uniform float u_fx_qa[33];
+uniform float u_fx_qr[33];
 float fx_sat(float x) { return clamp(x, 0.0, 1.0); }
 float fx_smooth(float a, float b, float x) { return smoothstep(a, b, x); }
 float fx_local(float t, float s0, float w) { return fx_sat((t - s0 * (1.0 - w)) / w); }
@@ -193,6 +231,40 @@ float fx_hashu(uint x) {
     x = x * 747796405u + 2891336453u;
     x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
     return float((x >> 22u) ^ x) * (1.0 / 4294967296.0);
+}
+// fx_cdf, once per table: GLSL 1.50 passes no uniform array by reference.
+float fx_cdf_h(float v) {
+    if (!(v > u_fx_qh[0])) return 0.0;
+    if (v >= u_fx_qh[32]) return 1.0;
+    int lo = 0, hi = 32;
+    for (int k = 0; k < 6 && hi - lo > 1; k++) {
+        int m = (lo + hi) / 2;
+        if (v < u_fx_qh[m]) hi = m; else lo = m;
+    }
+    float span = u_fx_qh[hi] - u_fx_qh[lo];
+    return (float(lo) + (span > 0.0 ? (v - u_fx_qh[lo]) / span : 0.5)) / 32.0;
+}
+float fx_cdf_a(float v) {
+    if (!(v > u_fx_qa[0])) return 0.0;
+    if (v >= u_fx_qa[32]) return 1.0;
+    int lo = 0, hi = 32;
+    for (int k = 0; k < 6 && hi - lo > 1; k++) {
+        int m = (lo + hi) / 2;
+        if (v < u_fx_qa[m]) hi = m; else lo = m;
+    }
+    float span = u_fx_qa[hi] - u_fx_qa[lo];
+    return (float(lo) + (span > 0.0 ? (v - u_fx_qa[lo]) / span : 0.5)) / 32.0;
+}
+float fx_cdf_r(float v) {
+    if (!(v > u_fx_qr[0])) return 0.0;
+    if (v >= u_fx_qr[32]) return 1.0;
+    int lo = 0, hi = 32;
+    for (int k = 0; k < 6 && hi - lo > 1; k++) {
+        int m = (lo + hi) / 2;
+        if (v < u_fx_qr[m]) hi = m; else lo = m;
+    }
+    float span = u_fx_qr[hi] - u_fx_qr[lo];
+    return (float(lo) + (span > 0.0 ? (v - u_fx_qr[lo]) / span : 0.5)) / 32.0;
 }
 float fx_h3(vec3 c) { return fract(sin(dot(c, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 // Smooth over space, for a mesh, whose shared vertices must move together.
@@ -214,14 +286,12 @@ void fx_apply(vec3 pos, float r1, float r2, out vec3 d, out float alpha, out flo
     vec2 prm = u_fx_p;
     vec3 q = pos - u_fx_c;
     float h = dot(q, u_fx_up), x1 = dot(q, u_fx_e1), x2 = dot(q, u_fx_e2);
-    float R = u_fx_geo.x;
-    float hn = fx_sat((h - u_fx_geo.y) / max(u_fx_geo.z - u_fx_geo.y, 1e-6 * R));
+    float R = u_fx_radius;
     float za = 2.0 * r1 - 1.0, sa = sqrt(max(0.0, 1.0 - za * za));
     vec3 rv = cos(kTau * r2) * sa * u_fx_e1 + sin(kTau * r2) * sa * u_fx_e2 + za * u_fx_up;
     if (u_fx == 8) {
         int mode = int(prm.x + 0.5);
-        float along = fx_sat(x1 / (2.0 * R) + 0.5);
-        float order = mode == 0 ? 1.0 - hn : mode == 1 ? hn : along;
+        float order = mode == 2 ? fx_cdf_a(x1) : mode == 1 ? fx_cdf_h(h) : 1.0 - fx_cdf_h(h);
         float s0 = order * 0.85 + r1 * 0.15;
         vec3 dir = mode == 0 ? -u_fx_up : mode == 1 ? u_fx_up : u_fx_e1 + 0.3 * u_fx_up;
         if (!inn) {
@@ -236,6 +306,7 @@ void fx_apply(vec3 pos, float r1, float r2, out vec3 d, out float alpha, out flo
             size = 0.3 + 0.7 * tau;
         }
     } else if (u_fx == 9) {
+        float hn = fx_cdf_h(h);
         float tau, u, turn;
         if (inn) {
             tau = fx_local(fx_phase(t, 0.3, 1.0), hn * 0.6 + r1 * 0.25, 0.45);
@@ -287,9 +358,10 @@ void fx_apply(vec3 pos, float r1, float r2, out vec3 d, out float alpha, out flo
         alpha = inn ? tau : 1.0 - tau;
         size = (inn ? 0.3 + 0.7 * tau : 1.0) + pop;
     } else if (u_fx == 13) {
-        float rn = sqrt(x1 * x1 + x2 * x2) / R;
-        float front = t * 2.1 - 0.6 + 1e3 * fx_smooth(0.9, 1.0, t);
-        float phi = (front - rn) / max(prm.y, 0.02);
+        float rn = fx_cdf_r(sqrt(x1 * x1 + x2 * x2));
+        float w = max(prm.y, 0.02);
+        float front = -2.0 * w + t * (1.0 + 4.0 * w);
+        float phi = (front - rn) / w;
         d = u_fx_up * (R * prm.x * exp(-2.5 * phi * phi));
         float passed = fx_smooth(-0.15, 0.15, phi);
         alpha = inn ? passed : 1.0 - passed;

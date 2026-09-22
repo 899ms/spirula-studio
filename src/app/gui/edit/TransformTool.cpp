@@ -529,7 +529,7 @@ void TransformTool::draw_overlay(ImDrawList* dl, const ImVec2& origin,
 
     // The constraint, drawn right across the view: a short stub would say
     // which axis but not where it goes.
-    if (_axis >= 0 && have_pivot) {
+    if (_axis >= 0 && have_pivot && !(f.each && local())) {
         const double pps = pixels_per_unit(f.cam, f.pivot);
         const double reach = pps > 0 ? 4000.0 / pps : 0.0;
         for (int a = 0; a < 3; a++) {

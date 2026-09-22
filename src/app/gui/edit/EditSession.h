@@ -120,6 +120,7 @@ public:
     bool saved_over_source() const { return _saved_over_source; }
     bool on_viewport_input(const ViewportInput& in) override;
     void draw_viewport_overlay(const ViewportOverlay& v) override;
+    bool frame_bounds(double centre[3], double& radius) override;
     // A long job is in flight; editing waits for it.
     bool busy() const {
         return _comp_busy.load() || _save_busy.load() || _attr_busy.load();

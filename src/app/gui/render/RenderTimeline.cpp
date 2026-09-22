@@ -142,52 +142,74 @@ void RenderSession::draw_timeline() {
         dl->AddText(ImVec2(x + px(3.0f), a.y), IM_COL32(150, 150, 160, 255), b2);
     }
 
-    // Shots: what is on screen when, and how each arrives -- its transition
-    // as a ramp from the colour before to its own. A boundary and a ramp's
-    // end drag.
+    // Shots: what is on screen when, column by column as shot_mix has it --
+    // the one arriving rising from the bottom, the one going from the top,
+    // the background between. Each start and end of a way in or out drags.
     const float lane0 = b.y - px(20.0f), lane1 = b.y - px(3.0f);
     const std::vector<Shot>& shots = _project.shots;
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     const bool in_lane = hovered && mouse.y >= lane0 - px(3.0f) && mouse.y <= lane1 + px(3.0f);
-    int shot_hot = -1;
-    bool shot_hot_end = false;
-    auto shot_col = [&](int i) {
-        if (i < 0) return IM_COL32(40, 40, 44, 255);
+    auto shot_col = [&](int i, int alpha) {
+        if (i < 0) return IM_COL32(40, 40, 44, alpha);
         const int src = shots[(size_t)i].source;
-        return src < 0 ? IM_COL32(50, 50, 55, 255) : kShotCols[(size_t)src % 4];
+        const ImU32 c = src < 0 ? IM_COL32(50, 50, 55, 255) : kShotCols[(size_t)src % 4];
+        return (c & 0x00ffffffu) | ((ImU32)alpha << 24);
+    };
+    if (!shots.empty()) {
+        dl->AddRectFilled(ImVec2(x_of(0.0), lane0), ImVec2(x_of(T), lane1), IM_COL32(34, 34, 38, 255));
+        const float step_px = std::max(1.0f, px(2.0f));
+        const float lh = lane1 - lane0;
+        for (float x = x_of(0.0); x < x_of(T); x += step_px) {
+            const ShotMix m = shot_mix(shots, t_of(x + 0.5f * step_px));
+            auto shown = [&](int i, double u, bool arriving) {
+                if (i < 0) return 0.0;
+                const Transition k = arriving ? shots[(size_t)i].transition
+                                              : shots[(size_t)i].exit.transition;
+                if (k == Transition::Cut) return arriving || u < 1.0 ? 1.0 : 0.0;
+                return arriving ? u : 1.0 - u;
+            };
+            const double vin = shown(m.in, m.u_in, true);
+            const double vout = m.own ? shown(m.out, m.u_out, false) : (m.out >= 0 ? 1.0 - vin : 0.0);
+            const float x1 = std::min(x + step_px, x_of(T));
+            if (vout > 0.0)
+                dl->AddRectFilled(ImVec2(x, lane0), ImVec2(x1, lane0 + (float)vout * lh),
+                                  shot_col(m.out, 255));
+            if (vin > 0.0)
+                dl->AddRectFilled(ImVec2(x, lane1 - (float)vin * lh), ImVec2(x1, lane1),
+                                  shot_col(m.in, 255));
+        }
+    }
+    // The handles: 0 a shot's start, 1 its arrival's end, 2 and 3 its own
+    // way out's start and end. In that order of reach when they meet, the
+    // start before the way out that begins with it.
+    int shot_hot = -1, shot_part = 0;
+    const float grab = px(5.0f);
+    auto handle = [&](int i, int part, double t_at, ImU32 col) {
+        const float x = x_of(std::clamp(t_at, 0.0, T));
+        const bool hot = (_drag_shot == i && _drag_shot_part == part) ||
+                         (_drag_shot < 0 && shot_hot < 0 && in_lane && std::fabs(mouse.x - x) < grab);
+        if (hot) { shot_hot = i; shot_part = part; }
+        dl->AddLine(ImVec2(x, lane0 - px(2.0f)), ImVec2(x, lane1 + px(1.0f)),
+                    hot ? IM_COL32(255, 235, 90, 255) : col, px(hot ? 2.0f : 1.0f));
     };
     for (size_t i = 0; i < shots.size(); i++) {
-        const double s0 = shots[i].start;
-        const double s1 = i + 1 < shots.size() ? shots[i + 1].start : T;
-        const float x0 = x_of(std::min(s0, T)), x1 = x_of(std::min(s1, T));
-        if (x1 <= x0) continue;
-        dl->AddRectFilled(ImVec2(x0, lane0), ImVec2(x1, lane1), shot_col((int)i), px(2.0f));
-        const float grab = px(5.0f);
-        if (shots[i].transition != Transition::Cut && shots[i].duration > 1e-6) {
-            const float xt = x_of(std::min(s0 + shots[i].duration, s1));
-            dl->AddRectFilled(ImVec2(x0, lane0), ImVec2(xt, lane1), shot_col((int)i - 1));
-            dl->AddTriangleFilled(ImVec2(x0, lane1), ImVec2(xt, lane0), ImVec2(xt, lane1),
-                                  shot_col((int)i));
-            dl->AddLine(ImVec2(x0, lane1), ImVec2(xt, lane0), IM_COL32(255, 255, 255, 170),
-                        px(1.0f));
-            const bool hot = (_drag_shot == (int)i && _drag_shot_end) ||
-                             (_drag_shot < 0 && in_lane && std::fabs(mouse.x - xt) < grab);
-            if (hot) { shot_hot = (int)i; shot_hot_end = true; }
-            dl->AddLine(ImVec2(xt, lane0 - px(2.0f)), ImVec2(xt, lane1 + px(1.0f)),
-                        hot ? IM_COL32(255, 235, 90, 255) : IM_COL32(230, 230, 230, 150),
-                        px(hot ? 2.0f : 1.0f));
+        const Shot& sh = shots[i];
+        if (sh.transition != Transition::Cut && sh.duration > 1e-6)
+            handle((int)i, 1, sh.start + sh.duration, IM_COL32(230, 230, 230, 150));
+        if (i + 1 < shots.size() && sh.exit.own) {
+            const double from = shots[i + 1].start + sh.exit.offset;
+            if (sh.exit.transition != Transition::Cut)
+                handle((int)i, 3, from + sh.exit.duration, IM_COL32(230, 230, 230, 150));
         }
-        if (i > 0) {
-            const bool hot = (_drag_shot == (int)i && !_drag_shot_end) ||
-                             (_drag_shot < 0 && shot_hot < 0 && in_lane &&
-                              std::fabs(mouse.x - x0) < grab);
-            if (hot) { shot_hot = (int)i; shot_hot_end = false; }
-            dl->AddLine(ImVec2(x0, lane0 - px(3.0f)), ImVec2(x0, lane1 + px(2.0f)),
-                        hot ? IM_COL32(255, 235, 90, 255) : IM_COL32(20, 20, 24, 255),
-                        px(hot ? 2.5f : 1.5f));
-        }
+    }
+    for (size_t i = 1; i < shots.size(); i++) handle((int)i, 0, shots[i].start, IM_COL32(20, 20, 24, 255));
+    for (size_t i = 0; i + 1 < shots.size(); i++)
+        if (shots[i].exit.own)
+            handle((int)i, 2, shots[i + 1].start + shots[i].exit.offset, IM_COL32(230, 230, 230, 110));
+    for (size_t i = 0; i < shots.size(); i++) {
         const std::string name = source_name(shots[i].source);
-        if (!name.empty())
+        const float x0 = x_of(std::min(shots[i].start, T));
+        if (!name.empty() && x0 < x_of(T) - px(8.0f))
             dl->AddText(ImVec2(x0 + px(4.0f), lane0 + px(1.0f)), IM_COL32(235, 235, 235, 230),
                         name.c_str());
     }
@@ -241,9 +263,10 @@ void RenderSession::draw_timeline() {
     const double frame = 1.0 / fps;
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && shot_hot >= 0) {
         _drag_shot = shot_hot;
-        _drag_shot_end = shot_hot_end;
+        _drag_shot_part = shot_part;
         const Shot& sh = shots[(size_t)shot_hot];
-        _drag_shot_from = shot_hot_end ? sh.duration : sh.start;
+        _drag_shot_from = shot_part == 0 ? sh.start : shot_part == 1 ? sh.duration
+                        : shot_part == 2 ? sh.exit.offset : sh.exit.duration;
     } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         if (hot >= 0) {
             const ImGuiIO& io = ImGui::GetIO();
@@ -304,11 +327,22 @@ void RenderSession::draw_timeline() {
         const size_t i = (size_t)_drag_shot;
         Shot& sh = _project.shots[i];
         const double next = i + 1 < shots.size() ? shots[i + 1].start : T;
-        if (_drag_shot_end) {
-            sh.duration = std::clamp(v, frame, std::max(frame, next - sh.start));
-        } else {
-            const double lo = i > 0 ? shots[i - 1].start + frame : 0.0;
-            sh.start = std::clamp(v, lo, std::max(lo, next - frame));
+        switch (_drag_shot_part) {
+            case 0: {
+                const double lo = i > 0 ? shots[i - 1].start + frame : 0.0;
+                sh.start = std::clamp(v, lo, std::max(lo, next - frame));
+                break;
+            }
+            case 1:
+                sh.duration = std::clamp(v, frame, std::max(frame, next - sh.start));
+                break;
+            case 2:
+                // It may leave before the next one comes, not before it came.
+                sh.exit.offset = std::clamp(v, sh.start - next, T - next);
+                break;
+            default:
+                sh.exit.duration = std::clamp(v, frame, std::max(frame, T));
+                break;
         }
         project_changed();
     }

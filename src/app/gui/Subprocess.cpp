@@ -189,8 +189,11 @@ bool ProcessPipe::start(const std::vector<std::string>& argv,
     PROCESS_INFORMATION pi{};
     std::vector<char> cmd(cmdline.begin(), cmdline.end());
     cmd.push_back('\0');
+    // An encoder saturates every core; the window showing its progress
+    // must still draw, so it runs a notch below.
     const BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+                                   CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS, nullptr,
+                                   nullptr, &si, &pi);
     CloseHandle(in_rd);
     CloseHandle(out_wr);
     if (!ok) {
@@ -364,6 +367,8 @@ bool ProcessPipe::start(const std::vector<std::string>& argv,
     }
     if (pid == 0) {
         setpgid(0, 0);
+        // Below the window, as on Windows.
+        if (nice(10) == -1) {}
         dup2(in[0], STDIN_FILENO);
         dup2(out[1], STDOUT_FILENO);
         dup2(out[1], STDERR_FILENO);

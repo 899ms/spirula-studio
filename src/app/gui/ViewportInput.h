@@ -51,6 +51,9 @@ struct ViewportInteractor {
     // one while the model is being placed against it. True hands the grid to
     // draw_viewport_overlay, fixed in the frame the model moves through.
     virtual bool draws_world_grid() const { return false; }
+    // What Numpad . frames, shared frame: the selection, or everything the
+    // tool edits when nothing is selected. False: nothing to frame.
+    virtual bool frame_bounds(double /*centre*/[3], double& /*radius*/) { return false; }
     // True when the tool took this frame's left button.
     virtual bool on_viewport_input(const ViewportInput& in) = 0;
     virtual void draw_viewport_overlay(const ViewportOverlay& v) = 0;

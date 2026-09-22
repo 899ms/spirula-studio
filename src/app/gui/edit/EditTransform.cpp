@@ -46,6 +46,47 @@ Sim3 EditSession::saved_to_shared() const {
     return base_frame() * _doc->view_frame();
 }
 
+// The current layer's selection, or all of it, by its median and a high
+// percentile of the distance from it: a stray element should not push the
+// view back, and a selection is what was meant, so it keeps nearly all.
+bool EditSession::frame_bounds(double centre[3], double& radius) {
+    if (!_doc || !_panel || _xform.active()) return false;
+    const Selection& sel = _doc->sel();
+    const std::vector<uint8_t>& alive = _doc->alive_of(_doc->layer());
+    const float* p = _doc->positions();
+    const bool only = !sel.empty();
+    const int64_t n = (int64_t)alive.size();
+    const int64_t want = only ? sel.count() : _doc->alive_count();
+    const int64_t step = std::max<int64_t>(1, want / 50000);
+    std::vector<double> pts;
+    int64_t seen = 0;
+    for (int64_t i = 0; i < n; i++) {
+        if (!alive[(size_t)i] || (only && !sel.selected(i))) continue;
+        if (seen++ % step) continue;
+        pts.insert(pts.end(), {(double)p[i*3], (double)p[i*3+1], (double)p[i*3+2]});
+    }
+    const size_t m = pts.size() / 3;
+    if (!m) return false;
+    double c[3];
+    std::vector<double> v(m);
+    for (int d = 0; d < 3; d++) {
+        for (size_t i = 0; i < m; i++) v[i] = pts[i * 3 + d];
+        std::nth_element(v.begin(), v.begin() + (ptrdiff_t)(m / 2), v.end());
+        c[d] = v[m / 2];
+    }
+    for (size_t i = 0; i < m; i++) {
+        const double dx = pts[i*3] - c[0], dy = pts[i*3+1] - c[1], dz = pts[i*3+2] - c[2];
+        v[i] = std::sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    const size_t k = std::min(m - 1, (size_t)((only ? 0.98 : 0.9) * (double)(m - 1)));
+    std::nth_element(v.begin(), v.begin() + (ptrdiff_t)k, v.end());
+    const double r = std::max(v[k], 0.01 * (double)_doc->extent());
+    const Sim3 to_shared = base_frame() * _doc->placement();
+    to_shared.apply(c, centre);
+    radius = r * to_shared.s;
+    return radius > 0.0;
+}
+
 bool EditSession::draws_world_grid() const {
     return _doc && (_moved_ever || _xform.active() || !_doc->placement().is_identity());
 }

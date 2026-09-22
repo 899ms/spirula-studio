@@ -29,6 +29,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 const ImVec4 kErr(1.0f, 0.45f, 0.45f, 1.0f);
+const ImVec4 kOk(0.35f, 0.85f, 0.45f, 1.0f);    // GuiApp's, for a job done
 const ImVec4 kDim(0.62f, 0.64f, 0.68f, 1.0f);
 
 struct Resolution { int w, h; const Msg* name; };
@@ -92,6 +93,12 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
     if (io.WantTextInput || ImGui::IsAnyItemActive() || _xform.active()) return;
     const bool plain = !io.KeyCtrl && !io.KeyAlt && !io.KeyShift;
     auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
+    // Flying: every other key is the flight's.
+    if (_flying) {
+        if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter)) stop_flight(true);
+        else if (pressed(ImGuiKey_Escape)) stop_flight(false);
+        return;
+    }
 
     if (io.KeyCtrl && !io.KeyShift && pressed(ImGuiKey_Z)) { undo(); return; }
     if (io.KeyCtrl && (pressed(ImGuiKey_Y) || (io.KeyShift && pressed(ImGuiKey_Z)))) {
@@ -203,6 +210,10 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
 
 void RenderSession::draw_status() {
     if (!_have_project) return;
+    if (_flying) {
+        ui::TextDisabled(msg::fly_hint);
+        return;
+    }
     if (_xform.active()) {
         ui::TextDisabled(_xform.kind() == XformKind::Scale && single_selected() >= 0
                              ? msg::hint_op_fov : msg::hint_op);
@@ -296,6 +307,8 @@ void RenderSession::draw_panel() {
             ImGui::EndDisabled();
             ui::help_on_hover_disabled(have_ds ? msg::quick_capture_help
                                                : msg::quick_capture_none);
+            if (!_flying && ui::Button(msg::quick_fly, ImVec2(full, 0))) start_flight();
+            ui::help_on_hover(msg::quick_fly_help);
         }
     }
 
@@ -325,9 +338,59 @@ void RenderSession::draw_panel() {
         // One line; the whole of it is in the log and on hover.
         const std::string line = elide_middle(_status.substr(0, _status.find('\n')), full);
         if (_status_err) ui::TextColoredRaw(kErr, line);
+        else if (_status_done) ui::TextColoredRaw(kOk, line);
         else ui::TextDisabledRaw(line);
         if (ImGui::IsItemHovered()) ui::SetTooltipRaw(_status);
     }
+}
+
+// The flight in progress, or the way the last one was fitted -- while the
+// keys are still the ones it made.
+void RenderSession::draw_flight_controls(float full) {
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float half = (full - st.ItemSpacing.x) * 0.5f;
+    if (_flying) {
+        char t[32];
+        std::snprintf(t, sizeof t, "%.1f", _fly_elapsed);
+        ui::TextColoredRaw(kErr, format(msg::fly_recording, {std::string(t)}));
+        if (ui::KeyButton(msg::fly_keep, half, "Enter")) stop_flight(true);
+        ImGui::SameLine();
+        if (ui::KeyButton(msg::render_cancel, half, "Esc")) stop_flight(false);
+        return;
+    }
+    if (_project.output.kind == OutputKind::Photo) return;
+    if (ui::Button(msg::fly_new, ImVec2(full, 0))) start_flight();
+    ui::help_on_hover(msg::quick_fly_help);
+    if (_flight.size() < 2 || _fit_keys.empty() || keys_json() != _fit_keys) return;
+    ui::SeparatorText(msg::fit_title);
+    const float w = full * 0.55f;
+    bool refit = false;
+    float timing = (float)_fit.timing;
+    ImGui::SetNextItemWidth(w);
+    if (ui::SliderFloatRaw("##fittiming", &timing, 0.0f, 1.0f, "%.2f")) _fit.timing = timing;
+    refit = ImGui::IsItemDeactivatedAfterEdit() || refit;
+    ImGui::SameLine();
+    ui::Text(msg::fit_timing);
+    ui::help_on_hover(msg::fit_timing_help);
+    float detail = (float)_fit.detail;
+    ImGui::SetNextItemWidth(w);
+    if (ui::SliderFloatRaw("##fitdetail", &detail, 0.0f, 1.0f, "%.2f")) _fit.detail = detail;
+    refit = ImGui::IsItemDeactivatedAfterEdit() || refit;
+    ImGui::SameLine();
+    ui::Text(msg::fit_detail);
+    ui::help_on_hover(msg::fit_detail_help);
+    float length = (float)_fit.length;
+    ImGui::SetNextItemWidth(w);
+    if (ui::DragFloatRaw("##fitlength", &length, 0.05f, 0.5f, 3600.0f, "%.2f s")) {
+        _fit.length = std::max(0.5f, length);
+        _fit_length_set = true;
+    }
+    refit = ImGui::IsItemDeactivatedAfterEdit() || refit;
+    ImGui::SameLine();
+    ui::Text(msg::fit_length);
+    ui::help_on_hover(msg::fit_length_help);
+    ui::TextDisabled(msg::fit_keys, {(long long)_project.keys.size()});
+    if (refit) refit_flight();
 }
 
 void RenderSession::draw_keys_section(float full) {
@@ -349,6 +412,7 @@ void RenderSession::draw_keys_section(float full) {
     ImGui::BeginDisabled(!any);
     if (ui::KeyButton(msg::key_delete, half, "X")) delete_selected();
     ImGui::EndDisabled();
+    draw_flight_controls(full);
     // The buttons may have added or deleted keys.
     one = single_selected();
 
@@ -425,19 +489,7 @@ void RenderSession::draw_keys_section(float full) {
         if (ui::Checkbox(msg::key_hold, &kk.hold)) project_changed();
         ui::help_on_hover(msg::key_hold_help);
         if (ui::Checkbox(msg::key_aim, &kk.aim)) {
-            if (kk.aim) {
-                // Aim at what the camera was already looking at, a little way on.
-                float c2w[12], tgt[3];
-                _panel->nav_pose(c2w, tgt);
-                double ahead[3];
-                double R[9];
-                quat_to_matrix3(kk.rot, R);
-                const double d = 1.0 / std::max(_w2s.s, 1e-12);
-                for (int a = 0; a < 3; a++) ahead[a] = kk.pos[a] - R[a*3+2] * d;
-                for (int a = 0; a < 3; a++) kk.target[a] = ahead[a];
-                kk.roll = roll_of(kk.rot, kk.pos, kk.target, _project.up);
-                update_aim(kk, _project.up);
-            }
+            if (kk.aim) aim_ahead(kk);
             project_changed();
         }
         ui::help_on_hover(msg::key_aim_help);
@@ -475,6 +527,23 @@ void RenderSession::draw_keys_section(float full) {
         ui::Text(msg::key_position);
     } else if (any) {
         ui::TextDisabledWrapped(msg::keys_many_hint);
+        // Aimed or not, all of them at once; or all at one point.
+        bool all = true;
+        for (int i = 0; i < n; i++)
+            if (selected(i)) all = all && _project.keys[(size_t)i].aim;
+        if (ui::Checkbox(msg::key_aim, &all)) {
+            for (int i = 0; i < n; i++) {
+                Keyframe& k = _project.keys[(size_t)i];
+                if (!selected(i) || k.aim == all) continue;
+                k.aim = all;
+                if (all) aim_ahead(k);
+            }
+            project_changed();
+        }
+        ui::help_on_hover(msg::keys_aim_many_help);
+        ImGui::SameLine();
+        if (ui::KeyButton(msg::key_pick_target, 0.0f, "T", _pick_target)) _pick_target = true;
+        ui::help_on_hover(msg::keys_pick_many_help);
         const Msg* pivots[3] = {&xmsg::pivot_origin, &xmsg::pivot_median, &xmsg::pivot_mean};
         ImGui::SetNextItemWidth(full * 0.55f);
         combo_msgs("##pivot", &_pivot, pivots, 3);
@@ -767,7 +836,8 @@ void RenderSession::draw_motion_section(float full) {
 
 // Under a shot, what its transition can be told: a colour, a direction, a
 // strength. Nothing for the few that need nothing.
-void RenderSession::draw_shot_settings(Shot& s, float full) {
+void RenderSession::draw_transition_settings(Transition kind, float param[2], float colour[3],
+                                             bool& camera, float full) {
     const float w = full * 0.5f;
     bool changed = false;
     ImGui::Indent();
@@ -777,66 +847,70 @@ void RenderSession::draw_shot_settings(Shot& s, float full) {
         ImGui::SameLine();
         ui::Text(name);
     };
-    auto colour = [&]() {
-        changed = ui::ColorEdit3Raw("##col", s.colour, ImGuiColorEditFlags_NoInputs) || changed;
+    auto tint = [&]() {
+        changed = ui::ColorEdit3Raw("##col", colour, ImGuiColorEditFlags_NoInputs) || changed;
         ImGui::SameLine();
         ui::Text(msg::tp_colour);
     };
-    switch (s.transition) {
-        case Transition::Dip: colour(); break;
+    switch (kind) {
+        case Transition::Dip: tint(); break;
         case Transition::Wipe:
-            slider("##p0", &s.param[0], 0.0f, 360.0f, "%.0f\xc2\xb0", msg::tp_direction);
-            slider("##p1", &s.param[1], 0.0f, 0.3f, "%.2f", msg::tp_softness);
+            slider("##p0", &param[0], 0.0f, 360.0f, "%.0f\xc2\xb0", msg::tp_direction);
+            slider("##p1", &param[1], 0.0f, 0.3f, "%.2f", msg::tp_softness);
             break;
         case Transition::Iris:
-            slider("##p1", &s.param[1], 0.0f, 0.3f, "%.2f", msg::tp_softness);
+            slider("##p1", &param[1], 0.0f, 0.3f, "%.2f", msg::tp_softness);
             break;
         case Transition::Zoom:
-            slider("##p0", &s.param[0], 0.1f, 1.5f, "%.2f", msg::tp_strength);
+            slider("##p0", &param[0], 0.1f, 1.5f, "%.2f", msg::tp_strength);
             break;
         case Transition::Sweep: {
-            bool down = s.param[0] >= 0.5f;
+            bool down = param[0] >= 0.5f;
             if (ui::Checkbox(msg::tp_downward, &down)) {
-                s.param[0] = down ? 1.0f : 0.0f;
+                param[0] = down ? 1.0f : 0.0f;
                 changed = true;
             }
-            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_glow);
-            colour();
+            slider("##p1", &param[1], 0.0f, 1.0f, "%.2f", msg::tp_glow);
+            tint();
             break;
         }
         case Transition::Dust: {
-            int mode = std::clamp((int)(s.param[0] + 0.5f), 0, 2);
+            int mode = std::clamp((int)(param[0] + 0.5f), 0, 2);
             ImGui::SetNextItemWidth(w);
             if (ui::ComboRaw("##p0", &mode, {&msg::tp_fall, &msg::tp_rise, &msg::tp_blow})) {
-                s.param[0] = (float)mode;
+                param[0] = (float)mode;
                 changed = true;
             }
             ImGui::SameLine();
             ui::Text(msg::tp_direction);
-            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_turbulence);
+            slider("##p1", &param[1], 0.0f, 1.0f, "%.2f", msg::tp_turbulence);
             break;
         }
         case Transition::Spiral:
-            slider("##p0", &s.param[0], 0.25f, 4.0f, "%.2f", msg::tp_turns);
-            slider("##p1", &s.param[1], 0.0f, 3.0f, "%.2f", msg::tp_spread);
+            slider("##p0", &param[0], 0.25f, 4.0f, "%.2f", msg::tp_turns);
+            slider("##p1", &param[1], 0.0f, 3.0f, "%.2f", msg::tp_spread);
             break;
         case Transition::Scatter:
-            slider("##p0", &s.param[0], 0.2f, 3.0f, "%.2f", msg::tp_distance);
-            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_randomness);
+            slider("##p0", &param[0], 0.2f, 3.0f, "%.2f", msg::tp_distance);
+            slider("##p1", &param[1], 0.0f, 1.0f, "%.2f", msg::tp_randomness);
             break;
         case Transition::Rain:
-            slider("##p0", &s.param[0], 0.2f, 3.0f, "%.2f", msg::tp_height);
-            slider("##p1", &s.param[1], 0.0f, 1.0f, "%.2f", msg::tp_stagger);
+            slider("##p0", &param[0], 0.2f, 3.0f, "%.2f", msg::tp_height);
+            slider("##p1", &param[1], 0.0f, 1.0f, "%.2f", msg::tp_stagger);
             break;
         case Transition::Dissolve:
-            slider("##p0", &s.param[0], 0.0f, 1.0f, "%.2f", msg::tp_sparkle);
+            slider("##p0", &param[0], 0.0f, 1.0f, "%.2f", msg::tp_sparkle);
             break;
         case Transition::Ripple:
-            slider("##p0", &s.param[0], 0.0f, 1.0f, "%.2f", msg::tp_height);
-            slider("##p1", &s.param[1], 0.05f, 1.0f, "%.2f", msg::tp_width);
+            slider("##p0", &param[0], 0.0f, 1.0f, "%.2f", msg::tp_height);
+            slider("##p1", &param[1], 0.05f, 1.0f, "%.2f", msg::tp_width);
             break;
         default:
             break;
+    }
+    if (transition_has_camera(kind)) {
+        changed = ui::Checkbox(msg::tp_camera, &camera) || changed;
+        ui::help_on_hover(msg::tp_camera_help);
     }
     ImGui::Unindent();
     if (changed) project_changed();
@@ -1011,11 +1085,21 @@ void RenderSession::draw_effects_section(float full) {
         _pick(Pick::AddModel, _sources.empty() ? std::string() : _sources[0].path, "");
     ui::help_on_hover(msg::model_add_help);
 
-    // Shots: which model is shown from when, and how it arrives.
+    // Shots: which model is shown from when, how it arrives and how it goes.
     ui::SeparatorText(msg::sec_shots);
     remove = -1;
     int swap = -1;
-    for (int i = 0; i < (int)_project.shots.size(); i++) {
+    // A way out may be any transition but a dip, which is the whole picture's.
+    std::vector<const Msg*> exits = {&msg::shot_exit_as_next};
+    for (int k = 0; k < kNumTransitions; k++)
+        if (k != (int)Transition::Dip) exits.push_back(kTransitions[k]);
+    auto exit_index = [](const ShotExit& e) {
+        if (!e.own) return 0;
+        const int k = (int)e.transition;
+        return k < (int)Transition::Dip ? k + 1 : k;
+    };
+    const int nshots = (int)_project.shots.size();
+    for (int i = 0; i < nshots; i++) {
         Shot& s = _project.shots[(size_t)i];
         ImGui::PushID(1000 + i);
         float start = (float)s.start;
@@ -1052,14 +1136,18 @@ void RenderSession::draw_effects_section(float full) {
         }
         ui::help_on_hover(msg::tr_help);
         ImGui::SameLine();
+        // One shot is always left: something is on screen.
+        ImGui::BeginDisabled(nshots < 2);
         if (ui::ButtonRaw("x##del", ImVec2(px(28.0f), 0))) remove = i;
+        ImGui::EndDisabled();
+        if (nshots < 2) ui::help_on_hover_disabled(msg::shot_keep_one);
         // Earlier or later: the models trade places, the times stay.
         ImGui::BeginDisabled(i == 0);
         if (ui::ArrowButtonRaw("##up", ImGuiDir_Up)) swap = i - 1;
         ImGui::EndDisabled();
         ui::help_on_hover(msg::shot_move_help);
         ImGui::SameLine();
-        ImGui::BeginDisabled(i + 1 >= (int)_project.shots.size());
+        ImGui::BeginDisabled(i + 1 >= nshots);
         if (ui::ArrowButtonRaw("##down", ImGuiDir_Down)) swap = i;
         ImGui::EndDisabled();
         ui::help_on_hover(msg::shot_move_help);
@@ -1073,20 +1161,69 @@ void RenderSession::draw_effects_section(float full) {
             }
             ImGui::SameLine();
             ui::TextDisabled(msg::shot_transition_time);
-            draw_shot_settings(s, full);
+            ImGui::PushID("in");
+            draw_transition_settings(s.transition, s.param, s.colour, s.camera, full);
+            ImGui::PopID();
+        }
+        // How it goes, when a shot comes after it.
+        if (i + 1 < nshots) {
+            ShotExit& e = s.exit;
+            ImGui::Indent();
+            int ex = exit_index(e);
+            ImGui::SetNextItemWidth(w * 0.9f);
+            if (ui::ComboRaw("##exit", &ex, exits)) {
+                const bool was = e.own;
+                e.own = ex > 0;
+                if (e.own) {
+                    e.transition = (Transition)(ex - 1 < (int)Transition::Dip ? ex - 1 : ex);
+                    exit_defaults(e);
+                    // Taken up as the next arrival was: the same length.
+                    if (!was) e.duration = std::max(_project.shots[(size_t)i + 1].duration, 0.1);
+                }
+                project_changed();
+            }
+            ImGui::SameLine();
+            ui::Text(msg::shot_exit);
+            ui::help_on_hover(msg::shot_exit_help);
+            if (e.own) {
+                if (e.transition != Transition::Cut) {
+                    float d = (float)e.duration;
+                    ImGui::SetNextItemWidth(px(110.0f));
+                    if (ui::SliderFloatRaw("##xdur", &d, 0.1f, 6.0f, "%.1f s")) {
+                        e.duration = d;
+                        project_changed();
+                    }
+                    ImGui::SameLine();
+                    ui::TextDisabled(msg::shot_transition_time);
+                    ImGui::SameLine();
+                }
+                float off = (float)e.offset;
+                ImGui::SetNextItemWidth(px(110.0f));
+                if (ui::SliderFloatRaw("##xoff", &off, -6.0f, 6.0f, "%+.1f s")) {
+                    e.offset = off;
+                    project_changed();
+                }
+                ImGui::SameLine();
+                ui::TextDisabled(msg::shot_exit_offset);
+                ui::help_on_hover(msg::shot_exit_offset_help);
+                ImGui::PushID("out");
+                draw_transition_settings(e.transition, e.param, e.colour, e.camera, full);
+                ImGui::PopID();
+            }
+            ImGui::Unindent();
         }
         ImGui::PopID();
     }
-    if (remove >= 0) {
+    if (remove >= 0 && nshots > 1) {
         _project.shots.erase(_project.shots.begin() + remove);
         project_changed();
     }
     if (swap >= 0 && swap + 1 < (int)_project.shots.size()) {
+        // Everything but the time: the model, how it arrives and how it goes.
         Shot& a = _project.shots[(size_t)swap];
         Shot& b = _project.shots[(size_t)swap + 1];
-        std::swap(a.source, b.source);
-        std::swap(a.transition, b.transition);
-        std::swap(a.duration, b.duration);
+        std::swap(a.start, b.start);
+        std::swap(a, b);
         project_changed();
     }
     if (ui::Button(msg::shot_add)) {

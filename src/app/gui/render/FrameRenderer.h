@@ -9,6 +9,7 @@
 // RenderWorker threads under the engine lock the viewer panes share.
 
 #include "app/gui/PreviewRenderer.h"
+#include "app/gui/render/TransitionFx.h"
 #include "app/gui/render/Trajectory.h"
 #include "app/webviewer/RenderWorker.h"
 #include "core/Similarity.h"
@@ -47,14 +48,16 @@ struct SourceView {
 };
 
 // A 3D transition acting on one layer's points, splats or vertices
-// (TransitionFx.h), with the scene it moves in the world frame.
+// (TransitionFx.h): the frame it moves in, world frame, and the quantiles
+// along it, world units from the centre.
 struct LayerFx {
     int kind = 0;                       // a Transition from Dust on; 0 none
     bool incoming = false;
     float t = 0.0f;
     float p[2] = {0.0f, 0.0f};
-    double centre[3] = {0, 0, 0}, up[3] = {0, 0, 1};
-    double radius = 1.0, h0 = -1.0, h1 = 1.0;
+    double centre[3] = {0, 0, 0}, up[3] = {0, 0, 1}, e1[3] = {1, 0, 0}, e2[3] = {0, 1, 0};
+    double radius = 1.0;
+    FxGeo q;                            // only its tables are read
 };
 
 // One model in one frame, and what an effect is doing to it. A model whose
@@ -67,21 +70,30 @@ struct LayerSpec {
     float style_mix = 0.0f;
     float grow = 1.0f;                  // splat and point size, 1 = as made
     float fade_in = 1.0f;               // splat opacity while growing in
-    // Keep only one side of a level along the project's up axis, world
-    // units, with `glow` before the cut lit up.
+    // Keep only one side of the level `clip_n`.P = `level`, world frame,
+    // with `glow` before the cut lit up.
     int clip = 0;                       // 0 none, 1 keep below, 2 keep above
+    double clip_n[3] = {0, 0, 1};
     double level = 0.0;
     float glow = 0.0f;
     float glow_col[3] = {1.0f, 0.86f, 0.6f};
     LayerFx fx;
+    // Its picture on its own (mode 3): faded, masked by a wipe or an iris
+    // -- or by what the mask has not reached yet, `mask_out` -- and zoomed.
+    float opacity = 1.0f;
+    int mask = 0;                       // 0 none, 1 wipe, 2 iris
+    bool mask_out = false;
+    float mask_t = 0.0f, mask_soft = 0.01f;
+    float mask_dir[2] = {1, 0};         // image space, y down
+    float zoom = 1.0f, zoom_blur = 0.0f;
 };
 
-// Where a model is, robust to what floats far from it: the per-axis median,
-// the 90th-percentile distance from it, and the 2nd / 98th-percentile heights
-// along up relative to it; world frame.
-struct SceneStats {
+// Where a model is, robust to what floats far from it: the per-axis median
+// of its elements, unweighted, and the 90th-percentile distance from it of
+// those within four median distances; world frame.
+struct SceneCore {
     double centre[3] = {0, 0, 0};
-    double radius = 1.0, h0 = -1.0, h1 = 1.0;
+    double radius = 1.0;
 };
 
 struct FrameSpec {
@@ -89,9 +101,9 @@ struct FrameSpec {
     int width = 0, height = 0;
     double up[3] = {0, 0, 1};
     LayerSpec a, b;                     // a under b
-    // 0: mix(a, b) by `mix` through `mask` (0 all, 1 wipe, 2 iris);
-    // 1: b over a (a 3D transition, where each has moved itself);
-    // 2: a zooms out of the picture as b zooms in, by `zoom`.
+    // 0: mix(a, b) by `mix` through `mask` (0 all, 1 wipe, 2 iris); 1: b
+    // over a, each moved in 3D; 2: a zooms past as b arrives, by `zoom`;
+    // 3: b over a, each as its own LayerSpec says.
     int mode = 0;
     int mask = 0;
     float mix = 1.0f;
@@ -134,8 +146,11 @@ public:
     // Effects that rewrite splats need them host-side: read on demand, in
     // the background. True once `source` has them (or needs none).
     bool effects_ready(int source);
-    // SceneStats of `source` along `up`; false until its elements are read.
-    bool scene_stats(int source, const double up[3], SceneStats& out);
+    // SceneCore of `source`; false until its elements are read. Then the
+    // quantiles of its elements along a frame through `centre`, into `q`.
+    bool scene_core(int source, SceneCore& out);
+    bool scene_quantiles(int source, const double centre[3], const double up[3],
+                         const double e1[3], const double e2[3], FxGeo& q);
 
     std::string take_error();
     void destroy_gl();
@@ -175,7 +190,7 @@ private:
 
     unsigned _prog = 0, _vao = 0, _fbo = 0, _out_tex = 0;
     int _out_w = 0, _out_h = 0;
-    int _u[16] = {};
+    int _u[22] = {};
     // The blend pass and the textures passes and layers land in.
     unsigned _blend_prog = 0, _blend_fbo = 0;
     int _bu[6] = {};

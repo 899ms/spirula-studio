@@ -6,7 +6,8 @@
 // otherwise.
 //
 // push() is called from the GUI thread and blocks only while the bounded
-// queue is full, which is what keeps a slow disk or encoder from growing it.
+// queue is full, which is what keeps a slow disk or encoder from growing it;
+// full() says so first, so the GUI can draw instead of waiting.
 
 #include "app/gui/render/RenderProject.h"
 
@@ -29,6 +30,8 @@ public:
     virtual int channels() const = 0;
     // What has been written so far.
     virtual int written() const = 0;
+    // A push now would wait.
+    virtual bool full() const = 0;
 };
 
 // PNG or JPEG files: `path` itself for a single photo, else `path` with the

@@ -140,7 +140,7 @@ private:
     struct StyleLoc {
         int tier = -1, dist = -1, clip_on = -1, clip = -1, glow = -1, glow_col = -1;
         int fx = -1, fx_in = -1, fx_t = -1, fx_p = -1, fx_c = -1, fx_up = -1, fx_e1 = -1,
-            fx_e2 = -1, fx_geo = -1;
+            fx_e2 = -1, fx_radius = -1, fx_qh = -1, fx_qa = -1, fx_qr = -1;
     } _sloc[2];
     void style_locations(int program, unsigned prog);
     int _u_points = -1, _u_psize = -1, _u_pradius = -1;

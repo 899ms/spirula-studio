@@ -58,6 +58,10 @@ public:
     }
     bool failed() const { return _failed.load(); }
     int done() const { return _done.load(); }
+    bool full() const {
+        std::lock_guard<std::mutex> lk(_mu);
+        return _q.size() >= _limit && !_failed && !_stop;
+    }
 
 private:
     void run() {
@@ -84,7 +88,7 @@ private:
     std::function<bool(Item&)> _work;
     size_t _limit = 4;
     std::vector<std::thread> _threads;
-    std::mutex _mu;
+    mutable std::mutex _mu;
     std::condition_variable _ready, _space;
     std::deque<Item> _q;
     bool _closing = false, _stop = false;
@@ -116,6 +120,7 @@ public:
     }
     int channels() const override { return _c; }
     int written() const override { return _q.done(); }
+    bool full() const override { return _q.full(); }
 
 private:
     bool write(Queue::Item& it) {
@@ -176,6 +181,7 @@ public:
     }
     int channels() const override { return 3; }
     int written() const override { return _q.done(); }
+    bool full() const override { return _q.full(); }
 
 private:
     bool encode(Queue::Item& it) {
@@ -252,6 +258,7 @@ public:
     std::string error() const override { return _error; }
     int channels() const override { return 3; }
     int written() const override { return _q.done(); }
+    bool full() const override { return _q.full(); }
 
 private:
     int _w, _h;

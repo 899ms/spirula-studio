@@ -318,7 +318,41 @@ void ViewportPanel::carry_view(const float d[12]) {
     _dirty = true;
 }
 
+void ViewportPanel::frame_view(const float centre[3], float radius) {
+    if (!(radius > 0.0f) || !std::isfinite(radius)) return;
+    // The narrower half-angle of the view, kept sane for the wide lenses.
+    constexpr float kDeg = 3.14159265f / 180.0f;
+    const float aspect = _img_w > 1.0f && _img_h > 1.0f ? _img_h / _img_w : 0.5625f;
+    const float hx = 0.5f * std::min(_fov_deg[_cam_model] > 0.0f ? _fov_deg[_cam_model] : 90.0f,
+                                     170.0f) * kDeg;
+    const float hy = std::atan(std::tan(hx) * aspect);
+    const float a = std::clamp(std::min(hx, hy), 5.0f * kDeg, 60.0f * kDeg);
+    for (int i = 0; i < 3; i++) {
+        _frame_from[i] = _cam.target[i];
+        _frame_to[i] = centre[i];
+    }
+    _frame_from[3] = std::max(nav_dist(), 1e-6f);
+    _frame_to[3] = radius / std::sin(a) * 1.1f;
+    _frame_anim = true;
+    _frame_t0 = ImGui::GetTime();
+    _anim = false;
+    _dirty = true;
+}
+
 void ViewportPanel::animate_view(double now) {
+    if (_frame_anim) {
+        float t = (float)std::clamp((now - _frame_t0) / (kSnapSeconds * 1.5), 0.0, 1.0);
+        t = t * t * (3.0f - 2.0f * t);
+        float fwd[3];
+        _cam.axis_forward(fwd);
+        const float d = _frame_from[3] * std::pow(_frame_to[3] / _frame_from[3], t);
+        for (int i = 0; i < 3; i++) {
+            _cam.target[i] = _frame_from[i] + (_frame_to[i] - _frame_from[i]) * t;
+            _cam.pos[i] = _cam.target[i] - fwd[i] * d;
+        }
+        _dirty = true;
+        if (t >= 1.0f) _frame_anim = false;
+    }
     if (!_anim) return;
     float t = (float)std::clamp((now - _anim_t0) / kSnapSeconds, 0.0, 1.0);
     t = t * t * (3.0f - 2.0f * t);
@@ -878,6 +912,7 @@ void ViewportPanel::handle_input(float /*item_h*/) {
                         _drag_button, (int)is_pan, (int)io.KeyShift, dx, dy,
                         _cam.target[0], _cam.target[1], _cam.target[2],
                         _cam.pos[0], _cam.pos[1], _cam.pos[2]);
+                _frame_anim = false;
                 if (is_pan) {
                     _cam.pan(dx, dy);
                 } else {
@@ -915,6 +950,7 @@ void ViewportPanel::handle_input(float /*item_h*/) {
     // Scroll = dolly (browser wheel deltaY is ~+-100 per notch, ImGui is
     // +-1 with the opposite sign convention).
     if (hovered && io.MouseWheel != 0.0f) {
+        _frame_anim = false;
         if (ortho_back() > 0.0f) {
             // Moving forward changes nothing about an orthographic image, so
             // every mode zooms the way the orbiting ones do.
@@ -956,7 +992,7 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         k.left = ImGui::IsKeyDown(ImGuiKey_LeftArrow);
         k.right = ImGui::IsKeyDown(ImGuiKey_RightArrow);
         float dt = std::min(io.DeltaTime, 0.1f);
-        if (_cam.keyboard_tick(dt, k)) _dirty = true;
+        if (_cam.keyboard_tick(dt, k)) _dirty = true, _frame_anim = false;
     }
     // The numeric-pad views every 3D package shares: 1 front, 3 right, 7 top,
     // Ctrl for the far side, 5 for perspective / orthographic.
@@ -965,12 +1001,19 @@ void ViewportPanel::handle_input(float /*item_h*/) {
         if (ImGui::IsKeyPressed(ImGuiKey_Keypad3, false)) snap_view(0, io.KeyCtrl);
         if (ImGui::IsKeyPressed(ImGuiKey_Keypad7, false)) snap_view(2, io.KeyCtrl);
         if (ImGui::IsKeyPressed(ImGuiKey_Keypad5, false)) set_ortho(!_ortho);
+        // And . for the selection, the way every 3D package has it.
+        double c[3], r = 0.0;
+        if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_KeypadDecimal, false) && _interactor &&
+            _interactor->frame_bounds(c, r)) {
+            const float cf[3] = {(float)c[0], (float)c[1], (float)c[2]};
+            frame_view(cf, (float)r);
+        }
     }
 
     // Gamepad: always active, like the browser's gamepadTick loop.
     {
         float dt = std::min(io.DeltaTime, 0.1f);
-        if (_cam.gamepad_tick(dt)) _dirty = true;
+        if (_cam.gamepad_tick(dt)) _dirty = true, _frame_anim = false;
     }
 }
 

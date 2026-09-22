@@ -68,6 +68,12 @@ double smooth(double u) {
     return u * u * (3.0 - 2.0 * u);
 }
 
+std::string seconds_text(double s) {
+    char b[32];
+    std::snprintf(b, sizeof b, "%.1f", s);
+    return b;
+}
+
 }  // namespace
 
 
@@ -78,10 +84,11 @@ RenderSession::~RenderSession() {
     if (_probe.joinable()) _probe.join();
 }
 
-void RenderSession::note(const std::string& s) {
+void RenderSession::note(const std::string& s, bool done) {
     _log.push_back(s);
     _status = s;
     _status_err = false;
+    _status_done = done;
 }
 
 std::vector<std::string> RenderSession::drain_log() {
@@ -114,6 +121,7 @@ void RenderSession::close(bool switching) {
         }
     }
     _playing = false;
+    stop_flight(false);
     _xform.cancel();
     _pick_target = _pick_waiting = false;
     if (_panel) _panel->set_interactor(nullptr);
@@ -124,7 +132,7 @@ void RenderSession::close(bool switching) {
 }
 
 bool RenderSession::animating() const {
-    return _playing || _job.state != Job::Idle || _frames.busy() || _pick_waiting;
+    return _playing || _flying || _job.state != Job::Idle || _frames.busy() || _pick_waiting;
 }
 
 bool RenderSession::dirty() const {
@@ -252,6 +260,8 @@ void RenderSession::new_project() {
     }
     _sync_models = 0;
     reconcile_sources();
+    // The model on screen, from the start: the first shot is there to change.
+    _project.shots.assign(1, Shot{});
     // Up is the dataset's when one says, else whatever the pane shows as up.
     const Sim3 s2w = _w2s.inverse();
     const double z[3] = {0, 0, 1};
@@ -442,6 +452,11 @@ void RenderSession::open_from(const std::string& path) {
         _asked_open.clear();
         _asked_close.clear();
         reconcile_sources();
+        // No shots meant the model on screen throughout: that is the first.
+        if (_project.shots.empty()) {
+            _project.shots.assign(1, Shot{});
+            _project.shots[0].source = std::max(0, project_source_of(0));
+        }
         _project_path = path;
         _saved_json = project_to_json(_project);
         reset_history();
@@ -631,6 +646,17 @@ Lens RenderSession::view_lens() const {
     l.projection = (Projection)std::clamp(_panel->view_model(), 0, 3);
     lens_set_fov(l, _panel->view_fov());
     return l;
+}
+
+// Aimed at what it was already looking at, a little way on.
+void RenderSession::aim_ahead(Keyframe& k) {
+    double R[9];
+    quat_to_matrix3(k.rot, R);
+    const double d = 1.0 / std::max(_w2s.s, 1e-12);
+    for (int a = 0; a < 3; a++) k.target[a] = k.pos[a] - R[a*3+2] * d;
+    k.aim = true;
+    k.roll = roll_of(k.rot, k.pos, k.target, _project.up);
+    update_aim(k, _project.up);
 }
 
 void RenderSession::update_key_from_view(int index) {
@@ -1000,6 +1026,62 @@ void RenderSession::follow_capture() {
 }
 
 
+void RenderSession::start_flight() {
+    if (!_panel || _flying) return;
+    _flying = true;
+    _playing = false;
+    _xform.cancel();
+    _pick_target = _pick_waiting = false;
+    // The keys would take the letters the flight flies with.
+    _sel.assign(_project.keys.size(), 0);
+    if (_preview_mode == PreviewMode::Through) _preview_mode = PreviewMode::Corner;
+    _flight.clear();
+    // Kept through what it was flown through.
+    _flight_lens = view_lens();
+    _fly_t0 = now_s();
+    _fly_elapsed = 0.0;
+}
+
+void RenderSession::stop_flight(bool keep) {
+    if (!_flying) return;
+    _flying = false;
+    if (!keep) {
+        _flight.clear();
+        return;
+    }
+    _fit_length_set = false;
+    _fit.length = 0.0;
+    refit_flight();
+    if (_fit_keys.empty()) note(msg::fly_nothing.get());
+    else note(format(msg::fly_done, {(long long)_project.keys.size(), seconds_text(_project.duration())}));
+}
+
+std::string RenderSession::keys_json() const {
+    RenderProject k;
+    k.keys = _project.keys;
+    return project_to_json(k);
+}
+
+void RenderSession::refit_flight() {
+    FlightFit f = _fit;
+    if (!_fit_length_set) f.length = 0.0;
+    RenderProject p = _project;
+    if (fit_flight(_flight, f, 1.0 / std::max(_w2s.s, 1e-12), _flight_lens, p) == 0) {
+        _fit_keys.clear();
+        return;
+    }
+    _project.keys = std::move(p.keys);
+    _project.motion = p.motion;
+    _project.end = p.end;
+    _fit.length = _project.keys.back().time - _project.keys.front().time;
+    _sel.assign(_project.keys.size(), 0);
+    _sel_anchor = -1;
+    _time = 0.0;
+    project_changed();
+    _fit_keys = keys_json();
+}
+
+
 // ===========================================================================
 // Viewport
 // ===========================================================================
@@ -1069,7 +1151,7 @@ bool RenderSession::xform_frame(XformFrame& f, XformKind kind) {
         if (!_sel[(size_t)i]) continue;
         for (int d = 0; d < 3; d++) c[d] += keys[(size_t)i].pos[d];
         n++;
-        one = i;
+        if (one < 0 || i == _sel_anchor) one = i;
     }
     if (!n) return false;
     // One camera turns on the spot; several about the pivot chosen.
@@ -1090,7 +1172,9 @@ bool RenderSession::xform_frame(XformFrame& f, XformKind kind) {
     to_shared(c, f.pivot);
     for (int a = 0; a < 3; a++)
         for (int k = 0; k < 3; k++) f.global_axes[a*3+k] = _w2s.R[k*3+a];
-    if (n == 1) {
+    // Its own axes: the one camera's, or with several the one clicked
+    // last, whose step each of the others then takes in its own.
+    {
         double R[9];
         quat_to_matrix3(keys[(size_t)one].rot, R);
         for (int a = 0; a < 3; a++)
@@ -1099,11 +1183,10 @@ bool RenderSession::xform_frame(XformFrame& f, XformKind kind) {
                 for (int m = 0; m < 3; m++) v += _w2s.R[k*3+m] * R[m*3+a];
                 f.local_axes[a*3+k] = v;
             }
-    } else {
-        for (int i = 0; i < 9; i++) f.local_axes[i] = f.global_axes[i];
     }
     f.unit = _w2s.s;
     f.grid_cell = _panel->world_grid_cell();
+    f.each = n > 1;
     return true;
 }
 
@@ -1121,13 +1204,45 @@ void RenderSession::begin_xform(XformKind kind, float mx, float my, bool drag,
 
 void RenderSession::apply_xform(const Sim3& step_shared, bool scale_fov, double factor) {
     const Sim3 s2w = _w2s.inverse();
-    const Sim3 step = s2w * step_shared * _w2s;
+    Sim3 step = s2w * step_shared * _w2s;
     int n = 0;
     for (uint8_t s : _sel) n += s ? 1 : 0;
+    // An axis pressed twice with several cameras: each takes the step the
+    // one clicked last takes, in its own frame and about itself -- R X X
+    // tilts every camera of an orbit by the same pitch.
+    const bool each = n > 1 && _xform.local() && _xform.kind() != XformKind::Scale;
+    auto frame_of = [&](const double pos[3], const double axes[9]) {
+        Sim3 F;
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++) F.R[r*3+c] = axes[c*3+r];
+        for (int d = 0; d < 3; d++) F.t[d] = pos[d];
+        return F;
+    };
+    // From the keys as the operator found them, confirmed or not.
     _project.keys = _xform_from;
+    Sim3 in_ref;
+    if (each) {
+        XformFrame f;
+        if (!xform_frame(f, _xform.kind())) return;
+        const Sim3 F = frame_of(f.pivot, f.local_axes);
+        in_ref = F.inverse() * step_shared * F;
+    }
     for (int i = 0; i < (int)_project.keys.size() && i < (int)_sel.size(); i++) {
         if (!_sel[(size_t)i]) continue;
         Keyframe& k = _project.keys[(size_t)i];
+        if (each) {
+            double R[9], axes[9], p[3];
+            quat_to_matrix3(k.rot, R);
+            for (int a = 0; a < 3; a++)
+                for (int d = 0; d < 3; d++) {
+                    double v = 0.0;
+                    for (int m = 0; m < 3; m++) v += _w2s.R[d*3+m] * R[m*3+a];
+                    axes[a*3+d] = v;
+                }
+            to_shared(k.pos, p);
+            const Sim3 F = frame_of(p, axes);
+            step = s2w * (F * in_ref * F.inverse()) * _w2s;
+        }
         if (scale_fov) {
             if (!k.own_lens) { k.lens = _project.lens_at(i); k.own_lens = true; }
             // A bigger frustum is a wider view.
@@ -1168,7 +1283,33 @@ void RenderSession::apply_xform(const Sim3& step_shared, bool scale_fov, double 
     project_changed();
 }
 
+// The selected cameras, or all of them, with room for their frusta.
+bool RenderSession::frame_bounds(double centre[3], double& radius) {
+    if (!_panel || _xform.active() || _project.keys.empty()) return false;
+    bool any = false;
+    for (int i = 0; i < (int)_project.keys.size(); i++) any = any || selected(i);
+    double c[3] = {0, 0, 0};
+    int n = 0;
+    for (int i = 0; i < (int)_project.keys.size(); i++) {
+        if (any && !selected(i)) continue;
+        for (int d = 0; d < 3; d++) c[d] += _project.keys[(size_t)i].pos[d];
+        n++;
+    }
+    for (double& v : c) v /= std::max(n, 1);
+    double r = 0.0;
+    for (int i = 0; i < (int)_project.keys.size(); i++) {
+        if (any && !selected(i)) continue;
+        const double* p = _project.keys[(size_t)i].pos;
+        r = std::max(r, std::sqrt((p[0]-c[0])*(p[0]-c[0]) + (p[1]-c[1])*(p[1]-c[1]) +
+                                  (p[2]-c[2])*(p[2]-c[2])));
+    }
+    to_shared(c, centre);
+    radius = (r + 2.0 * camera_size()) * _w2s.s;
+    return radius > 0.0;
+}
+
 bool RenderSession::owns_left_button() const {
+    if (_flying) return false;
     return _xform.active() || _pick_target || _pick_waiting || _hot >= 0 ||
            _handle_hot >= 0 || _pip_hot || _pip_resizing || over_pip();
 }
@@ -1180,6 +1321,7 @@ bool RenderSession::over_pip() const {
 }
 
 bool RenderSession::blocks_fly_keys() const {
+    if (_flying) return false;
     if (_xform.active() || _fly_block_key != 0) return true;
     for (uint8_t s : _sel)
         if (s) return true;
@@ -1190,6 +1332,8 @@ bool RenderSession::on_viewport_input(const ViewportInput& in) {
     _mouse[0] = in.x;
     _mouse[1] = in.y;
     _mouse_in = in.hovered;
+    // Flying: the view is the navigation's alone.
+    if (_flying) { _hot = _handle_hot = -1; return false; }
 
     // The corner picture: its grip resizes it, a double-click makes it the view.
     if (_pip_resizing) {
@@ -1464,6 +1608,16 @@ double RenderSession::camera_size() const {
 void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
     if (!_have_project || !_panel) return;
     ImDrawList* dl = v.dl;
+    // Flying: the view as it is, a red dot and the time, and the way out.
+    if (_flying) {
+        const ImVec2 c(v.x + px(22.0f), v.y + px(22.0f));
+        const bool blink = std::fmod(now_s() - _fly_t0, 1.0) < 0.6;
+        dl->AddCircleFilled(c, px(7.0f), blink ? IM_COL32(235, 50, 50, 255) : IM_COL32(120, 30, 30, 255));
+        const std::string t = format(msg::fly_recording, {seconds_text(_fly_elapsed)});
+        dl->AddText(ImVec2(c.x + px(14.0f), c.y - ImGui::GetFontSize() * 0.5f),
+                    IM_COL32(255, 255, 255, 235), t.c_str());
+        return;
+    }
     ViewProjection vp;
     if (!view_projection(vp, (int)v.w, (int)v.h)) return;
     const Trajectory& tr = trajectory();
@@ -1522,6 +1676,32 @@ void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
     if (!_project.keys.empty())
         draw_camera(dl, vp, v.x, v.y, tr.at(_time), kHeadCol, 1.0f, false);
 
+    // An axis of each camera's own, for an operator that moves each in its own.
+    if (_xform.active() && _xform.local()) {
+        int count = 0;
+        for (int i = 0; i < (int)_project.keys.size(); i++) count += selected(i) ? 1 : 0;
+        const int a = std::clamp(_xform.axis(), 0, 2);
+        const double reach = camera_size() * 3.0;
+        for (int i = 0; count > 1 && i < (int)_project.keys.size(); i++) {
+            if (!selected(i)) continue;
+            const Keyframe& k = _project.keys[(size_t)i];
+            double R[9], e[2][3], s[2][3];
+            quat_to_matrix3(k.rot, R);
+            for (int d = 0; d < 3; d++) {
+                e[0][d] = k.pos[d] - R[d*3+a] * reach;
+                e[1][d] = k.pos[d] + R[d*3+a] * reach;
+            }
+            to_shared(e[0], s[0]);
+            to_shared(e[1], s[1]);
+            const float p0[3] = {(float)s[0][0], (float)s[0][1], (float)s[0][2]};
+            const float p1[3] = {(float)s[1][0], (float)s[1][1], (float)s[1][2]};
+            float x0, y0, d0, x1, y1, d1;
+            if (vp.project(p0, x0, y0, d0) && vp.project(p1, x1, y1, d1) && d0 > 0.0f && d1 > 0.0f)
+                dl->AddLine(ImVec2(v.x + x0, v.y + y0), ImVec2(v.x + x1, v.y + y1),
+                            (kAxis[a] & 0x00ffffffu) | 0xb0000000u, px(1.5f));
+        }
+    }
+
     // The handles of the one selected key, or the operator running on it.
     XformFrame f;
     if (xform_frame(f, _xform.active() ? _xform.kind() : _handle_mode)) {
@@ -1573,6 +1753,155 @@ void RenderSession::draw_viewport_overlay(const ViewportOverlay& v) {
 // Frames
 // ===========================================================================
 
+// The frame a 3D transition moves `source` in: the world's up, or the
+// camera's -- down the picture for what falls, round its middle for what
+// turns or ripples, about the view's own axis at the scene's depth.
+bool RenderSession::fx_frame(Transition kind, bool camera, int source, const CameraState& cam,
+                             LayerFx& x) {
+    SceneCore core;
+    if (source < 0 || !_frames.scene_core(source, core)) return false;
+    for (int k = 0; k < 3; k++) x.centre[k] = core.centre[k];
+    x.radius = core.radius;
+    if (camera && transition_has_camera(kind)) {
+        double R[9];
+        quat_to_matrix3(cam.rot, R);
+        const double right[3] = {R[0], R[3], R[6]}, cup[3] = {R[1], R[4], R[7]},
+                     back[3] = {R[2], R[5], R[8]};
+        if (kind == Transition::Spiral || kind == Transition::Ripple) {
+            double depth = 0.0;
+            for (int k = 0; k < 3; k++) depth -= (core.centre[k] - cam.pos[k]) * back[k];
+            depth = std::max(depth, 0.5 * core.radius);
+            for (int k = 0; k < 3; k++) {
+                x.centre[k] = cam.pos[k] - back[k] * depth;
+                x.up[k] = kind == Transition::Spiral ? -back[k] : back[k];
+                x.e1[k] = right[k];
+                x.e2[k] = cup[k];
+            }
+        } else {
+            for (int k = 0; k < 3; k++) {
+                x.up[k] = cup[k];
+                x.e1[k] = right[k];
+                x.e2[k] = back[k];
+            }
+        }
+    } else {
+        double n = 0.0;
+        for (int k = 0; k < 3; k++) n += _project.up[k] * _project.up[k];
+        n = std::sqrt(std::max(n, 1e-24));
+        for (int k = 0; k < 3; k++) x.up[k] = _project.up[k] / n;
+        // Any two across up, the same two every frame.
+        double a[3] = {1, 0, 0};
+        if (std::fabs(x.up[0]) > 0.9) { a[0] = 0; a[1] = 1; }
+        double e1[3] = {a[1]*x.up[2] - a[2]*x.up[1], a[2]*x.up[0] - a[0]*x.up[2],
+                        a[0]*x.up[1] - a[1]*x.up[0]};
+        const double n1 = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
+        for (int k = 0; k < 3; k++) x.e1[k] = e1[k] / std::max(n1, 1e-12);
+        x.e2[0] = x.up[1]*x.e1[2] - x.up[2]*x.e1[1];
+        x.e2[1] = x.up[2]*x.e1[0] - x.up[0]*x.e1[2];
+        x.e2[2] = x.up[0]*x.e1[1] - x.up[1]*x.e1[0];
+    }
+    return _frames.scene_quantiles(source, x.centre, x.up, x.e1, x.e2, x.q);
+}
+
+namespace {
+
+// A sweep's level when `k` of the elements are behind it, world frame: in
+// step with the elements rather than the distance, so a far sky costs no
+// more of it than the rest; led in and out past the first and the last.
+double sweep_level(const LayerFx& x, double k) {
+    const double base = x.centre[0]*x.up[0] + x.centre[1]*x.up[1] + x.centre[2]*x.up[2];
+    const double span = std::max((double)(fx_quantile(x.q.qh, 0.98f) - fx_quantile(x.q.qh, 0.02f)),
+                                 1e-9 * x.radius);
+    constexpr double m = 0.06;
+    const double kk = -m + k * (1.0 + 2.0 * m);
+    if (kk < 0.0) return base + x.q.qh[0] + kk / m * 0.08 * span;
+    if (kk > 1.0) return base + x.q.qh[kFxQuantiles - 1] + (kk - 1.0) / m * 0.08 * span;
+    return base + fx_quantile(x.q.qh, (float)kk);
+}
+
+void set_sweep(LayerSpec& l, const LayerFx& x, double k, bool keep_below, float glow,
+               const float colour[3]) {
+    l.clip = keep_below ? 1 : 2;
+    for (int d = 0; d < 3; d++) l.clip_n[d] = x.up[d];
+    l.level = sweep_level(x, k);
+    const double span = fx_quantile(x.q.qh, 0.98f) - fx_quantile(x.q.qh, 0.02f);
+    l.glow = (float)(0.07 * std::max(span, 1e-9 * x.radius) * std::clamp(glow, 0.0f, 1.0f));
+    for (int d = 0; d < 3; d++) l.glow_col[d] = colour[d];
+}
+
+}  // namespace
+
+// One layer's own way in or out, for a picture where each is composited on
+// its own (mode 3): `u` of the way through it.
+void RenderSession::side_effect(FrameSpec& f, LayerSpec& l, Transition kind, double u, bool in,
+                                const float param[2], const float colour[3], bool camera) {
+    if (l.source < 0) return;
+    const double v = in ? u : 1.0 - u;   // how much of it there is
+    switch (kind) {
+        case Transition::Cut:
+            if (!in && u >= 1.0) l.source = -1;
+            break;
+        case Transition::Crossfade:
+            l.opacity = (float)smooth(v);
+            break;
+        case Transition::Dip:
+            // Through the colour, the whole picture: it is there from the middle on.
+            for (int k = 0; k < 3; k++) f.tint[0][k] = colour[k];
+            f.tint[0][3] = (float)std::max((double)f.tint[0][3],
+                                           u < 0.5 ? smooth(u * 2.0) : 1.0 - smooth(u * 2.0 - 1.0));
+            if (in ? u < 0.5 : u >= 0.5) l.opacity = 0.0f;
+            break;
+        case Transition::Wipe: {
+            const double ang = param[0] * kPi / 180.0;
+            l.mask = 1;
+            l.mask_t = (float)u;
+            l.mask_out = !in;
+            l.mask_dir[0] = (float)std::cos(ang);
+            l.mask_dir[1] = (float)-std::sin(ang);
+            l.mask_soft = std::max(param[1], 0.002f);
+            break;
+        }
+        case Transition::Iris:
+            l.mask = 2;
+            l.mask_t = (float)smooth(u);
+            l.mask_out = !in;
+            l.mask_soft = std::max(param[1], 0.002f);
+            break;
+        case Transition::Zoom: {
+            // Arriving from far and smeared, or rushing past the camera.
+            const double z = std::clamp(param[0], 0.05f, 2.0f), r = 1.0 - v;
+            l.zoom = (float)(in ? 1.0 / (1.0 + 2.0 * z * r * r) : 1.0 + 2.0 * z * r * r);
+            l.zoom_blur = (float)(z * r);
+            l.opacity = (float)smooth(std::clamp((v - 0.3) / 0.4, 0.0, 1.0));
+            break;
+        }
+        case Transition::Grow:
+            l.grow = (float)(0.02 + 0.98 * smooth(v));
+            l.fade_in = (float)std::min(1.0, v * 2.5);
+            break;
+        default: {
+            LayerFx x;
+            if (!fx_frame(kind, camera, l.source, f.cam, x)) {
+                l.opacity = (float)smooth(v);
+                break;
+            }
+            if (kind == Transition::Sweep) {
+                // The level passes it: what is left of it on the far side.
+                const bool down = param[0] >= 0.5f;
+                set_sweep(l, x, smooth(down ? 1.0 - u : u), in != down, param[1], colour);
+                break;
+            }
+            x.kind = (int)kind;
+            x.incoming = in;
+            x.t = (float)u;
+            x.p[0] = param[0];
+            x.p[1] = param[1];
+            l.fx = x;
+            break;
+        }
+    }
+}
+
 FrameSpec RenderSession::frame_spec(double t, int W, int H, bool photo) {
     FrameSpec f;
     f.cam = trajectory().at(t);
@@ -1586,21 +1915,30 @@ FrameSpec RenderSession::frame_spec(double t, int W, int H, bool photo) {
     // Which shot, and how far into its transition.
     std::vector<Shot> shots = _project.shots;
     if (shots.empty()) shots.push_back(Shot{});
-    int j = 0;
-    for (int i = 0; i < (int)shots.size(); i++)
-        if (shots[(size_t)i].start <= t) j = i;
-    const Shot& sh = shots[(size_t)j];
+    const int n = (int)shots.size();
     // Shots name the project's models; the layers are the open ones. With no
     // shots it is the model on screen throughout.
-    const int B = _project.shots.empty() ? (_sources.empty() ? -1 : 0) : rt(sh.source);
-    const int A = j > 0 ? rt(shots[(size_t)j - 1].source) : -1;
-    double p = sh.duration > 1e-6 ? (t - sh.start) / sh.duration : 1.0;
-    if (t < sh.start) p = 1.0;
-    if (photo && sh.transition != Transition::Cut) p = std::clamp(p, 0.0, 1.0);
+    auto layer_of = [&](int i) {
+        if (i < 0 || i >= n) return -1;
+        return _project.shots.empty() ? (_sources.empty() ? -1 : 0) : rt(shots[(size_t)i].source);
+    };
+    const ShotMix m = shot_mix(shots, t);
+    const Shot& sh = shots[(size_t)std::max(m.in, 0)];
+    const int B = layer_of(m.in), A = layer_of(m.out);
     f.b.source = B;
     f.mix = 1.0f;
-    if (p < 1.0 && sh.transition != Transition::Cut) {
-        const double u = std::clamp(p, 0.0, 1.0);
+    if (m.own) {
+        // Leaving its own way: each layer on its own.
+        f.mode = 3;
+        f.a.source = A;
+        if (m.in >= 0)
+            side_effect(f, f.b, sh.transition, m.u_in, true, sh.param, sh.colour, sh.camera);
+        if (m.out >= 0) {
+            const ShotExit& e = shots[(size_t)m.out].exit;
+            side_effect(f, f.a, e.transition, m.u_out, false, e.param, e.colour, e.camera);
+        }
+    } else if (m.u_in < 1.0) {
+        const double u = m.u_in;
         const float su = (float)smooth(u);
         switch (sh.transition) {
             case Transition::Crossfade:
@@ -1642,49 +1980,33 @@ FrameSpec RenderSession::frame_spec(double t, int W, int H, bool photo) {
                 f.b.fade_in = (float)std::min(1.0, u * 2.5);
                 break;
             default: {
-                // In 3D: the incoming model's scene, or the outgoing one's
-                // when nothing comes in. Until it is read, a crossfade.
-                SceneStats st;
-                const int S = B >= 0 ? B : A;
-                if (S < 0 || !_frames.scene_stats(S, _project.up, st)) {
+                // In 3D, both in the incoming model's frame -- the outgoing
+                // one's when nothing comes in. Until it is read, a crossfade.
+                LayerFx x;
+                if (!fx_frame(sh.transition, sh.camera, B >= 0 ? B : A, f.cam, x)) {
                     f.a.source = A;
                     f.mix = su;
                     break;
                 }
                 f.mode = 1;
                 f.a.source = A;
-                const double centre_h = st.centre[0] * _project.up[0] +
-                                        st.centre[1] * _project.up[1] +
-                                        st.centre[2] * _project.up[2];
                 if (sh.transition == Transition::Sweep) {
-                    // A level along up; the new model on one side of it, the
-                    // old on the other, the band at the cut lit.
+                    // A level; the new model on one side of it, the old on
+                    // the other, the band at the cut lit.
                     const bool down = sh.param[0] >= 0.5f;
-                    const double lo = centre_h + st.h0, hi = centre_h + st.h1;
-                    const double span = hi - lo, margin = 0.08 * span;
                     const double k = smooth(down ? 1.0 - u : u);
-                    const double level = lo - margin + (span + 2.0 * margin) * k;
-                    f.a.clip = down ? 1 : 2;
-                    f.b.clip = down ? 2 : 1;
-                    f.a.level = f.b.level = level;
-                    f.a.glow = f.b.glow = (float)(0.07 * span * std::clamp(sh.param[1], 0.0f, 1.0f));
-                    for (int k2 = 0; k2 < 3; k2++) f.a.glow_col[k2] = f.b.glow_col[k2] = sh.colour[k2];
+                    set_sweep(f.a, x, k, down, sh.param[1], sh.colour);
+                    set_sweep(f.b, x, k, !down, sh.param[1], sh.colour);
                     break;
                 }
                 for (int layer = 0; layer < 2; layer++) {
-                    LayerFx& x = layer ? f.b.fx : f.a.fx;
-                    x.kind = (int)sh.transition;
-                    x.incoming = layer == 1;
-                    x.t = (float)u;
-                    x.p[0] = sh.param[0];
-                    x.p[1] = sh.param[1];
-                    for (int k = 0; k < 3; k++) {
-                        x.centre[k] = st.centre[k];
-                        x.up[k] = _project.up[k];
-                    }
-                    x.radius = st.radius;
-                    x.h0 = st.h0;
-                    x.h1 = st.h1;
+                    LayerFx& lx = layer ? f.b.fx : f.a.fx;
+                    lx = x;
+                    lx.kind = (int)sh.transition;
+                    lx.incoming = layer == 1;
+                    lx.t = (float)u;
+                    lx.p[0] = sh.param[0];
+                    lx.p[1] = sh.param[1];
                 }
                 break;
             }
@@ -1780,6 +2102,13 @@ void RenderSession::poll() {
                 _playing = false;
             }
         }
+    }
+
+    if (_flying) {
+        FlightSample fs;
+        fs.t = _fly_elapsed = now_s() - _fly_t0;
+        double target[3];
+        if (view_pose(fs.pos, fs.rot, target)) _flight.push_back(fs);
     }
 
     if (_pick_waiting) {
@@ -1994,6 +2323,7 @@ void RenderSession::start_export(bool no_builtin, bool confirmed) {
     _job.started = now_s();
     _status.clear();
     _status_err = false;
+    _status_done = false;
 }
 
 void RenderSession::cancel_export() {
@@ -2029,24 +2359,32 @@ void RenderSession::poll_export() {
         j.frame = 0;
     }
     if (j.state == Job::Rendering) {
-        const double budget = now_s() + 0.035;
+        // A slice of each window frame, so the window keeps drawing: the
+        // renders and the encoder work on their own threads meanwhile.
+        const double budget = now_s() + 0.012;
         const double first = _project.keys.front().time;
         auto time_of = [&](int frame) {
             return j.photo ? _time
                            : std::min(first + frame / std::max(o.fps, 1.0), _project.duration());
         };
         do {
-            if (!_frames.busy() && !j.queued) _frames.request(frame_spec(time_of(j.frame), W, H, j.photo));
-            j.queued = false;
-            if (!_frames.poll(0.02)) continue;
-            // The next one goes to the renderers before this one is read back
-            // and written, and while the window draws: they overlap.
-            if (j.frame + 1 < j.frames) {
-                _frames.request(frame_spec(time_of(j.frame + 1), W, H, j.photo));
-                j.queued = true;
+            if (!j.unread) {
+                if (!_frames.busy() && !j.queued) _frames.request(frame_spec(time_of(j.frame), W, H, j.photo));
+                j.queued = false;
+                if (!_frames.poll(std::clamp(budget - now_s(), 0.0, 0.004))) continue;
+                // The next one goes to the renderers before this one is read
+                // back and written, and while the window draws: they overlap.
+                if (j.frame + 1 < j.frames) {
+                    _frames.request(frame_spec(time_of(j.frame + 1), W, H, j.photo));
+                    j.queued = true;
+                }
+                j.unread = true;
             }
+            // An encoder behind: the frame waits in the renderer, not the window.
+            if (j.sink->full()) break;
             std::vector<uint8_t> px;
             _frames.read(px, j.sink->channels() == 4);
+            j.unread = false;
             if (!j.sink->push(std::move(px))) {
                 j.ok = false;
                 j.error = j.sink->error();
@@ -2083,7 +2421,7 @@ void RenderSession::poll_export() {
             return;
         }
         if (j.ok) {
-            note(format(msg::render_saved, {j.path}));
+            note(format(msg::render_saved, {j.path}), true);
         } else {
             _status = format(msg::render_failed, {j.error});
             _status_err = true;

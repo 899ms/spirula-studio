@@ -4,6 +4,7 @@
 // glide between keys; per-key looks; a project's JSON round trip; moved-
 // project copies; and a GIF read back through a decoder of its own.
 
+#include "app/gui/render/FlightFit.h"
 #include "app/gui/render/GifWriter.h"
 #include "app/gui/render/LensPresets.h"
 #include "app/gui/render/RenderProject.h"
@@ -11,6 +12,8 @@
 #include "app/gui/render/TransitionFx.h"
 #include "data/DatasetParser.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -516,12 +519,76 @@ void test_transitions() {
               old.shots[1].param[0] == 180.0f,
           "an older file's dip to white and wipe right read as a white dip and a 180-degree wipe");
 
-    // Every 3D transition starts with the old model as it was and ends with
-    // the new one as it is -- out to the scene's outliers too.
+    // A way out of its own, and which way a 3D one goes, survive too.
+    {
+        RenderProject r;
+        r.sources.resize(2);
+        Shot x;
+        x.transition = Transition::Ripple;
+        shot_defaults(x);
+        x.camera = true;
+        x.exit.own = true;
+        x.exit.transition = Transition::Dust;
+        exit_defaults(x.exit);
+        x.exit.offset = -0.5;
+        x.exit.duration = 2.0;
+        Shot y;
+        y.start = 4.0;
+        r.shots = {x, y};
+        const RenderProject back = project_from_json(project_to_json(r));
+        check(back.shots.size() == 2 && back.shots[0].camera && back.shots[0].exit.own &&
+                  back.shots[0].exit.transition == Transition::Dust &&
+                  back.shots[0].exit.offset == -0.5 && back.shots[0].exit.duration == 2.0 &&
+                  back.shots[0].exit.camera && !back.shots[1].exit.own,
+              "a shot's own way out, its offset and its camera setting survive the file");
+        Shot d;
+        d.transition = Transition::Dust;
+        shot_defaults(d);
+        Shot w;
+        w.transition = Transition::Sweep;
+        shot_defaults(w);
+        check(d.camera && !w.camera, "dust falls down the picture, a sweep keeps the world's level");
+    }
+
+    // Quantiles and the share below a value undo each other.
     FxGeo g;
     g.radius = 2.0f;
-    g.h0 = -1.0f;
-    g.h1 = 1.5f;
+    for (int i = 0; i < kFxQuantiles; i++) {
+        const float f = (float)i / (kFxQuantiles - 1);
+        g.qh[i] = f * f * 3.0f - 1.0f;
+    }
+    bool inverse = true;
+    for (float f = 0.0f; f <= 1.0f; f += 0.01f)
+        inverse = inverse && std::fabs(fx_cdf(g.qh, fx_quantile(g.qh, f)) - f) < 1e-4f;
+    check(inverse && fx_cdf(g.qh, -5.0f) == 0.0f && fx_cdf(g.qh, 50.0f) == 1.0f,
+          "a share of the elements and where it lies are each other's inverse");
+
+    // Every 3D transition starts with the old model as it was and ends with
+    // the new one as it is -- out to the scene's outliers too.
+    std::vector<std::array<float, 3>> pts;
+    for (uint32_t i = 0; i < 400; i++) {
+        float r1, r2;
+        fx_random(i, r1, r2);
+        const float reach = i % 10 == 0 ? 3.0f : 1.0f;
+        pts.push_back({(r1 - 0.5f) * 4.0f * reach, (r2 - 0.5f) * 4.0f * reach,
+                       (r1 * r2 - 0.3f) * 3.0f});
+    }
+    {
+        std::vector<float> h, a, r;
+        for (const auto& q : pts) {
+            h.push_back(q[2]);
+            a.push_back(q[0]);
+            r.push_back(std::sqrt(q[0] * q[0] + q[1] * q[1]));
+        }
+        auto table = [&](std::vector<float>& v, float* out) {
+            std::sort(v.begin(), v.end());
+            for (int i = 0; i < kFxQuantiles; i++)
+                out[i] = v[(size_t)std::lround((double)i / (kFxQuantiles - 1) * (v.size() - 1))];
+        };
+        table(h, g.qh);
+        table(a, g.qa);
+        table(r, g.qr);
+    }
     bool ends = true;
     std::string bad;
     for (int kind = (int)Transition::Dust; kind <= (int)Transition::Ripple; kind++) {
@@ -531,9 +598,7 @@ void test_transitions() {
         for (uint32_t i = 0; i < 400; i++) {
             float r1, r2;
             fx_random(i, r1, r2);
-            const float reach = i % 10 == 0 ? 3.0f : 1.0f;
-            const float pos[3] = {(r1 - 0.5f) * 4.0f * reach, (r2 - 0.5f) * 4.0f * reach,
-                                  (r1 * r2 - 0.3f) * 3.0f};
+            const float* pos = pts[i].data();
             float d[3], al, sz;
             auto still = [&](float want_alpha) {
                 return std::fabs(d[0]) + std::fabs(d[1]) + std::fabs(d[2]) < 1e-3f &&
@@ -552,6 +617,141 @@ void test_transitions() {
     }
     check(ends, "every 3D transition begins and ends where the models rest" +
                     (bad.empty() ? std::string() : " (fails: " + bad + ")"));
+}
+
+// Who is on screen when, and how far each is through its way in or out.
+void test_shot_mix() {
+    auto near = [](double a, double b) { return std::fabs(a - b) < 1e-9; };
+    Shot a, b;
+    b.start = 4.0;
+    b.transition = Transition::Crossfade;
+    b.duration = 2.0;
+    ShotMix m = shot_mix({a, b}, 5.0);
+    check(m.in == 1 && m.out == 0 && near(m.u_in, 0.5) && !m.own,
+          "a crossfade takes the one before out as the next comes in");
+    Shot first;
+    first.transition = Transition::Crossfade;
+    first.duration = 2.0;
+    m = shot_mix({first}, 1.0);
+    check(m.in == 0 && m.out == -1 && near(m.u_in, 0.5) && !m.own,
+          "the first shot can arrive from nothing");
+    m = shot_mix({first}, 5.0);
+    check(m.in == 0 && m.out == -1 && near(m.u_in, 1.0), "and is there once it has");
+
+    // Leaving a second early, over two, as the next rains in over two.
+    a.exit.own = true;
+    a.exit.transition = Transition::Dust;
+    a.exit.duration = 2.0;
+    a.exit.offset = -1.0;
+    b.transition = Transition::Rain;
+    const std::vector<Shot> shots = {a, b};
+    m = shot_mix(shots, 2.9);
+    check(m.in == 0 && m.out == -1 && !m.own, "before it leaves, the shot is simply there");
+    m = shot_mix(shots, 3.5);
+    check(m.in == -1 && m.out == 0 && near(m.u_out, 0.25) && m.own,
+          "leaving early, it goes before the next arrives");
+    m = shot_mix(shots, 4.5);
+    check(m.in == 1 && m.out == 0 && near(m.u_in, 0.25) && near(m.u_out, 0.75) && m.own,
+          "then the two overlap, each through its own");
+    m = shot_mix(shots, 5.5);
+    check(m.in == 1 && m.out == -1 && near(m.u_in, 0.75) && m.own,
+          "gone, while the next is still arriving");
+    // Leaving a second after the next has come, at once: both whole meanwhile.
+    Shot c = a, d = b;
+    c.exit.transition = Transition::Cut;
+    c.exit.offset = 1.0;
+    d.transition = Transition::Cut;
+    m = shot_mix({c, d}, 4.5);
+    check(m.in == 1 && m.out == 0 && near(m.u_in, 1.0) && near(m.u_out, 0.0) && m.own,
+          "a later way out keeps both on screen");
+    m = shot_mix({c, d}, 5.5);
+    check(m.in == 1 && m.out == -1, "and a cut out takes it at once");
+}
+
+// A hand-flown move: still for a second, round a quarter circle, a two
+// second stop half way, the rest of the half circle, still again.
+void test_flight() {
+    std::vector<FlightSample> fl;
+    const double pi = 3.14159265358979;
+    auto at = [&](double t, double a) {
+        FlightSample s;
+        s.t = t;
+        s.pos[0] = 4.0 * std::cos(a);
+        s.pos[1] = 4.0 * std::sin(a);
+        s.pos[2] = 1.0;
+        // Facing the middle as it goes: a yaw about +Z.
+        const double yaw = a + pi / 2.0;
+        s.rot[0] = std::cos(yaw / 2.0);
+        s.rot[3] = std::sin(yaw / 2.0);
+        // A hand's wobble, a millimetre.
+        s.pos[2] += 0.001 * std::sin(t * 37.0);
+        fl.push_back(s);
+    };
+    double t = 0.0;
+    for (; t < 1.0; t += 1.0 / 60.0) at(t, 0.0);
+    for (double a = 0.0; a < pi / 4.0; a += pi / 4.0 / 120.0, t += 1.0 / 60.0) at(t, a);
+    for (double e = t + 2.0; t < e; t += 1.0 / 60.0) at(t, pi / 4.0);
+    for (double a = pi / 4.0; a < pi / 2.0; a += pi / 4.0 / 120.0, t += 1.0 / 60.0) at(t, a);
+    for (double e = t + 1.0; t < e; t += 1.0 / 60.0) at(t, pi / 2.0);
+
+    RenderProject p;
+    FlightFit fit;
+    fit.timing = 1.0;
+    const int keys = fit_flight(fl, fit, 4.0, Lens{}, p);
+    const double flown = p.keys.empty() ? 0.0 : p.keys.back().time;
+    check(keys >= 2 && keys < 40 && std::fabs(flown - 6.0) < 0.1,
+          "as flown, the still ends go and the stop in the middle stays: " +
+              std::to_string(keys) + " keys, " + std::to_string(flown) + " s");
+    // Where it rests half way, the camera is still for most of two seconds.
+    {
+        const Trajectory tr(p);
+        double moved = 0.0;
+        CameraState last = tr.at(2.4);
+        for (double x = 2.5; x < 3.6; x += 0.1) {
+            const CameraState c = tr.at(x);
+            moved += std::hypot(c.pos[0] - last.pos[0], c.pos[1] - last.pos[1]);
+            last = c;
+        }
+        check(moved < 0.05, "as flown, a stop is kept: moved " + std::to_string(moved));
+    }
+    fit.timing = 0.5;
+    const double cut = flight_length(fl, fit, 4.0);
+    fit_flight(fl, fit, 4.0, Lens{}, p);
+    check(p.keys.size() >= 2 && std::fabs(p.keys.back().time - cut) < 1e-6 && cut < 4.4 && cut > 3.6,
+          "between the two, the stop drops out and the flying stays: " + std::to_string(cut) + " s");
+    {
+        // Every tenth of a second the camera is on its way: nowhere still.
+        const Trajectory tr(p);
+        double least = 1e9;
+        for (double x = 0.2; x + 0.2 < cut; x += 0.1) {
+            const CameraState a = tr.at(x), b = tr.at(x + 0.1);
+            least = std::min(least, std::hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]));
+        }
+        check(least > 0.02, "with the stop dropped, the camera never halts: " + std::to_string(least));
+        // And it passes within the tolerance of where it was flown.
+        double worst = 0.0;
+        for (const FlightSample& s : fl) {
+            double best = 1e9;
+            for (double x = 0.0; x <= cut; x += 0.01) {
+                const CameraState c = tr.at(x);
+                best = std::min(best, std::hypot(c.pos[0] - s.pos[0], c.pos[1] - s.pos[1]));
+            }
+            worst = std::max(worst, best);
+        }
+        check(worst < 0.05, "the fit passes where the flight went: off by " + std::to_string(worst));
+    }
+    fit.detail = 1.0;
+    const int close = fit_flight(fl, fit, 4.0, Lens{}, p);
+    fit.detail = 0.0;
+    const int loose = fit_flight(fl, fit, 4.0, Lens{}, p);
+    check(close > loose, "more detail keeps more keys: " + std::to_string(loose) + " then " +
+                             std::to_string(close));
+    fit.length = 10.0;
+    fit_flight(fl, fit, 4.0, Lens{}, p);
+    check(std::fabs(p.keys.back().time - 10.0) < 1e-6, "a length asked for is the length");
+    std::vector<FlightSample> still(30);
+    for (int i = 0; i < 30; i++) still[(size_t)i].t = i / 30.0;
+    check(fit_flight(still, fit, 4.0, Lens{}, p) == 0, "a flight that never moved makes no keys");
 }
 
 // ---- a GIF decoder, just enough to read back what GifWriter wrote ----
@@ -709,6 +909,8 @@ int main() {
     test_looks();
     test_refit_after_delete();
     test_transitions();
+    test_shot_mix();
+    test_flight();
     test_gif();
     if (g_failures) {
         std::printf("%d FAILED\n", g_failures);

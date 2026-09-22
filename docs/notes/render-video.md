@@ -9,6 +9,7 @@ the GPU video encoder it feeds is `src/video/VideoEncoder.cpp`.
 ```
 RenderProject    the move, the lens, the output, the shots: one JSON file
 Trajectory       keys -> a camera at any time
+FlightFit        a move flown by hand -> keys
 FrameRenderer    one frame: every model drawn by its own renderer, composited
 FrameSink        where frames go: image files, a GIF, or an encoder process
 GifWriter        animated GIF: a palette per frame, ordered dither, LZW
@@ -30,7 +31,10 @@ stays open behind the render, so what it deleted or moved is what is filmed.
 
 Keys are picked the same way in the viewport as in the list: a click takes
 one, Ctrl toggles, Shift takes the run from the last one clicked, and a click
-on nothing (or Ctrl+D) takes none. A click on the viewport or the panel stops
+on nothing (or Ctrl+D) takes none. Numeric-pad . frames the selected cameras,
+or all of them, as it frames the selection in the editor
+(`ViewportInteractor::frame_bounds`, `ViewportPanel::frame_view`: the view
+glides to it from the direction it had). A click on the viewport or the panel stops
 playback before it lands, and the lens section holds its key while playing,
 so what was under the pointer is still there.
 
@@ -105,13 +109,43 @@ key that has none, so the zoom still gets there; R turns one camera about its
 middle; with several selected, G and R move and turn them about the pivot --
 origin, median or mean -- aim points included, and S spreads their positions
 alone, so a widened orbit still looks at its subject (S on one camera is its
-zoom). Deleting from the viewport refits the keys left to the old
+zoom). An axis pressed twice with several selected -- R X X, G Z Z -- works on
+each in its own frame and about itself: the step the camera clicked last
+takes in its frame, carried into every other's (`apply_xform`), so R X X
+tilts every camera of an orbit by one pitch and G Z Z dollies them all along
+their own view. *Look at a point* and *Pick point* (T) take several keys at
+once too. Deleting from the viewport refits the keys left to the old
 path (`refit_keys`): Levenberg-Marquardt on a numeric Jacobian over each key's
 position and its aim point or a rotation vector, matching position and
 rotation at 12 samples per key, a radian weighing one scene unit; the times
 and lenses stay. Deleting from the panel or the timeline takes the key out and
 nothing else. *Smooth keyframes* pulls keys towards their neighbours' line
 with Taubin's second outward pass so a loop does not shrink.
+
+## Flying a path
+
+*Fly a path* records the viewport's own camera while the user flies it -- any
+navigation mode, mouse, keys or a gamepad; the keys and the corner picture
+step aside meanwhile -- and Enter turns the flight into keys
+(`FlightFit.cpp`), Esc throws it away:
+
+1. The still stretches at either end go: within half a percent of the scene
+   (a radian of turn weighs the scene's size) of where it rests.
+2. It is resampled evenly at 30 per second and smoothed over a twentieth of
+   a second, to the ends, against a hand's jitter and the window's hitches.
+3. It is timed anew. A step of recorded length dt that covers ds, turning
+   included, takes dt^g (ds / v)^(1-g), v the median pace of the moving part.
+   *Timing* g = 1 is the flight as flown, stops and all; g = 0 one steady
+   pace, which rushes through a cramped stretch; between, the output pace is
+   v_flown^g v^(1-g), so a stop costs nothing and the slow parts stay a
+   little slow. *Length* scales the result.
+4. Keys are chosen greedily: the two ends, then in every stretch between two
+   keys where the spline through them strays furthest past the tolerance --
+   *Detail*, 3% of the scene and 4 degrees down to 0.2% and 0.3 degrees -- a
+   key at that sample, until none strays. The keys play on a spline with no
+   easing, the first with the lens the flight was flown through.
+
+The settings refit on letting go, as long as the keys are still the fit's.
 
 ## One frame
 
@@ -131,9 +165,11 @@ at the output size:
   -- spans the size asked for.
 
 Two layers at most meet in one GLSL compositing pass: a mix through a mask
-(crossfade, wipe, iris), or one over the other (the sweep, where each layer
-has cut itself to its side of the level), then two tints (a dip, then the
-fades) and the background. Readback is one `glReadPixels` of the result.
+(crossfade, wipe, iris), one over the other (the 3D ones, where each layer
+has moved or cut itself), or -- for a shot leaving its own way -- each layer
+on its own, faded, masked or zoomed as its own transition says, the new one
+over the old; then two tints (a dip, then the fades) and the background.
+Readback is one `glReadPixels` of the result.
 
 A frame is a list of passes, one per layer and look. A `RenderWorker` keeps a
 single latest-wins request slot, so a second request to the same worker
@@ -179,7 +215,10 @@ picture share the row under them, a splitter between.
 
 ## Transitions
 
-A **shot** is a start time, a model (or nothing) and how it arrives:
+A **shot** is a start time, a model (or nothing), how it arrives and how it
+leaves. A project starts with one, the model on screen from the start, so
+the list shows what is rendered before any shot is added; a file with none
+reads as that one shot. How it arrives:
 
 | | |
 |---|---|
@@ -196,25 +235,51 @@ A **shot** is a start time, a model (or nothing) and how it arrives:
 | ripple (height, width) | a wave rolls out from the middle, swapping the models as it passes |
 
 Each transition keeps two settings and a colour in its shot, reset to the
-kind's own defaults when the kind changes (`shot_defaults`); files from before
-the dips and wipes were one each read their colour and direction across.
+kind's own defaults when the kind changes (`transition_defaults`); files from
+before the dips and wipes were one each read their colour and direction
+across.
+
+How a shot **leaves** is, by default, as the next one arrives: the next
+shot's transition takes both at once, as above. It can leave its own way
+instead -- any transition but a dip, over its own time, starting an *offset*
+after the next shot starts -- and then each model is drawn through its own
+half on its own: before the next arrives (a negative offset leaves the
+background between), overlapping it (a positive one keeps both on screen), or
+exactly with it. `shot_mix` says, for any moment, which shot is arriving and
+which leaving and how far each is; the frame and the timeline both read it.
 
 The 3D ones (sweep on) move the models' own elements: one set of formulas in
 `TransitionFx.h`, run on the host per splat (means, opacities and scales
 rewritten in `before_render`, as the reveal effects are) and in the point and
 mesh vertex shaders. They act on a scene measured robustly -- the per-axis
-median of the elements, unweighted, the 90th-percentile distance from it
-past four median distances left out, and the 2nd / 98th-percentile heights
-along up (`FrameRenderer::scene_stats`) -- so a sky or a floater far away
-does not stretch them. Every one begins with the old model exactly as it was
-and ends with the new one exactly as it is, outliers included
-(`render_project_test`). Points take a random number of their own from their
+median of the elements, unweighted, and the 90th-percentile distance from it
+past four median distances left out (`FrameRenderer::scene_core`) -- so a sky
+or a floater far away does not stretch them. What they order by goes through
+the elements' own quantiles, every 1/32 of them, unweighted
+(`scene_quantiles`): the sweep's level, dust's and the spiral's order by
+height, blowing dust's across, the ripple's front outward. Each moment then
+passes as many elements, where a uniform sweep would race through the nearby
+things and spend most of its time climbing into the sky.
+
+Those with a way to go -- sweep, dust, spiral, rain, ripple -- go it *as the
+camera sees it* or along the world's up (`Shot::camera`, per shot and per
+way out; `RenderSession::fx_frame`). As the camera sees it, the frame is the
+camera's at that moment: dust falls and rain drops down the screen and a
+sweep climbs it, while a spiral turns and a ripple spreads about the view's
+own axis, at the scene's depth -- round the middle of the picture, however it
+is framed and wherever the camera stands. Dust, rain and the spiral default
+to the camera; the sweep and the ripple to the world, where a level and a
+wave over the ground look like what they are. Every one begins with the old
+model exactly as it was and ends with the new one exactly as it is, outliers
+included (`render_project_test`). Points take a random number of their own from their
 index; a mesh's vertices take a smooth noise of where they are, since shared
 vertices must move together, and a mesh fades by losing world-space grains.
 Both layers are then drawn one over the other.
 
-On the timeline a shot's transition is a ramp from the colour before to its
-own; its start and the ramp's end drag.
+The timeline draws what `shot_mix` says, column by column: the shot arriving
+rising from the bottom of the lane, the one leaving shrinking from the top,
+the background between them. A shot's start, the end of its arrival, and the
+start and end of its own way out all drag.
 
 *Show each model in turn* splits the video into one shot per model -- points,
 then splats, then meshes -- with the transition that suits each; shots can
@@ -279,6 +344,16 @@ raw path keeps its buffers between frames, skips the depth read back and turns
 floats into bytes on every core. 1080p splats went from 22 to 68 frames a
 second (RTX 5070, H.264 on the GPU).
 
+The window keeps drawing meanwhile. An encoder slower than the renders used
+to hold the GUI thread in the pipe's write, and the loop spent 35 ms of every
+window frame waiting on the engine: the window drew at 11 frames a second
+(95th percentile 225 ms, worst 371 ms) through a 1080p SVT-AV1 export. Now a
+finished frame waits in the renderer while the encoder's queue is full
+(`FrameSink::full`), the loop takes 12 ms a frame, and the encoder runs a
+notch below the window (nice 10; below normal on Windows): 46 frames a
+second (95th percentile 31 ms, worst 47 ms), the export as fast as before.
+A finished render's message is green, as a finished dataset's is.
+
 ## The file
 
 `<dataset>/renders/*.json` by default -- the dataset the run read, or the
@@ -300,8 +375,13 @@ JSON round trips including older files, moved-project copies, dataset lens
 clustering, the lens glide between keys, when each key is passed at
 constant speed, per-key looks and their JSON, the refit after a deletion (an
 orbit missing a key comes back to within a third of its gap), transition
-settings and the older names they replaced, every 3D transition starting and
-ending exactly at rest, and a GIF read back through a decoder of its own. The rest was
+settings and the older names they replaced, a shot's way out and camera
+setting in the file, the quantile lookups, every 3D transition starting and
+ending exactly at rest, who is on screen when (`shot_mix`: crossfades, a
+first shot arriving from nothing, leaving early, overlapping, cutting out),
+the flight fit (still ends trimmed, a stop kept as flown and dropped between,
+the path followed within the tolerance, more detail keeping more keys), and a
+GIF read back through a decoder of its own. The rest was
 driven through the GUI automation surface ([gui-automation.md](gui-automation.md))
 on a trained scene with a mesh: orbit loops, insertion, deletion, R, the
 lens-aware gizmos, the three preview layouts, keys following a turned model,

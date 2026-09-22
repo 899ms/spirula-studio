@@ -88,6 +88,14 @@ uniform vec4 u_tint0;
 uniform vec4 u_tint1;
 uniform float u_soft;
 uniform float u_zoom;
+// Mode 3, per layer: opacity, mask, its progress, its softness; the wipe's
+// direction, the zoom and its blur; and whether the mask keeps the outside.
+uniform vec4 u_la0;
+uniform vec4 u_lb0;
+uniform int u_lo0;
+uniform vec4 u_la1;
+uniform vec4 u_lb1;
+uniform int u_lo1;
 out vec4 frag;
 vec4 fetch(sampler2D t, int flip, vec2 uv) {
     if (flip == 1) uv.y = 1.0 - uv.y;
@@ -107,12 +115,37 @@ vec4 zoomed(sampler2D t, int flip, vec2 uv, float scale, float blur) {
 vec4 tint(vec4 c, vec4 t) {
     return t.a > 0.0 ? mix(c, vec4(t.rgb, 1.0), t.a) : c;
 }
+// How much of the picture a wipe (1) or an iris (2) at `m` lets through.
+float mask_at(int kind, float m, float soft, vec2 dir) {
+    vec2 img = vec2(v_uv.x, 1.0 - v_uv.y);
+    float e = max(soft, 0.001);
+    float s;
+    if (kind == 1) {
+        s = dot(img - 0.5, dir) + 0.5;
+    } else {
+        vec2 d = (img - 0.5) * vec2(u_aspect, 1.0);
+        s = length(d) / (0.5 * sqrt(u_aspect * u_aspect + 1.0));
+    }
+    return 1.0 - smoothstep(m - e, m + e, s);
+}
+vec4 layer(sampler2D t, int has, int flip, vec4 la, vec4 lb, int keep_out) {
+    if (has == 0 || la.x <= 0.0) return vec4(0.0);
+    vec4 c = lb.z != 1.0 || lb.w > 0.0 ? zoomed(t, flip, v_uv, lb.z, lb.w)
+                                       : fetch(t, flip, v_uv);
+    int kind = int(la.y + 0.5);
+    float m = kind == 0 ? 1.0 : mask_at(kind, la.z, la.w, lb.xy);
+    if (kind != 0 && keep_out == 1) m = 1.0 - m;
+    return c * (m * la.x);
+}
 void main() {
     vec4 a = u_has_a == 1 ? fetch(u_a, u_flip_a, v_uv) : vec4(0.0);
     vec4 b = u_has_b == 1 ? fetch(u_b, u_flip_b, v_uv) : vec4(0.0);
     vec4 c;
     if (u_mode == 1) {
         c = over(over(b, a), u_bg);
+    } else if (u_mode == 3) {
+        c = over(layer(u_b, u_has_b, u_flip_b, u_la1, u_lb1, u_lo1),
+                 over(layer(u_a, u_has_a, u_flip_a, u_la0, u_lb0, u_lo0), u_bg));
     } else if (u_mode == 2) {
         // The old picture rushes past the camera, the new one arrives from far.
         float m = u_mix;
@@ -161,33 +194,30 @@ void main() {
 }
 )";
 
-// A transition's scene carried into a frame whose points reach the world
-// through `to_world`.
+// A transition's frame carried into one whose points reach the world
+// through `to_world`: a similarity, so the axes only turn and every length
+// scales alike.
 FxGeo fx_geo_in(const LayerFx& fx, const spirula::Sim3& to_world) {
-    FxGeo g;
+    FxGeo g = fx.q;
     const spirula::Sim3 inv = to_world.inverse();
-    double c[3], u[3];
+    double c[3], ax[3][3];
     inv.apply(fx.centre, c);
-    inv.rotate(fx.up, u);
-    const double un = std::sqrt(u[0]*u[0] + u[1]*u[1] + u[2]*u[2]);
-    for (double& v : u) v /= std::max(un, 1e-12);
-    // Any two across up; which two only turns a spiral's start.
-    double a[3] = {1, 0, 0};
-    if (std::fabs(u[0]) > 0.9) { a[0] = 0; a[1] = 1; }
-    double e1[3] = {a[1]*u[2] - a[2]*u[1], a[2]*u[0] - a[0]*u[2], a[0]*u[1] - a[1]*u[0]};
-    const double n1 = std::sqrt(e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2]);
-    for (double& v : e1) v /= std::max(n1, 1e-12);
-    const double e2[3] = {u[1]*e1[2] - u[2]*e1[1], u[2]*e1[0] - u[0]*e1[2], u[0]*e1[1] - u[1]*e1[0]};
-    const double k = 1.0 / std::max(to_world.s, 1e-12);
-    for (int i = 0; i < 3; i++) {
-        g.c[i] = (float)c[i];
-        g.up[i] = (float)u[i];
-        g.e1[i] = (float)e1[i];
-        g.e2[i] = (float)e2[i];
+    inv.rotate(fx.up, ax[0]);
+    inv.rotate(fx.e1, ax[1]);
+    inv.rotate(fx.e2, ax[2]);
+    float* out[3] = {g.up, g.e1, g.e2};
+    for (int a = 0; a < 3; a++) {
+        const double n = std::sqrt(ax[a][0]*ax[a][0] + ax[a][1]*ax[a][1] + ax[a][2]*ax[a][2]);
+        for (int k = 0; k < 3; k++) out[a][k] = (float)(ax[a][k] / std::max(n, 1e-12));
     }
-    g.radius = (float)(fx.radius * k);
-    g.h0 = (float)(fx.h0 * k);
-    g.h1 = (float)(fx.h1 * k);
+    const float k = (float)(1.0 / std::max(to_world.s, 1e-12));
+    for (int i = 0; i < 3; i++) g.c[i] = (float)c[i];
+    g.radius = (float)fx.radius * k;
+    for (int i = 0; i < kFxQuantiles; i++) {
+        g.qh[i] *= k;
+        g.qa[i] *= k;
+        g.qr[i] *= k;
+    }
     return g;
 }
 
@@ -234,9 +264,15 @@ struct FrameRenderer::Slot {
     std::thread loader;
     std::atomic<int> load_state{0};     // 0 not asked, 1 reading, 2 ready, 3 failed
     std::shared_ptr<const std::vector<uint8_t>> masked_for;
-    double h_up[3] = {0, 0, 0};
-    SceneStats stats;
-    bool h_valid = false;
+    // Its elements thinned, world frame, for the transitions: as of the
+    // placement `pts_at`, with their SceneCore; and the last quantiles asked.
+    std::vector<double> pts;
+    spirula::Sim3 pts_at;
+    bool pts_valid = false;
+    SceneCore core;
+    double q_key[12] = {};
+    FxGeo q;
+    bool q_valid = false;
 
     ~Slot() {
         if (loader.joinable()) loader.join();
@@ -327,17 +363,18 @@ bool FrameRenderer::effects_ready(int source) {
     return false;
 }
 
-bool FrameRenderer::scene_stats(int source, const double up[3], SceneStats& out) {
+bool FrameRenderer::scene_core(int source, SceneCore& out) {
     if (source < 0 || source >= (int)_slots.size()) return false;
     Slot& s = *_slots[(size_t)source];
-    if (s.h_valid && s.h_up[0] == up[0] && s.h_up[1] == up[1] && s.h_up[2] == up[2]) {
-        out = s.stats;
+    const spirula::Sim3 file_to_world = s.view.norm_to_world * s.view.file_to_norm;
+    if (s.pts_valid && std::memcmp(&s.pts_at, &file_to_world, sizeof file_to_world) == 0) {
+        out = s.core;
         return true;
     }
-    const spirula::Sim3 file_to_world = s.view.norm_to_world * s.view.file_to_norm;
     std::vector<double> w;
     auto add = [&](const auto* p, int64_t n) {
-        const int64_t step = std::max<int64_t>(1, n / 200000);
+        // Enough for every quantile a frame asks, cheap to sort per frame.
+        const int64_t step = std::max<int64_t>(1, n / 40000);
         for (int64_t i = 0; i < n; i += step) {
             const double x[3] = {(double)p[i*3], (double)p[i*3+1], (double)p[i*3+2]};
             double q[3];
@@ -364,7 +401,7 @@ bool FrameRenderer::scene_stats(int source, const double up[3], SceneStats& out)
     // Every point counts the same, whatever its size or opacity: the centre
     // is the median, and what floats past four median distances is not the
     // scene. A trained scene keeps floaters and a sky far outside it.
-    SceneStats st;
+    SceneCore st;
     std::vector<double> tmp(m);
     for (int d = 0; d < 3; d++) {
         for (size_t i = 0; i < m; i++) tmp[i] = w[i * 3 + d];
@@ -380,25 +417,58 @@ bool FrameRenderer::scene_stats(int source, const double up[3], SceneStats& out)
     tmp = dist;
     std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t)(m / 2), tmp.end());
     const double reach = 4.0 * tmp[m / 2];
-    std::vector<double> core, h;
-    for (size_t i = 0; i < m; i++) {
-        if (dist[i] > reach) continue;
-        core.push_back(dist[i]);
-        h.push_back(up[0] * (w[i*3] - st.centre[0]) + up[1] * (w[i*3+1] - st.centre[1]) +
-                    up[2] * (w[i*3+2] - st.centre[2]));
-    }
+    std::vector<double> core;
+    for (size_t i = 0; i < m; i++)
+        if (dist[i] <= reach) core.push_back(dist[i]);
     if (core.empty()) return false;
-    auto pct = [](std::vector<double>& v, double f) {
-        const size_t k = std::min(v.size() - 1, (size_t)(f * (double)(v.size() - 1)));
-        std::nth_element(v.begin(), v.begin() + (ptrdiff_t)k, v.end());
-        return v[k];
+    const size_t k = std::min(core.size() - 1, (size_t)(0.9 * (double)(core.size() - 1)));
+    std::nth_element(core.begin(), core.begin() + (ptrdiff_t)k, core.end());
+    st.radius = std::max(core[k], 1e-9);
+    s.pts = std::move(w);
+    s.pts_at = file_to_world;
+    s.pts_valid = true;
+    s.q_valid = false;
+    s.core = out = st;
+    return true;
+}
+
+bool FrameRenderer::scene_quantiles(int source, const double centre[3], const double up[3],
+                                    const double e1[3], const double e2[3], FxGeo& q) {
+    SceneCore core;
+    if (!scene_core(source, core)) return false;
+    Slot& s = *_slots[(size_t)source];
+    const double key[12] = {centre[0], centre[1], centre[2], up[0], up[1], up[2],
+                            e1[0], e1[1], e1[2], e2[0], e2[1], e2[2]};
+    if (s.q_valid && std::memcmp(key, s.q_key, sizeof key) == 0) {
+        std::memcpy(q.qh, s.q.qh, sizeof q.qh);
+        std::memcpy(q.qa, s.q.qa, sizeof q.qa);
+        std::memcpy(q.qr, s.q.qr, sizeof q.qr);
+        return true;
+    }
+    const size_t m = s.pts.size() / 3;
+    std::vector<float> h(m), a(m), r(m);
+    for (size_t i = 0; i < m; i++) {
+        const double d[3] = {s.pts[i*3] - centre[0], s.pts[i*3+1] - centre[1],
+                             s.pts[i*3+2] - centre[2]};
+        const double x1 = d[0]*e1[0] + d[1]*e1[1] + d[2]*e1[2];
+        const double x2 = d[0]*e2[0] + d[1]*e2[1] + d[2]*e2[2];
+        h[i] = (float)(d[0]*up[0] + d[1]*up[1] + d[2]*up[2]);
+        a[i] = (float)x1;
+        r[i] = (float)std::sqrt(x1*x1 + x2*x2);
+    }
+    auto table = [&](std::vector<float>& v, float* out) {
+        std::sort(v.begin(), v.end());
+        for (int i = 0; i < kFxQuantiles; i++)
+            out[i] = v[(size_t)std::lround((double)i / (kFxQuantiles - 1) * (double)(m - 1))];
     };
-    st.radius = std::max(pct(core, 0.9), 1e-9);
-    st.h0 = pct(h, 0.02);
-    st.h1 = std::max(pct(h, 0.98), st.h0 + 1e-9);
-    for (int k = 0; k < 3; k++) s.h_up[k] = up[k];
-    s.stats = out = st;
-    s.h_valid = true;
+    table(h, s.q.qh);
+    table(a, s.q.qa);
+    table(r, s.q.qr);
+    std::memcpy(s.q_key, key, sizeof key);
+    s.q_valid = true;
+    std::memcpy(q.qh, s.q.qh, sizeof q.qh);
+    std::memcpy(q.qa, s.q.qa, sizeof q.qa);
+    std::memcpy(q.qr, s.q.qr, sizeof q.qr);
     return true;
 }
 
@@ -463,7 +533,7 @@ void FrameRenderer::submit(Pass& p) {
         // The cut in the file's own coordinates, where the means are.
         double n[3] = {0, 0, 1}, d = 0.0;
         if (l.clip) {
-            plane_in(s.view.norm_to_world * s.view.file_to_norm, _spec.up, l.level, n, d);
+            plane_in(s.view.norm_to_world * s.view.file_to_norm, l.clip_n, l.level, n, d);
             if (l.clip == 2) { for (double& v : n) v = -v; d = -d; }
         }
         const float log_grow = std::log(std::max(l.grow, 1e-4f));
@@ -566,7 +636,7 @@ unsigned FrameRenderer::draw_gl_layer(Slot& s, const LayerSpec& l,
     for (int k = 0; k < 8; k++) ps.dist[k] = ps.tier ? c.lens.dist[k] : 0.0f;
     if (l.clip) {
         double n[3], d;
-        plane_in(s.view.norm_to_world, _spec.up, l.level, n, d);
+        plane_in(s.view.norm_to_world, l.clip_n, l.level, n, d);
         if (l.clip == 2) { for (double& v : n) v = -v; d = -d; }
         for (int k = 0; k < 3; k++) ps.plane[k] = (float)n[k];
         ps.plane[3] = (float)d;
@@ -748,8 +818,9 @@ bool FrameRenderer::ensure_compositor() {
     }
     const char* names[] = {"u_a", "u_b", "u_has_a", "u_has_b", "u_flip_a",
                            "u_flip_b", "u_mode", "u_mask", "u_mix", "u_dir",
-                           "u_aspect", "u_bg", "u_tint0", "u_tint1", "u_soft", "u_zoom"};
-    for (int i = 0; i < 16; i++) _u[i] = glx::GetUniformLocation(_prog, names[i]);
+                           "u_aspect", "u_bg", "u_tint0", "u_tint1", "u_soft", "u_zoom",
+                           "u_la0", "u_lb0", "u_lo0", "u_la1", "u_lb1", "u_lo1"};
+    for (int i = 0; i < 22; i++) _u[i] = glx::GetUniformLocation(_prog, names[i]);
     GLuint vao = 0;
     glx::GenVertexArrays(1, &vao);
     _vao = vao;
@@ -827,6 +898,12 @@ void FrameRenderer::composite() {
                    _spec.tint[1][3]);
     glx::Uniform1f(_u[14], _spec.soft);
     glx::Uniform1f(_u[15], _spec.zoom);
+    for (int i = 0; i < 2; i++) {
+        const LayerSpec& l = i ? _spec.b : _spec.a;
+        glx::Uniform4f(_u[16 + 3 * i], l.opacity, (float)l.mask, l.mask_t, l.mask_soft);
+        glx::Uniform4f(_u[17 + 3 * i], l.mask_dir[0], l.mask_dir[1], l.zoom, l.zoom_blur);
+        glx::Uniform1i(_u[18 + 3 * i], l.mask_out ? 1 : 0);
+    }
     glx::BindVertexArray(_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glx::BindVertexArray(0);

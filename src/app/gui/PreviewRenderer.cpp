@@ -255,7 +255,7 @@ void main() {
     vec3 pos = a_pos;
     v_fxa = 1.0;
     if (u_fx != 0) {
-        float s = 3.0 / u_fx_geo.x, fs;
+        float s = 3.0 / u_fx_radius, fs;
         vec3 dd;
         fx_apply(a_pos, fx_noise(a_pos * s), fx_noise(a_pos * s + 17.3), dd, v_fxa, fs);
         pos += dd;
@@ -305,7 +305,7 @@ out vec4 frag;
 void main() {
     // A transition fading a mesh drops it grain by grain, a grain being a
     // cell of the surface where it rests.
-    if (u_fx != 0 && v_fxa < fx_h3(floor(v_world * (60.0 / u_fx_geo.x)))) discard;
+    if (u_fx != 0 && v_fxa < fx_h3(floor(v_world * (60.0 / u_fx_radius)))) discard;
     if (u_model != 0 || u_tier != 0) {
         // Reject fragments of a triangle that crosses a projection
         // discontinuity (the equirect +-180-degree seam, the fisheye backward
@@ -448,7 +448,8 @@ void PreviewRenderer::style_locations(int program, unsigned prog) {
     auto at = [&](const char* name) { return glx::GetUniformLocation(prog, name); };
     l = {at("u_tier"), at("u_dist"), at("u_clip_on"), at("u_clip"), at("u_glow"),
          at("u_glow_col"), at("u_fx"), at("u_fx_in"), at("u_fx_t"), at("u_fx_p"), at("u_fx_c"),
-         at("u_fx_up"), at("u_fx_e1"), at("u_fx_e2"), at("u_fx_geo")};
+         at("u_fx_up"), at("u_fx_e1"), at("u_fx_e2"), at("u_fx_radius"), at("u_fx_qh"),
+         at("u_fx_qa"), at("u_fx_qr")};
 }
 
 void PreviewRenderer::set_style_uniforms(int program, const PreviewStyle& st) {
@@ -468,7 +469,10 @@ void PreviewRenderer::set_style_uniforms(int program, const PreviewStyle& st) {
     glx::Uniform3f(l.fx_up, g.up[0], g.up[1], g.up[2]);
     glx::Uniform3f(l.fx_e1, g.e1[0], g.e1[1], g.e1[2]);
     glx::Uniform3f(l.fx_e2, g.e2[0], g.e2[1], g.e2[2]);
-    glx::Uniform3f(l.fx_geo, std::max(g.radius, 1e-6f), g.h0, g.h1);
+    glx::Uniform1f(l.fx_radius, std::max(g.radius, 1e-6f));
+    glx::Uniform1fv(l.fx_qh, render::kFxQuantiles, g.qh);
+    glx::Uniform1fv(l.fx_qa, render::kFxQuantiles, g.qa);
+    glx::Uniform1fv(l.fx_qr, render::kFxQuantiles, g.qr);
 }
 
 bool PreviewRenderer::ensure_mesh_program() {

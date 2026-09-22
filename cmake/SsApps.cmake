@@ -386,6 +386,7 @@ if(SS_BUILD_GUI)
 
     add_executable(render_project_test
         ${SS_SRC}/app/gui/tests/render_project_test.cpp
+        ${SS_SRC}/app/gui/render/FlightFit.cpp
         ${SS_SRC}/app/gui/render/GifWriter.cpp
         ${SS_SRC}/app/gui/render/LensPresets.cpp
         ${SS_SRC}/app/gui/render/RenderProject.cpp

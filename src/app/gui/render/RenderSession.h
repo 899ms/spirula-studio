@@ -11,6 +11,7 @@
 
 #include "app/gui/ViewportInput.h"
 #include "app/gui/edit/TransformTool.h"
+#include "app/gui/render/FlightFit.h"
 #include "app/gui/render/FrameRenderer.h"
 #include "app/gui/render/FrameSink.h"
 #include "app/gui/render/LensPresets.h"
@@ -121,6 +122,7 @@ public:
     bool owns_right_button() const override { return _xform.active(); }
     bool on_viewport_input(const ViewportInput& in) override;
     void draw_viewport_overlay(const ViewportOverlay& v) override;
+    bool frame_bounds(double centre[3], double& radius) override;
 
 private:
     // ---- the project and its history ----
@@ -166,6 +168,7 @@ private:
     std::string source_name(int i) const;
     void draw_history_section(float full);
     void update_key_from_view(int index);
+    void aim_ahead(Keyframe& k);
     void look_through(double time);
     // `fit`: the keys left move to keep the path as it was.
     void delete_selected(bool fit = false);
@@ -175,6 +178,13 @@ private:
     void space_evenly(double total);
     void make_orbit();
     void follow_capture();
+    // Flying a path by hand: the view is recorded while the user flies it,
+    // and kept -- fitted into keys -- or thrown away.
+    void start_flight();
+    void stop_flight(bool keep);
+    void refit_flight();
+    std::string keys_json() const;
+    void draw_flight_controls(float full);
     // The pane's navigation camera as a keyframe pose, world frame.
     bool view_pose(double pos[3], double rot[4], double target[3]) const;
 
@@ -202,6 +212,9 @@ private:
 
     // ---- frames ----
     FrameSpec frame_spec(double t, int W, int H, bool photo);
+    bool fx_frame(Transition kind, bool camera, int source, const CameraState& cam, LayerFx& x);
+    void side_effect(FrameSpec& f, LayerSpec& l, Transition kind, double u, bool in,
+                     const float param[2], const float colour[3], bool camera);
     void preview_size(float box_w, float box_h, int& W, int& H) const;
     void request_preview();
 
@@ -212,6 +225,7 @@ private:
         bool builtin = false;            // the GPU encoder, which may hand over to ffmpeg
         int frame = 0, frames = 0;
         bool queued = false;             // `frame` already asked of the renderers
+        bool unread = false;             // a finished frame waits for room in the sink
         std::unique_ptr<FrameSink> sink;
         std::thread finisher;
         std::atomic<bool> finished{false};
@@ -224,6 +238,7 @@ private:
             builtin = false;
             frame = frames = 0;
             queued = false;
+            unread = false;
             sink.reset();
             finished = false;
             ok = true;
@@ -248,9 +263,11 @@ private:
     void draw_lens_section(float full);
     void draw_motion_section(float full);
     void draw_effects_section(float full);
-    void draw_shot_settings(Shot& s, float full);
+    void draw_transition_settings(Transition kind, float param[2], float colour[3],
+                                  bool& camera, float full);
     void draw_project_section(float full);
-    void note(const std::string& s);
+    // `done`: a job finished, which the status line shows in green.
+    void note(const std::string& s, bool done = false);
 
     ViewportPanel* _panel = nullptr;
     RenderProject _project;
@@ -344,13 +361,25 @@ private:
     // Timeline.
     int _drag_key = -1;
     double _drag_key_from = 0.0;
-    // A shot's start, or with `_drag_shot_end` its transition's end, in hand.
+    // A shot's start, its arrival's end, or its own way out's start or end
+    // (0..3), in hand.
     int _drag_shot = -1;
-    bool _drag_shot_end = false;
+    int _drag_shot_part = 0;
     double _drag_shot_from = 0.0;
     bool _scrubbing = false;
     bool _timeline_hovered = false;
     float _timeline_zoom = 1.0f;
+
+    // The flight: recording since `_fly_t0`, what it recorded, the lens it
+    // started with, how it is fitted, and the keys the last fit made -- its
+    // settings show while those still stand.
+    bool _flying = false;
+    double _fly_t0 = 0.0, _fly_elapsed = 0.0;
+    std::vector<FlightSample> _flight;
+    Lens _flight_lens;
+    FlightFit _fit;
+    bool _fit_length_set = false;
+    std::string _fit_keys;
 
     Job _job;
     std::atomic<int> _encoder_probe{0};  // 0 unknown, 1 probing, 2 built-in works, 3 not
@@ -384,7 +413,7 @@ private:
     std::function<void(int, bool)> _view_model;
     std::vector<std::string> _log;
     std::string _status;
-    bool _status_err = false;
+    bool _status_err = false, _status_done = false;
 };
 
 }  // namespace render

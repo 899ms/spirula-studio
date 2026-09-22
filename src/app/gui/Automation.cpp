@@ -150,7 +150,8 @@ const KeyName kKeys[] = {
     {"alt", ImGuiKey_LeftAlt}, {"super", ImGuiKey_LeftSuper},
     {"minus", ImGuiKey_Minus}, {"equal", ImGuiKey_Equal},
     {"comma", ImGuiKey_Comma}, {"period", ImGuiKey_Period},
-    {"slash", ImGuiKey_Slash},
+    {"slash", ImGuiKey_Slash}, {"kpdecimal", ImGuiKey_KeypadDecimal},
+    {"kpenter", ImGuiKey_KeypadEnter},
 };
 
 std::string lower(std::string s) {
@@ -176,6 +177,9 @@ bool parse_chord(const std::string& spec, std::vector<int>& out) {
             if (c >= 'a' && c <= 'z') k = (ImGuiKey)(ImGuiKey_A + (c - 'a'));
             else if (c >= '0' && c <= '9') k = (ImGuiKey)(ImGuiKey_0 + (c - '0'));
         }
+        if (k == ImGuiKey_None && part.size() == 3 && part.rfind("kp", 0) == 0 &&
+            part[2] >= '0' && part[2] <= '9')
+            k = (ImGuiKey)(ImGuiKey_Keypad0 + (part[2] - '0'));
         if (k == ImGuiKey_None && part.size() >= 2 && part[0] == 'f') {
             int n = std::atoi(part.c_str() + 1);
             if (n >= 1 && n <= 12) k = (ImGuiKey)(ImGuiKey_F1 + (n - 1));

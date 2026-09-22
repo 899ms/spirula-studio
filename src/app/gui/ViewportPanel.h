@@ -164,6 +164,9 @@ public:
     // on screen and it is the grid that arrives under it.
     void carry_view(const float step[12]);
 
+    // Glide to look at a sphere, shared frame, from the direction the view
+    // already has, near enough to fill it: what Numpad . does.
+    void frame_view(const float centre[3], float radius);
     // Look along a world axis (0..2, `negative` for the far side), switching
     // to the orthographic view; and the switch on its own.
     void snap_view(int axis, bool negative);
@@ -340,6 +343,10 @@ private:
     bool _anim = false;
     double _anim_t0 = 0.0;
     float _anim_from[4] = {0, 0, 0, 1}, _anim_to[4] = {0, 0, 0, 1};
+    // And a framing: the pivot and its distance glide, the rotation stays.
+    bool _frame_anim = false;
+    double _frame_t0 = 0.0;
+    float _frame_from[4] = {0, 0, 0, 1}, _frame_to[4] = {0, 0, 0, 1};   // pivot, distance
     // Gizmo pointer state.
     bool _giz_down = false, _giz_dragged = false, _giz_hover = false;
     int _giz_hot = -1;               // 0..5: +X +Y +Z -X -Y -Z under the cursor

@@ -249,9 +249,9 @@ Lens RenderProject::lens_at(int i) const {
     return l;
 }
 
-void shot_defaults(Shot& s) {
+void transition_defaults(Transition t, float param[2], float colour[3], bool& camera) {
     float p0 = 0.0f, p1 = 0.0f, c[3] = {0.0f, 0.0f, 0.0f};
-    switch (s.transition) {
+    switch (t) {
         case Transition::Wipe: p0 = 0.0f; p1 = 0.03f; break;       // direction, degrees; softness
         case Transition::Iris: p1 = 0.03f; break;                  // softness
         case Transition::Zoom: p0 = 0.5f; break;                   // strength
@@ -267,9 +267,59 @@ void shot_defaults(Shot& s) {
         case Transition::Ripple: p0 = 0.25f; p1 = 0.3f; break;     // height; width
         default: break;
     }
-    s.param[0] = p0;
-    s.param[1] = p1;
-    for (int k = 0; k < 3; k++) s.colour[k] = c[k];
+    param[0] = p0;
+    param[1] = p1;
+    for (int k = 0; k < 3; k++) colour[k] = c[k];
+    // Dust falls, rain drops and a spiral turns as seen; a sweep is a level
+    // and a ripple runs over the ground, which the world's up has.
+    camera = t == Transition::Dust || t == Transition::Spiral || t == Transition::Rain;
+}
+
+void shot_defaults(Shot& s) { transition_defaults(s.transition, s.param, s.colour, s.camera); }
+
+void exit_defaults(ShotExit& e) { transition_defaults(e.transition, e.param, e.colour, e.camera); }
+
+ShotMix shot_mix(const std::vector<Shot>& shots, double t) {
+    ShotMix m;
+    const int n = (int)shots.size();
+    if (!n) return m;
+    int j = 0;
+    for (int i = 0; i < n; i++)
+        if (shots[(size_t)i].start <= t) j = i;
+    const Shot& sh = shots[(size_t)j];
+    // Before the first shot starts, it is already there.
+    double p = 1.0;
+    if (sh.transition != Transition::Cut && sh.duration > 1e-6 && t >= sh.start)
+        p = std::min((t - sh.start) / sh.duration, 1.0);
+    m.in = j;
+    m.u_in = p;
+    auto leaving = [&](int i) {
+        const ShotExit& e = shots[(size_t)i].exit;
+        const double from = shots[(size_t)i + 1].start + e.offset;
+        if (e.transition == Transition::Cut || e.duration <= 1e-6) return t >= from ? 1.0 : 0.0;
+        return std::clamp((t - from) / e.duration, 0.0, 1.0);
+    };
+    if (j > 0 && shots[(size_t)j - 1].exit.own) {
+        m.own = true;
+        const double u = leaving(j - 1);
+        if (u < 1.0) {
+            m.out = j - 1;
+            m.u_out = u;
+        }
+    }
+    // Gone early, before the next one arrives.
+    if (m.out < 0 && j + 1 < n && shots[(size_t)j].exit.own &&
+        t >= shots[(size_t)j + 1].start + shots[(size_t)j].exit.offset) {
+        m.own = true;
+        m.out = j;
+        m.in = -1;
+        m.u_out = leaving(j);
+    }
+    if (!m.own && p < 1.0) {
+        m.out = j - 1;
+        m.u_out = p;
+    }
+    return m;
 }
 
 bool SourceStyle::operator==(const SourceStyle& o) const {
@@ -484,6 +534,18 @@ std::string project_to_json(const RenderProject& p) {
         w.key("duration").raw(json_number_exact(s.duration));
         write_vecf(w, "params", s.param, 2);
         write_vecf(w, "colour", s.colour, 3);
+        w.field("camera", s.camera);
+        if (s.exit.own) {
+            const ShotExit& e = s.exit;
+            w.key("exit").object();
+            w.field("transition", kTransitionNames[(int)e.transition]);
+            w.key("duration").raw(json_number_exact(e.duration));
+            w.key("offset").raw(json_number_exact(e.offset));
+            write_vecf(w, "params", e.param, 2);
+            write_vecf(w, "colour", e.colour, 3);
+            w.field("camera", e.camera);
+            w.end();
+        }
         w.end();
     }
     w.end();
@@ -604,7 +666,21 @@ RenderProject project_from_json(const std::string& text) {
                 }
             read_vecf(o, "params", s.param, 2);
             read_vecf(o, "colour", s.colour, 3);
+            s.camera = get_bool(o, "camera", s.camera);
             s.duration = std::clamp(get_num(o, "duration", 1.0), 0.0, 3600.0);
+            if (const JsonValue* x = o.find("exit"); x && x->is_object()) {
+                ShotExit& e = s.exit;
+                e.own = true;
+                e.transition = (Transition)name_index(kTransitionNames, get_str(*x, "transition"),
+                                                      (int)Transition::Crossfade);
+                if (e.transition == Transition::Dip) e.transition = Transition::Crossfade;
+                exit_defaults(e);
+                read_vecf(*x, "params", e.param, 2);
+                read_vecf(*x, "colour", e.colour, 3);
+                e.camera = get_bool(*x, "camera", e.camera);
+                e.duration = std::clamp(get_num(*x, "duration", 1.0), 0.0, 3600.0);
+                e.offset = std::clamp(get_num(*x, "offset", 0.0), -3600.0, 3600.0);
+            }
             p.shots.push_back(s);
         }
         std::stable_sort(p.shots.begin(), p.shots.end(),

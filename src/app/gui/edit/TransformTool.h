@@ -35,6 +35,9 @@ struct XformFrame {
     double unit = 1.0;
     // One grid cell, in file units: what Ctrl snaps a move to.
     double grid_cell = 1.0;
+    // Several things that each move in their own frame on a local axis,
+    // each drawing its own; the one through the pivot would mislead.
+    bool each = false;
 };
 
 class TransformTool {
@@ -54,6 +57,9 @@ public:
     Result update(const ViewportInput& in, const XformFrame& f);
     // The step so far, in the shared frame.
     const spirula::Sim3& delta() const { return _delta; }
+    // Locked to an axis of the selection's own (the key pressed twice).
+    bool local() const { return _space == Space::Local && _axis >= 0; }
+    int axis() const { return _axis; }
 
     // The handles, when nothing is running: which one is under the pointer
     // (0..2 an axis, 3..5 the plane across it, 6 the free / view handle, -1).

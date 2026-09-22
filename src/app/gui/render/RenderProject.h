@@ -100,6 +100,25 @@ enum class Transition {
 };
 constexpr int kNumTransitions = 14;
 inline bool transition_in_3d(Transition t) { return t >= Transition::Sweep; }
+// The 3D ones with a way to go, which can take it from the camera: down the
+// screen, round its middle, rather than along the world's up.
+inline bool transition_has_camera(Transition t) {
+    return t == Transition::Sweep || t == Transition::Dust || t == Transition::Spiral ||
+           t == Transition::Rain || t == Transition::Ripple;
+}
+
+// How a shot leaves when not simply as the next one arrives: a transition
+// of its own, starting `offset` seconds after the next shot does (before
+// it, when negative). Every kind but a dip, which is the whole picture's.
+struct ShotExit {
+    bool own = false;
+    Transition transition = Transition::Crossfade;
+    double duration = 1.0;
+    double offset = 0.0;
+    float param[2] = {0.0f, 0.0f};
+    float colour[3] = {0.0f, 0.0f, 0.0f};
+    bool camera = false;
+};
 
 // From `start` on, `source` is what is shown, entering by `transition` over
 // `duration` seconds. Source -1 is the background alone.
@@ -108,12 +127,27 @@ struct Shot {
     int source = 0;
     Transition transition = Transition::Cut;
     double duration = 1.0;
-    // The transition's own settings; what each means is in shot_defaults.
+    // The transition's own settings; what each means is in transition_defaults.
     float param[2] = {0.0f, 0.0f};
     float colour[3] = {0.0f, 0.0f, 0.0f};
+    bool camera = false;
+    ShotExit exit;
 };
-// `s.transition`'s settings as they look best untouched.
+// `t`'s settings as they look best untouched, and the same for a shot's
+// way in and its way out.
+void transition_defaults(Transition t, float param[2], float colour[3], bool& camera);
 void shot_defaults(Shot& s);
+void exit_defaults(ShotExit& e);
+
+// The shots on screen at `t`, each through its way in or out: `in` the one
+// arriving or there, `out` the one going; `own` when `out` leaves its own
+// way, and each is then drawn on its own. -1 for none.
+struct ShotMix {
+    int in = -1, out = -1;
+    double u_in = 1.0, u_out = 1.0;
+    bool own = false;
+};
+ShotMix shot_mix(const std::vector<Shot>& shots, double t);
 
 struct Source {
     std::string path;                   // what was opened, as the viewer took it
