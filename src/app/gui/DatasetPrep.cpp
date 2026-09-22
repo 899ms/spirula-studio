@@ -96,10 +96,19 @@ bool is_image_file(const fs::path& p) {
 
 // Candidates ffmpeg resamples per frame kept. Adaptive selection picks from
 // them, so there have to be enough for the fastest rate it may ask for.
-int candidate_group(const PrepJob& job) {
+int candidate_group(const PrepJob& job, const PrepInput& in) {
+    if (every_frame(job, in)) return 1;
     const int window = std::max(job.sharp_window, 1);
     return job.adaptive_fps ? std::max(window, (int)std::ceil(job.adaptive_range))
                             : window;
+}
+
+// How ffmpeg is told to write every decoded frame exactly once: the image2
+// muxer is constant-rate by default, and pads or drops a variable-rate file to
+// fit. -vsync rather than -fps_mode, which ffmpeg before 5.1 rejects.
+void append_every_frame_args(std::vector<std::string>& argv, int max_frames) {
+    argv.insert(argv.end(), {"-vsync", "passthrough"});
+    if (max_frames > 0) argv.insert(argv.end(), {"-frames:v", std::to_string(max_frames)});
 }
 
 // Throw away what a previous run generated, for a step being re-done. Only
@@ -563,6 +572,7 @@ private:
 // One frame is written every this many source frames, from the kept frame rate
 // this input asked for and what the container says it holds.
 int frame_skip(float fps, double src_fps) {
+    if (!(fps > 0.0f)) return 1;
     return std::max(1, (int)std::lround(src_fps / std::max(fps, 0.01f)));
 }
 
@@ -1280,7 +1290,8 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
             std::vector<ScanRow> rows(job.inputs.size());
             for (size_t i = 0; i < job.inputs.size(); i++) {
                 rows[i].name = leaf_name(job.inputs[i].path);
-                rows[i].video = job.inputs[i].is_video;
+                rows[i].video = job.inputs[i].is_video &&
+                                !every_frame(job, job.inputs[i]);
                 if (!rows[i].video) rows[i].frames = planned[i];
             }
             _prog->scan_reset(std::move(rows));
@@ -1478,10 +1489,11 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
                         ? extract_360_ffmpeg(job, in, images, out, error)
                         : extract_video_ffmpeg(job, in, images, out, error);
     // The stems are candidate numbers, and the candidates were resampled at
-    // the kept rate times the group -- which is the rate that times them.
+    // the kept rate times the group -- which is the rate that times them. Every
+    // frame is not resampled, so its stems are source indices as above.
     if (ok)
         out.captures.push_back({in.subdir, in.path,
-                                (double)input_fps(job, in) * candidate_group(job),
+                                (double)input_fps(job, in) * candidate_group(job, in),
                                 lockstep_extraction(job, in, false)});
     return ok;
 }
@@ -1500,14 +1512,15 @@ static bool builtin_job(const PrepJob& job, const PrepInput& in,
     }
     if (frames) *frames = probe.frame_count;
     const double src_fps = probe.fps > 1.0 ? probe.fps : 30.0;
-    const int window = std::max(job.sharp_window, 1);
+    const bool every = every_frame(job, in);
+    const int window = every ? 1 : std::max(job.sharp_window, 1);
     fx.input = in.path;
     fx.device = job.device;
     fx.skip = frame_skip(input_fps(job, in), src_fps);
     fx.keep = window > 1 ? window : 0;
     fx.max_frames = job.max_frames;
     fx.sync_tracks = job.sync_tracks;
-    fx.adaptive = job.adaptive_fps;
+    fx.adaptive = job.adaptive_fps && !every;
     fx.adaptive_range = job.adaptive_range;
     fx.auto_rotate = job.auto_rotate;
     fx.quality = 95;
@@ -1532,7 +1545,7 @@ bool DatasetPrep::plan_group(const PrepJob& job, size_t at, std::string& error) 
     return true;
 #else
     if (!job.adaptive_fps || _plans.size() != job.inputs.size()) return true;
-    if (_planned[at]) return true;
+    if (_planned[at] || every_frame(job, job.inputs[at])) return true;
     const size_t g = fps_group(job.inputs, at);
     std::vector<size_t> rows;
     for (size_t i = 0; i < job.inputs.size(); i++)
@@ -1694,8 +1707,9 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         streams = facts.tracks.size();
     if (streams > 1) out.per_folder_cameras = true;
 
-    const int window = std::max(job.sharp_window, 1);
-    const int group = candidate_group(job);
+    const bool every = every_frame(job, in);
+    const int window = every ? 1 : std::max(job.sharp_window, 1);
+    const int group = candidate_group(job, in);
     const bool fisheye = streams > 1 && !facts.tracks.empty() &&
                          facts.tracks[0].first == facts.tracks[0].second;
     for (size_t tr = 0; tr < streams; tr++) {
@@ -1738,8 +1752,10 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         // to, which is what the built-in decoder's auto_rotate matches.
         std::vector<std::string> argv{job.ffmpeg_exe, "-nostdin", "-y"};
         if (!job.auto_rotate) argv.push_back("-noautorotate");
-        argv.insert(argv.end(), {"-i", track_path, "-vf", vf, "-qscale:v", "2",
-                                 (cand / "c_%06d.jpg").string()});
+        argv.insert(argv.end(), {"-i", track_path});
+        if (every) append_every_frame_args(argv, job.max_frames);
+        else argv.insert(argv.end(), {"-vf", vf});
+        argv.insert(argv.end(), {"-qscale:v", "2", (cand / "c_%06d.jpg").string()});
         const int max_frames = job.max_frames;
         int rc = exec(argv, [&progress, window, max_frames](const std::string& line) {
             const size_t at = line.find_first_not_of(" \t");
@@ -1763,8 +1779,10 @@ bool DatasetPrep::extract_video_ffmpeg(const PrepJob& job, const PrepInput& in,
         fs::create_directories(out_dir, ec);
         FrameSelectOptions so;
         so.group = group;
-        so.max_frames = job.max_frames;
-        so.adaptive = job.adaptive_fps;
+        // ffmpeg already stopped at the cap, which is where the built-in
+        // decoder stops too; spreading the cap would skip frames.
+        so.max_frames = every ? 0 : job.max_frames;
+        so.adaptive = job.adaptive_fps && !every;
         so.range = job.adaptive_range;
         so.window = window;
         if (fisheye) so.view = app::MotionView::Fisheye;
@@ -1880,8 +1898,9 @@ bool DatasetPrep::extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
                                  views[0].height}), /*detail=*/false);
 
     const fs::path ws = job.workspace;
-    const int window = std::max(job.sharp_window, 1);
-    const int group = candidate_group(job);
+    const bool every = every_frame(job, in);
+    const int window = every ? 1 : std::max(job.sharp_window, 1);
+    const int group = candidate_group(job, in);
     std::error_code ec;
 
     // ffmpeg decodes both tracks and cuts the overlap strips out; the warp is
@@ -1892,15 +1911,18 @@ bool DatasetPrep::extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
     const fs::path cand = ws / "frames_tmp";
     remove_tree(cand);
     fs::create_directories(cand, ec);
-    char pre[64];
-    std::snprintf(pre, sizeof pre, "fps=%g", (double)input_fps(job, in) * group);
+    char pre[64] = "";
+    if (!every)
+        std::snprintf(pre, sizeof pre, "fps=%g", (double)input_fps(job, in) * group);
     const std::string graph = app::pano360_graph(in.pano360, pre);
     // A 360 capture's geometry is the EAC layout, not the display matrix: the
     // built-in path leaves it alone and so must this one.
-    int rc = exec({job.ffmpeg_exe, "-nostdin", "-y", "-noautorotate", "-i", in.path,
-                   "-filter_complex", graph,
-                   "-map", std::string("[") + app::pano360_canvas_pad() + "]",
-                   "-qscale:v", "2", (cand / "c_%06d.jpg").string()});
+    std::vector<std::string> argv{job.ffmpeg_exe, "-nostdin", "-y", "-noautorotate",
+                                  "-i", in.path, "-filter_complex", graph, "-map",
+                                  std::string("[") + app::pano360_canvas_pad() + "]"};
+    if (every) append_every_frame_args(argv, job.max_frames);
+    argv.insert(argv.end(), {"-qscale:v", "2", (cand / "c_%06d.jpg").string()});
+    int rc = exec(argv);
     if (rc == kCancelled) { error = lmsg::err_cancelled.get(); return false; }
     if (rc != 0) {
         error = lmsg::err_ffmpeg_extract_failed.get();
@@ -1915,8 +1937,8 @@ bool DatasetPrep::extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
     fs::create_directories(kept, ec);
     FrameSelectOptions so;
     so.group = group;
-    so.max_frames = job.max_frames;
-    so.adaptive = job.adaptive_fps;
+    so.max_frames = every ? 0 : job.max_frames;
+    so.adaptive = job.adaptive_fps && !every;
     so.range = job.adaptive_range;
     so.window = window;
     so.view = app::MotionView::Packed360;

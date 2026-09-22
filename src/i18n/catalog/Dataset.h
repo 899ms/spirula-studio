@@ -2631,104 +2631,150 @@ SS_MSG(loop_closure_help_builtin,
 SS_MSG(frames_per_second_help,
     EN("How many frames to keep per second of video. 1-3 is right for a slow "
        "walkthrough; more only helps if the camera moved fast. A video with a "
-       "rate of its own uses that instead."),
+       "rate of its own uses that instead. "
+       "0 keeps every frame."),
     JA("動画1秒あたり何フレーム残すかです。ゆっくり歩いて撮ったなら 1〜3 が"
        "適切で、それ以上が効くのはカメラが速く動いたときだけです。個別の値を"
-       "入れた動画はそちらに従います。"),
+       "入れた動画はそちらに従います。"
+       "0 にするとすべてのフレームを残します。"),
     ZH_HANS("每秒视频保留多少帧。慢慢走着拍的话 1-3 就合适；更高只有在相机移动"
-            "很快时才有用。单独设了帧率的视频按各自的来。"),
+            "很快时才有用。单独设了帧率的视频按各自的来。"
+            "设为 0 则保留每一帧。"),
     ZH_HANT("每秒影片保留多少影格。慢慢走著拍的話 1-3 就合適；更高只有在相機移動"
-            "很快時才有用。單獨設了影格率的影片按各自的來。"),
+            "很快時才有用。單獨設了影格率的影片按各自的來。"
+            "設為 0 則保留每一影格。"),
     KO("동영상 1초당 몇 프레임을 남길지입니다. 천천히 걸으며 찍었다면 1~3이 "
        "알맞고, 그보다 높이는 건 카메라가 빠르게 움직였을 때만 도움이 됩니다. "
-       "자체 값이 있는 동영상은 그 값을 씁니다."),
+       "자체 값이 있는 동영상은 그 값을 씁니다. "
+       "0이면 모든 프레임을 남깁니다."),
     DE("Wie viele Bilder je Sekunde Video behalten werden. 1-3 passt für "
        "einen langsamen Rundgang; mehr hilft nur, wenn die Kamera schnell "
-       "bewegt wurde. Ein Video mit eigener Rate nimmt seine eigene."),
+       "bewegt wurde. Ein Video mit eigener Rate nimmt seine eigene. "
+       "0 behält jedes Bild."),
     FR("Combien d'images conserver par seconde de vidéo. 1 à 3 convient à une "
        "déambulation lente ; davantage n'aide que si la caméra bougeait vite. "
-       "Une vidéo ayant son propre débit garde le sien."),
+       "Une vidéo ayant son propre débit garde le sien. "
+       "0 conserve toutes les images."),
     ES("Cuántos fotogramas conservar por segundo de vídeo. De 1 a 3 va bien "
        "para un recorrido lento; más solo ayuda si la cámara se movía rápido. "
-       "Un vídeo con su propia tasa usa la suya."),
+       "Un vídeo con su propia tasa usa la suya. "
+       "0 conserva todos los fotogramas."),
     PT("Quantos quadros manter por segundo de vídeo. De 1 a 3 serve para um "
        "percurso lento; mais só ajuda se a câmera se moveu rápido. Um vídeo "
-       "com taxa própria usa a dele."),
+       "com taxa própria usa a dele. "
+       "0 mantém todos os quadros."),
     IT("Quanti fotogrammi tenere per ogni secondo di video. Da 1 a 3 va bene "
        "per una camminata lenta; di più serve solo se la fotocamera si "
-       "muoveva in fretta. Un video con una frequenza propria usa la sua."),
+       "muoveva in fretta. Un video con una frequenza propria usa la sua. "
+       "0 tiene tutti i fotogrammi."),
     NL("Hoeveel beelden per seconde video bewaard blijven. 1-3 past bij een "
        "rustige rondgang; meer helpt alleen als de camera snel bewoog. Een "
-       "video met een eigen tempo houdt dat van zichzelf."),
+       "video met een eigen tempo houdt dat van zichzelf. "
+       "0 bewaart elk beeld."),
     RU("Сколько кадров оставлять на секунду видео. 1-3 подходит для "
        "неторопливого обхода; больше помогает, только если камера двигалась "
-       "быстро. Видео со своей частотой берёт свою."),
+       "быстро. Видео со своей частотой берёт свою. "
+       "0 оставляет все кадры."),
     TR("Videonun her saniyesinden kaç karenin tutulacağı. Yavaş bir gezinti "
        "için 1-3 uygundur; daha fazlası yalnızca kamera hızlı hareket ettiyse "
-       "işe yarar. Kendi hızı olan video kendininkini kullanır."));
+       "işe yarar. Kendi hızı olan video kendininkini kullanır. "
+       "0 her kareyi tutar."));
 
 SS_MSG(frames_per_second_help_adaptive,
     EN("The AVERAGE number of frames to keep per second of video; where they "
        "fall is decided by how much the view changes. A video with a rate of "
-       "its own uses that instead."),
+       "its own uses that instead. "
+       "0 keeps every frame, which leaves nothing to space by motion."),
     JA("動画1秒あたり平均で何フレーム残すかです。どこで残すかは見えの変化量が"
-       "決めます。個別の値を入れた動画はそちらに従います。"),
+       "決めます。個別の値を入れた動画はそちらに従います。"
+       "0 にするとすべてのフレームを残すので、動きで間隔を変える余地はなくなり"
+       "ます。"),
     ZH_HANS("每秒视频平均保留多少帧；具体取在哪里由画面变化量决定。单独设了帧率"
-            "的视频按各自的来。"),
+            "的视频按各自的来。"
+            "设为 0 则保留每一帧，也就没有按运动调整的余地了。"),
     ZH_HANT("每秒影片平均保留多少影格；具體取在哪裡由畫面變化量決定。單獨設了影格率"
-            "的影片按各自的來。"),
+            "的影片按各自的來。"
+            "設為 0 則保留每一影格，也就沒有依運動調整的空間了。"),
     KO("동영상 1초당 평균 몇 프레임을 남길지입니다. 어디서 남길지는 시야가 바뀐 "
-       "정도가 정합니다. 자체 값이 있는 동영상은 그 값을 씁니다."),
+       "정도가 정합니다. 자체 값이 있는 동영상은 그 값을 씁니다. "
+       "0이면 모든 프레임을 남기므로 움직임에 따라 간격을 조절할 여지가 없습니다."),
     DE("Wie viele Bilder je Sekunde Video im DURCHSCHNITT behalten werden; wo "
        "sie liegen, entscheidet die Änderung des Blicks. Ein Video mit eigener "
-       "Rate nimmt seine eigene."),
+       "Rate nimmt seine eigene. "
+       "0 behält jedes Bild; dann bleibt nichts nach der Bewegung zu "
+       "verteilen."),
     FR("Le nombre MOYEN d'images conservées par seconde de vidéo ; leur "
        "emplacement suit le changement de vue. Une vidéo ayant son propre "
-       "débit garde le sien."),
+       "débit garde le sien. "
+       "0 conserve toutes les images ; il ne reste alors rien à répartir "
+       "selon le mouvement."),
     ES("El número MEDIO de fotogramas conservados por segundo de vídeo; dónde "
        "caen lo decide cuánto cambia la vista. Un vídeo con su propia tasa usa "
-       "la suya."),
+       "la suya. "
+       "0 conserva todos los fotogramas, y entonces no queda nada que "
+       "repartir según el movimiento."),
     PT("O número MÉDIO de quadros guardados por segundo de vídeo; onde caem "
-       "depende de quanto a vista muda. Um vídeo com taxa própria usa o dele."),
+       "depende de quanto a vista muda. Um vídeo com taxa própria usa o dele. "
+       "0 mantém todos os quadros, e então não sobra nada para espaçar pelo "
+       "movimento."),
     IT("Il numero MEDIO di fotogrammi tenuti per secondo di video; dove "
        "cadono lo decide quanto cambia la vista. Un video con una frequenza "
-       "propria usa la sua."),
+       "propria usa la sua. "
+       "0 tiene tutti i fotogrammi, e allora non resta nulla da distribuire "
+       "secondo il movimento."),
     NL("Het GEMIDDELDE aantal beelden per seconde video; waar ze vallen "
        "bepaalt hoeveel het beeld verandert. Een video met een eigen tempo "
-       "houdt dat van zichzelf."),
+       "houdt dat van zichzelf. "
+       "0 bewaart elk beeld; dan valt er niets meer naar de beweging te "
+       "spreiden."),
     RU("СРЕДНЕЕ число кадров, оставляемых на секунду видео; где именно они "
-       "придутся, решает изменение вида. Видео со своей частотой берёт свою."),
+       "придутся, решает изменение вида. Видео со своей частотой берёт свою. "
+       "0 оставляет все кадры, и распределять по движению уже нечего."),
     TR("Videonun her saniyesinden ORTALAMA kaç kare tutulacağı; nereye "
        "düşecekleri görüntünün ne kadar değiştiğine bağlıdır. Kendi hızı olan "
-       "video kendininkini kullanır."));
+       "video kendininkini kullanır. "
+       "0 her kareyi tutar; o zaman harekete göre aralanacak bir şey kalmaz."));
 
 SS_MSG(video_fps_this_one_help,
     EN("Frames per second for this video alone. \"^\" is following the video "
-       "above it; type that rate back in to go back to following."),
+       "above it; type that rate back in to go back to following. "
+       "0 keeps every frame of it."),
     JA("この動画だけの毎秒フレーム数です。「^」は上の動画に従っている印で、"
-       "上と同じ値を入れ直すとまた従います。"),
+       "上と同じ値を入れ直すとまた従います。"
+       "0 にするとこの動画のすべてのフレームを残します。"),
     ZH_HANS("仅用于这个视频的每秒帧数。「^」表示跟随上面那个视频；改回上面的值"
-            "就重新跟随。"),
+            "就重新跟随。"
+            "设为 0 则保留它的每一帧。"),
     ZH_HANT("僅用於這個影片的每秒影格數。「^」表示跟隨上面那個影片；改回上面的"
-            "值就重新跟隨。"),
+            "值就重新跟隨。"
+            "設為 0 則保留它的每一影格。"),
     KO("이 동영상에만 적용되는 초당 프레임 수입니다. \"^\"는 위 동영상을 따르고 "
-       "있다는 뜻이며, 그 값을 다시 입력하면 다시 따릅니다."),
+       "있다는 뜻이며, 그 값을 다시 입력하면 다시 따릅니다. "
+       "0이면 이 동영상의 모든 프레임을 남깁니다."),
     DE("Bilder je Sekunde nur für dieses Video. \"^\" heißt, es folgt dem Video "
-       "darüber; die Rate wieder eintragen, und es folgt erneut."),
+       "darüber; die Rate wieder eintragen, und es folgt erneut. "
+       "0 behält jedes seiner Bilder."),
     FR("Images par seconde pour cette vidéo seule. « ^ » signifie qu'elle suit "
-       "la vidéo au-dessus ; retapez ce débit pour qu'elle la suive à nouveau."),
+       "la vidéo au-dessus ; retapez ce débit pour qu'elle la suive à nouveau. "
+       "0 en conserve toutes les images."),
     ES("Fotogramas por segundo solo para este vídeo. «^» es que sigue al vídeo "
-       "de arriba; vuelve a escribir esa tasa para que lo siga otra vez."),
+       "de arriba; vuelve a escribir esa tasa para que lo siga otra vez. "
+       "0 conserva todos sus fotogramas."),
     PT("Quadros por segundo só para este vídeo. \"^\" é seguir o vídeo acima; "
-       "escreva essa taxa outra vez para voltar a segui-lo."),
+       "escreva essa taxa outra vez para voltar a segui-lo. "
+       "0 mantém todos os quadros dele."),
     IT("Fotogrammi al secondo solo per questo video. \"^\" vuol dire che segue "
-       "il video qui sopra; riscrivi quella frequenza e torna a seguirlo."),
+       "il video qui sopra; riscrivi quella frequenza e torna a seguirlo. "
+       "0 ne tiene tutti i fotogrammi."),
     NL("Beelden per seconde alleen voor deze video. \"^\" is de video hierboven "
-       "volgen; typ dat tempo terug om weer te volgen."),
+       "volgen; typ dat tempo terug om weer te volgen. "
+       "0 bewaart er elk beeld van."),
     RU("Кадров в секунду только для этого видео. «^» значит, что оно следует за "
-       "видео выше; введите ту же частоту, чтобы снова следовать."),
+       "видео выше; введите ту же частоту, чтобы снова следовать. "
+       "0 оставляет все его кадры."),
     TR("Yalnızca bu video için saniyedeki kare sayısı. \"^\", üstündeki videoyu "
-       "izlediği anlamına gelir; o hızı yeniden yazınca yine izler."));
+       "izlediği anlamına gelir; o hızı yeniden yazınca yine izler. "
+       "0 onun her karesini tutar."));
 
 SS_MSG(adaptive_fps,
     EN("Adapt the rate to the motion"),
@@ -2788,6 +2834,32 @@ SS_MSG(adaptive_fps_help,
     TR("Kamera hızlı giderken ya da bir şeyin yakınından geçerken daha çok, "
        "yerinde dönerken ya da uzağa bakarken daha az kare tut. Yukarıdaki "
        "hız ortalama olur. Her video için bir ek geçişe mal olur."));
+
+SS_MSG(adaptive_fps_every_frame,
+    EN("Every video keeps every frame (0 fps), so adapting the rate to the "
+       "motion has no effect."),
+    JA("どの動画もすべてのフレームを残す設定（0 fps）なので、動きに合わせた"
+       "レート調整は効きません。"),
+    ZH_HANS("所有视频都保留每一帧（0 fps），按运动调整帧率不会起作用。"),
+    ZH_HANT("所有影片都保留每一影格（0 fps），依運動調整影格率不會起作用。"),
+    KO("모든 동영상이 모든 프레임을 남기므로(0 fps) 움직임에 맞춘 속도 조절은 "
+       "효과가 없습니다."),
+    DE("Jedes Video behält jedes Bild (0 fps), die Anpassung an die Bewegung "
+       "wirkt daher nicht."),
+    FR("Chaque vidéo conserve toutes ses images (0 fps) : adapter le débit au "
+       "mouvement n'a donc aucun effet."),
+    ES("Todos los vídeos conservan todos sus fotogramas (0 fps), así que "
+       "adaptar la tasa al movimiento no tiene efecto."),
+    PT("Todos os vídeos mantêm todos os quadros (0 fps), então adaptar a taxa "
+       "ao movimento não tem efeito."),
+    IT("Ogni video tiene tutti i fotogrammi (0 fps), quindi adattare la "
+       "frequenza al movimento non ha effetto."),
+    NL("Elke video bewaart elk beeld (0 fps), dus het tempo aanpassen aan de "
+       "beweging doet niets."),
+    RU("Каждое видео оставляет все кадры (0 fps), поэтому подстройка частоты "
+       "под движение ни на что не влияет."),
+    TR("Her video her kareyi tutuyor (0 fps), bu yüzden hızı harekete göre "
+       "ayarlamanın etkisi yok."));
 
 SS_MSG(adaptive_range,
     EN("Spread"),

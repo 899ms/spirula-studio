@@ -654,9 +654,9 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("adaptive_fps", cfg_str(j.prep.adaptive_fps));
     if (j.prep.adaptive_fps) line("adaptive_range", cfg_str(j.prep.adaptive_range));
     for (const PrepInput& s : _sources)
-        if (s.is_video && s.fps > 0.0f)
+        if (s.is_video && s.fps != 0.0f)
             line("video_fps:" + (s.subdir.empty() ? s.path : s.subdir),
-                 cfg_str(s.fps));
+                 cfg_str(std::max(s.fps, 0.0f)));
     line("sharp_window", std::to_string(j.prep.sharp_window));
     line("sync_tracks", cfg_str(j.prep.sync_tracks));
     line("max_frames", std::to_string(j.prep.max_frames));
@@ -3362,21 +3362,21 @@ void GuiApp::draw_sensor_badge(const PrepInput& s) {
 
 namespace {
 
-// The rate box's text. The first video spells its rate out with the unit, since
-// it is the one the rest of the list is written against; every row below it
-// shows the caret the lens column uses for the same idea.
+// The rate box's text, with the unit; "0 fps" is every frame. A row following
+// the one above shows the caret the lens column uses for the same idea.
 std::string fps_label(float fps) {
-    if (!(fps > 0.0f)) return "^";
     char b[32];
-    std::snprintf(b, sizeof b, "%g fps", (double)fps);
+    std::snprintf(b, sizeof b, "%g fps", (double)std::max(fps, 0.0f));
     return b;
 }
 
-// And back: a number is a rate (with or without the unit typed back), and
-// anything else -- or the rate the row above is already on -- means "^".
-float parse_fps(const std::string& text, float above) {
-    const double v = std::atof(text.c_str());
-    if (!(v > 0.0) || (float)v == above) return 0.0f;
+// And back: a number is a rate, with or without the unit typed back, and 0 is
+// every frame. Nothing readable is nullopt.
+std::optional<float> parse_fps(const std::string& text) {
+    const char* first = text.c_str();
+    char* end = nullptr;
+    const double v = std::strtod(first, &end);
+    if (end == first || !(v >= 0.0)) return std::nullopt;
     return (float)v;
 }
 
@@ -3461,18 +3461,22 @@ void GuiApp::draw_dataset_source() {
                 }
                 std::string& text = _fps_text[i];
                 if (_fps_editing != (int)i)
-                    text = fps_label(head ? _sfm_job.prep.video_fps : s.fps);
+                    text = head ? fps_label(_sfm_job.prep.video_fps)
+                                : s.fps == 0.0f ? std::string("^") : fps_label(s.fps);
                 ui::InputTextRaw("##fps", &text);
                 if (ImGui::IsItemActive()) _fps_editing = (int)i;
                 else if (_fps_editing == (int)i) _fps_editing = -1;
                 if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    const float v = parse_fps(text, above);
+                    const std::optional<float> v = parse_fps(text);
                     // A head row cannot be a caret: an unreadable answer there
                     // leaves the rate where it was rather than at nothing.
+                    // Below it, that answer or the rate above is the caret.
                     if (head) {
-                        if (v > 0.0f) _sfm_job.prep.video_fps = v;
+                        if (v) _sfm_job.prep.video_fps = *v;
                     } else {
-                        s.fps = v;
+                        s.fps = !v || *v == above ? 0.0f
+                                : *v > 0.0f       ? *v
+                                                  : kFpsEveryFrame;
                     }
                     edited = true;
                 }
@@ -3812,6 +3816,9 @@ void GuiApp::draw_dataset_basics() {
         ImGui::BeginDisabled(dataset_locked(Stage::Frames));
         ui::Checkbox(dmsg::adaptive_fps, &_sfm_job.prep.adaptive_fps);
         ui::help_on_hover(dmsg::adaptive_fps_help);
+        if (_sfm_job.prep.adaptive_fps &&
+            all_videos_every_frame(_sources, _sfm_job.prep.video_fps))
+            ui::TextColoredWrapped(kWarn, dmsg::adaptive_fps_every_frame);
         if (_sfm_job.prep.adaptive_fps) {
             ImGui::Indent();
             ImGui::SetNextItemWidth(px(220.0f));

@@ -87,6 +87,33 @@ int main() {
                "a list that states nothing is all on the dataset's rate");
     }
 
+    // Every frame is a rate of 0 on the job and kFpsEveryFrame on a row, whose
+    // own 0 is already "^".
+    {
+        gui::PrepJob j = two_clips();
+        j.video_fps = 0.0f;
+        expect(gui::input_fps(j.inputs, j.video_fps, 1) == 0.0f &&
+                   gui::every_frame(j, j.inputs[1]),
+               "a job at 0 fps keeps every frame of every row");
+        expect(gui::all_videos_every_frame(j.inputs, j.video_fps),
+               "and says so for the adaptive warning");
+        j.inputs[1].fps = 3.0f;
+        expect(!gui::every_frame(j, j.inputs[1]) &&
+                   !gui::all_videos_every_frame(j.inputs, j.video_fps),
+               "a row with a rate of its own is not every frame");
+
+        gui::PrepJob k = two_clips();
+        k.inputs[1].fps = gui::kFpsEveryFrame;
+        expect(!gui::every_frame(k, k.inputs[0]) && gui::every_frame(k, k.inputs[1]),
+               "a row set to every frame leaves the one above alone");
+        expect(gui::fps_group(k.inputs, 1) == 1, "and opens a group");
+        expect(!gui::all_videos_every_frame(k.inputs, k.video_fps),
+               "one row at a rate is enough to keep adaptive meaningful");
+    }
+    moves("every-frame row", [](gui::PrepJob& j) {
+        j.inputs[1].fps = gui::kFpsEveryFrame;
+    });
+
     std::printf(g_failures ? "\nFAILED: %d\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;
 }

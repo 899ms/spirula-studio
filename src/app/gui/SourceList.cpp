@@ -296,16 +296,17 @@ void normalize_source_fps(std::vector<PrepInput>& sources, float& video_fps) {
     bool first = true;
     for (PrepInput& s : sources) {
         if (!s.is_video) continue;
+        const float rate = std::max(s.fps, 0.0f);
         if (first) {
-            if (s.fps > 0.0f) video_fps = s.fps;
-            if (!(video_fps > 0.0f)) video_fps = 2.0f;
+            if (s.fps != 0.0f) video_fps = rate;
+            if (!(video_fps >= 0.0f)) video_fps = 2.0f;
             s.fps = 0.0f;
             above = video_fps;
             first = false;
-        } else if (s.fps == above) {
+        } else if (s.fps != 0.0f && rate == above) {
             s.fps = 0.0f;
-        } else if (s.fps > 0.0f) {
-            above = s.fps;
+        } else if (s.fps != 0.0f) {
+            above = rate;
         }
     }
 }

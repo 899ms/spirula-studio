@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -105,6 +107,31 @@ void analyze(const std::string& path, int mw, int mh, bool top_rows,
             out.grey[i] = (uint8_t)std::min(255.0f, std::max(0.0f, f[i] + 0.5f));
     }
     if (exr_rgb.empty()) stbi_image_free(img);
+}
+
+bool same_bytes(const fs::path& a, const fs::path& b) {
+    std::ifstream fa(a, std::ios::binary), fb(b, std::ios::binary);
+    if (!fa || !fb) return false;
+    return std::equal(std::istreambuf_iterator<char>(fa), std::istreambuf_iterator<char>(),
+                      std::istreambuf_iterator<char>(fb), std::istreambuf_iterator<char>());
+}
+
+// ffmpeg's fps filter repeats a source frame to reach a rate above the
+// source's, and the repeats encode to the same bytes. Each candidate's first
+// copy, so a frame is kept once however many groups choose it.
+std::vector<size_t> first_copies(const std::vector<fs::path>& files) {
+    std::vector<size_t> first(files.size());
+    uintmax_t prev = (uintmax_t)-1;
+    for (size_t i = 0; i < files.size(); i++) {
+        std::error_code ec;
+        const uintmax_t size = fs::file_size(files[i], ec);
+        first[i] = i;
+        if (i > 0 && size != (uintmax_t)-1 && size == prev &&
+            same_bytes(files[i - 1], files[i]))
+            first[i] = first[i - 1];
+        prev = size;
+    }
+    return first;
 }
 
 }  // namespace
@@ -212,8 +239,19 @@ int select_sharpest_frames(const std::string& cand_dir,
     }
 
     // Which candidates survive: one per group, or one per equal share of view
-    // change with the sharpest of the window around it.
+    // change with the sharpest of the window around it. What an earlier pick
+    // already took, itself or a repeat of it, is not a candidate again.
+    const std::vector<size_t> first = first_copies(files);
+    std::vector<bool> taken(files.size(), false);
     std::vector<size_t> keep;
+    auto take = [&](size_t g0, size_t g1) {
+        size_t best = g1;
+        for (size_t i = g0; i < g1; i++)
+            if (!taken[first[i]] && (best == g1 || scores[i] > scores[best])) best = i;
+        if (best == g1) return;
+        taken[first[best]] = true;
+        keep.push_back(best);
+    };
     if (tracker) {
         tracker->finish();
         const int window = std::max(options.window, 1);
@@ -230,22 +268,13 @@ int select_sharpest_frames(const std::string& cand_dir,
         const std::vector<int64_t>& plan = planned[0];
         for (int64_t at : plan) {
             const size_t g1 = (size_t)at + 1;
-            const size_t g0 = g1 > (size_t)window ? g1 - (size_t)window : 0;
-            size_t best = g0;
-            for (size_t i = g0 + 1; i < g1; i++)
-                if (scores[i] > scores[best]) best = i;
-            if (keep.empty() || keep.back() != best) keep.push_back(best);
+            take(g1 > (size_t)window ? g1 - (size_t)window : 0, g1);
         }
         if (options.planned) options.planned(plan, (int64_t)files.size());
     }
     if (keep.empty())
-        for (size_t g0 = 0; g0 < files.size(); g0 += (size_t)group) {
-            const size_t g1 = std::min(g0 + (size_t)group, files.size());
-            size_t best = g0;
-            for (size_t i = g0 + 1; i < g1; i++)
-                if (scores[i] > scores[best]) best = i;
-            keep.push_back(best);
-        }
+        for (size_t g0 = 0; g0 < files.size(); g0 += (size_t)group)
+            take(g0, std::min(g0 + (size_t)group, files.size()));
 
     fs::create_directories(out_dir, ec);
     std::vector<bool> kept_flag(files.size(), false);

@@ -85,6 +85,10 @@ struct SubCamera {
 // shared letters that join rows across inputs (SfmRunner::build_rigs).
 inline constexpr int kRigNone = 0, kRigOwn = 1, kRigFirstShared = 2, kRigShared = 4;
 
+// PrepInput::fps for "every frame" -- a 0 there already means "^". Everywhere
+// else, a rate of 0 is every frame.
+inline constexpr float kFpsEveryFrame = -1.0f;
+
 // One thing the user picked: a video file, or a folder of photos. A job holds
 // a list of them, because a capture is often shot as several clips, or on a rig
 // whose lenses each write their own file -- and those only reconstruct together
@@ -237,7 +241,8 @@ struct PrepJob {
     // panoramas and pinhole faces in one image tree describes no camera rig.
     app::Pano360Options pano;
 
-    // Kept frames per second; PrepInput::fps overrides it per video.
+    // Kept frames per second, 0 = every frame; PrepInput::fps overrides it
+    // per video.
     float video_fps = 2.0f;
     // Space them by view change rather than by time (app/FrameMotion.h): the
     // rate above becomes the average and stays within `adaptive_range` of it.
@@ -298,15 +303,16 @@ struct PrepJob {
     std::string python_exe = "python3";
 };
 
-// The rate a row is actually extracted at. 0 means "the same as the row above",
-// which is how the lens column already spells a decision made once for a run of
-// clips; the first row falls back to the dataset's own rate.
+// The rate a row is actually extracted at (0 = every frame). A row's 0 means
+// "the same as the row above", as the lens column spells a decision made once
+// for a run of clips; the first row falls back to the dataset's own rate.
 inline float input_fps(const std::vector<PrepInput>& inputs, float dataset_fps,
                        size_t at) {
     for (size_t k = std::min(at, inputs.size() - (inputs.empty() ? 0 : 1)) + 1;
          k-- > 0;)
-        if (k < inputs.size() && inputs[k].fps > 0.0f) return inputs[k].fps;
-    return dataset_fps;
+        if (k < inputs.size() && inputs[k].fps != 0.0f)
+            return std::max(inputs[k].fps, 0.0f);
+    return std::max(dataset_fps, 0.0f);
 }
 
 // Rows extracted at one rate, named by the one that states it -- so an adaptive
@@ -315,7 +321,7 @@ inline float input_fps(const std::vector<PrepInput>& inputs, float dataset_fps,
 inline size_t fps_group(const std::vector<PrepInput>& inputs, size_t at) {
     size_t g = 0;
     for (size_t k = 1; k <= at && k < inputs.size(); k++)
-        if (inputs[k].fps > 0.0f) g = k;
+        if (inputs[k].fps != 0.0f) g = k;
     return g;
 }
 
@@ -328,6 +334,23 @@ inline size_t input_index(const PrepJob& job, const PrepInput& in) {
 
 inline float input_fps(const PrepJob& job, const PrepInput& in) {
     return input_fps(job.inputs, job.video_fps, input_index(job, in));
+}
+
+// No selection happens at all: no sharpness window, no motion plan.
+inline bool every_frame(const PrepJob& job, const PrepInput& in) {
+    return in.is_video && !(input_fps(job, in) > 0.0f);
+}
+
+// Nothing left for adaptive spacing to decide, which the panel warns about.
+inline bool all_videos_every_frame(const std::vector<PrepInput>& inputs,
+                                   float dataset_fps) {
+    bool any = false;
+    for (size_t i = 0; i < inputs.size(); i++) {
+        if (!inputs[i].is_video) continue;
+        if (input_fps(inputs, dataset_fps, i) > 0.0f) return false;
+        any = true;
+    }
+    return any;
 }
 
 // Images read where they are instead of gathered into the dataset's own
