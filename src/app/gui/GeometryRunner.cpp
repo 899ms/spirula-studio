@@ -5,6 +5,7 @@
 #include "app/FrameMask.h"
 #include "app/AppPaths.h"
 #include "app/gui/Subprocess.h"
+#include "core/ModelMirror.h"
 #include "i18n/Locale.h"
 #include "i18n/catalog/Dataset.h"
 #include "i18n/catalog/Geometry.h"
@@ -172,7 +173,7 @@ std::vector<PendingDownload> geometry_model_downloads(const std::string& id) {
     auto want = [&](const nn::FetchFile& f) {
         if (!f.file) return;
         const std::string dest = nn::cached_path(f);
-        if (!file_is_cached(dest, f.bytes)) out.push_back({f.url, dest, f.bytes});
+        if (!file_is_cached(dest, f.bytes)) out.push_back({f.url, dest, f.bytes, spirula::model_mirror_url(f.file)});
     };
     if (const moge::ModelSource* m = moge::find_model_source(id)) {
         want(m->onnx);

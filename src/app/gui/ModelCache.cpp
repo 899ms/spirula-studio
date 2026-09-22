@@ -5,6 +5,7 @@
 
 #include "app/AppPaths.h"
 #include "app/gui/Subprocess.h"
+#include "core/ModelMirror.h"
 
 #include "i18n/catalog/Dataset.h"
 
@@ -112,7 +113,7 @@ FileDownload::~FileDownload() {
 }
 
 void FileDownload::start(const std::string& url, const std::string& dest,
-                         uint64_t expected_bytes) {
+                         uint64_t expected_bytes, const std::string& mirror) {
     if (_state.load() == State::Running) return;
     if (_worker.joinable()) _worker.join();
     _cancel = false;
@@ -123,13 +124,16 @@ void FileDownload::start(const std::string& url, const std::string& dest,
         _path.clear();
     }
     _state = State::Running;
-    _worker = std::thread([this, url, dest, expected_bytes] {
-        run(url, dest, expected_bytes);
+    std::vector<std::string> urls{url};
+    if (!mirror.empty()) urls.push_back(mirror);
+    _worker = std::thread([this, urls, dest, expected_bytes] {
+        run(urls, dest, expected_bytes);
     });
 }
 
 void FileDownload::start(const ModelEntry& e) {
-    start(std::string(kBaseUrl) + e.file, model_path(e), e.bytes);
+    start(std::string(kBaseUrl) + e.file, model_path(e), e.bytes,
+          spirula::model_mirror_url(e.file));
 }
 
 void FileDownload::cancel() { _cancel = true; }
@@ -157,34 +161,14 @@ void FileDownload::log(const std::string& line) {
     if (_log.size() > 500) _log.erase(_log.begin(), _log.begin() + 200);
 }
 
-void FileDownload::run(std::string url, std::string dest,
-                       uint64_t expected_bytes) {
-    auto fail = [&](const std::string& why) {
-        std::lock_guard<std::mutex> lk(_mu);
-        _status = why;
-        _state = _cancel.load() ? State::Cancelled : State::Failed;
-    };
-
-    const fs::path dst = dest;
-    std::error_code ec;
-    fs::create_directories(dst.parent_path(), ec);
-    if (ec) return fail("cannot create " + dst.parent_path().string());
-
-    if (!command_exists("curl"))
-        return fail("curl was not found. Install curl, or download\n" + url +
-                    "\nto " + dst.string() + " by hand.");
-
-    fs::path part = dst;
-    part += ".part";
-
-    log("Downloading " + dst.filename().string() + " (" +
-        human_bytes(expected_bytes) + ")");
-    // -C - resumes a partial .part file, so a cancelled or dropped download
-    // does not start over. --progress-bar writes "###...  42.0%" to stderr;
-    // that percentage is the only progress the GUI needs.
-    const int rc = run_process(
-        {"curl", "-L", "-f", "--progress-bar", "-C", "-", "-o", part.string(),
-         url},
+int FileDownload::fetch(const std::string& url, const std::string& part,
+                        uint64_t expected_bytes) {
+    // -C - resumes a cancelled download. The timeouts make a blocked host fail
+    // over to the mirror instead of hanging. --progress-bar's "42.0%" on stderr
+    // is the only progress the GUI needs.
+    return run_process(
+        {"curl", "-L", "-f", "--progress-bar", "-C", "-", "--connect-timeout", "30",
+         "--speed-limit", "1024", "--speed-time", "60", "-o", part, url},
         "",
         [&](const std::string& line) {
             size_t pct = line.find('%');
@@ -209,16 +193,46 @@ void FileDownload::run(std::string url, std::string dest,
             log(line);
         },
         _cancel);
+}
 
-    if (rc == kCancelled) {
+void FileDownload::run(std::vector<std::string> urls, std::string dest,
+                       uint64_t expected_bytes) {
+    auto fail = [&](const std::string& why) {
+        std::lock_guard<std::mutex> lk(_mu);
+        _status = why;
+        _state = _cancel.load() ? State::Cancelled : State::Failed;
+    };
+
+    const fs::path dst = dest;
+    std::error_code ec;
+    fs::create_directories(dst.parent_path(), ec);
+    if (ec) return fail("cannot create " + dst.parent_path().string());
+
+    if (!command_exists("curl"))
+        return fail("curl was not found. Install curl, or download\n" + urls[0] +
+                    "\nto " + dst.string() + " by hand.");
+
+    fs::path part = dst;
+    part += ".part";
+
+    log("Downloading " + dst.filename().string() + " (" +
+        human_bytes(expected_bytes) + ")");
+    int rc = 0;
+    for (size_t i = 0; i < urls.size(); i++) {
+        if (i > 0) {
+            log("Download from " + urls[i - 1] + " failed (curl exit " +
+                std::to_string(rc) + "); trying " + urls[i]);
+            _progress = -1.0f;
+        }
+        rc = fetch(urls[i], part.string(), expected_bytes);
         // The .part file stays: -C - picks it up if the user tries again.
-        return fail("cancelled");
-    }
-    if (rc != 0) {
+        if (rc == kCancelled) return fail("cancelled");
+        if (rc == 0) break;
         fs::remove(part, ec);
+    }
+    if (rc != 0)
         return fail("download failed (curl exit " + std::to_string(rc) +
                     "); see the log");
-    }
 
     fs::rename(part, dst, ec);
     if (ec) return fail("cannot move the download into place: " + ec.message());
@@ -253,7 +267,7 @@ void DownloadQueue::pump() {
     if (_rest.empty()) return;
     const PendingDownload d = _rest.front();
     _rest.erase(_rest.begin());
-    _dl.start(d.url, d.dest, d.bytes);
+    _dl.start(d.url, d.dest, d.bytes, d.mirror);
 }
 
 void DownloadQueue::cancel() {

@@ -7,6 +7,7 @@
 #include "app/gui/ReconStamp.h"
 
 #include "core/Env.h"
+#include "core/ModelMirror.h"
 
 #include "i18n/catalog/Log.h"
 #include "app/AppPaths.h"
@@ -388,11 +389,18 @@ std::string ColmapRunner::resolve_vocab_tree(const ColmapJob& job) {
     }
     fs::path tmp = dst;
     tmp += ".part";
-    int rc = exec({"curl", "-L", "-f", "--progress-bar",
-                   "-o", tmp.string(), kVocabTreeUrl});
+    int rc = 1;
+    for (const std::string& url : {std::string(kVocabTreeUrl),
+                                   spirula::model_mirror_url(kVocabTreeName)}) {
+        rc = exec({"curl", "-L", "-f", "--progress-bar", "--connect-timeout", "30",
+                   "--speed-limit", "1024", "--speed-time", "60",
+                   "-o", tmp.string(), url});
+        if (rc == 0 || rc == kCancelled) break;
+        fs::remove(tmp, ec);
+        log("vocabulary tree download from " + url + " failed");
+    }
     if (rc != 0) {
         fs::remove(tmp, ec);
-        log("vocabulary tree download failed");
         return "";
     }
     fs::rename(tmp, dst, ec);

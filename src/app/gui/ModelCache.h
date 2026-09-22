@@ -85,9 +85,9 @@ public:
     ~FileDownload();
 
     // `expected_bytes` is only used for the progress readout; curl reports the
-    // real length. 0 means unknown.
+    // real length. 0 means unknown. `mirror`, if set, is tried when `url` fails.
     void start(const std::string& url, const std::string& dest,
-               uint64_t expected_bytes);
+               uint64_t expected_bytes, const std::string& mirror = "");
     void start(const ModelEntry& e);
     void cancel();
 
@@ -99,7 +99,8 @@ public:
     std::vector<std::string> drain_log();
 
 private:
-    void run(std::string url, std::string dest, uint64_t expected_bytes);
+    void run(std::vector<std::string> urls, std::string dest, uint64_t expected_bytes);
+    int fetch(const std::string& url, const std::string& part, uint64_t expected_bytes);
     void log(const std::string& line);
 
     std::thread _worker;
@@ -119,6 +120,7 @@ using ModelDownload = FileDownload;
 struct PendingDownload {
     std::string url, dest;
     uint64_t bytes = 0;
+    std::string mirror;
 };
 
 // Several of them, fetched one at a time: a checkpoint that comes in two

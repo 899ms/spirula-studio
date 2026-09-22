@@ -15,6 +15,7 @@
 
 #include "app/AppPaths.h"
 #include "app/gui/Subprocess.h"
+#include "core/ModelMirror.h"
 #ifdef SS_TOOL_SFM
 // The stage tags the child prints and the manifest it reads; a build without the
 // module has no child to run (see availability()).
@@ -153,7 +154,7 @@ std::vector<PendingDownload> sfm_feature_downloads(int features, int matcher) {
 #if defined(SS_TOOL_SFM) && defined(SS_HAVE_ALIKED) && SS_HAVE_ALIKED
     auto take = [&](const nn::FetchFile& f) {
         const std::string dest = nn::cached_path(f);
-        if (!file_is_cached(dest, f.bytes)) out.push_back({f.url, dest, f.bytes});
+        if (!file_is_cached(dest, f.bytes)) out.push_back({f.url, dest, f.bytes, spirula::model_mirror_url(f.file)});
     };
     auto want_aliked = [&](const char* id) {
         if (const aliked::ModelSource* src = aliked::find_model_source(id)) take(src->onnx);

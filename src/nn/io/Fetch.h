@@ -7,9 +7,9 @@
 // Everything below that -- where it lands, how it is verified, what happens to
 // a half-finished download -- is not, and there is one copy of it here.
 //
-// Nothing is bundled and nothing of ours is hosted anywhere, so the bytes we
-// run are the bytes the reference implementation runs and a parity check
-// compares two implementations rather than two checkpoints.
+// Nothing is bundled: the upstream URL is tried first, so the bytes we run are
+// the bytes the reference implementation runs. The fallback mirror
+// (core/ModelMirror.h) holds identical files, and the SHA-256 holds it to that.
 
 #include <cstdint>
 #include <string>
@@ -32,9 +32,9 @@ struct FetchFile {
 std::string model_cache_dir();
 std::string cached_path(const FetchFile& f);
 
-// A verified local copy, fetched with the system `curl` if missing; `tag`
-// prefixes its progress lines. Throws nn::Error naming the URL to fetch by
-// hand -- and, with SS_NO_AUTO_FETCH set, instead of downloading at all.
+// A verified local copy, fetched with the system `curl` from `url`, then the
+// mirror, if missing; `tag` prefixes its progress lines. Throws nn::Error naming
+// both URLs -- and, with SS_NO_AUTO_FETCH set, instead of downloading at all.
 std::string ensure_file(const FetchFile& f, const char* tag);
 
 // Lowercase hex SHA-256 of a file's contents. Empty when it cannot be read.
