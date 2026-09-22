@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "sfm/core/CameraSetup.h"
+#include "sfm/core/Sequence.h"
 #include "sfm/feature/Matcher.h"
 #include "sfm/feature/Extractor.h"
 #include "sfm/feature/LearnedMatcher.h"
@@ -182,6 +183,10 @@ struct SfmConfig {
     // adjustment with every image on its own pose.
     std::vector<RigDef> rigs;
     bool final_free_rig = false;
+    // Sequences (sfm/core/Sequence.h, D79): --sequence and the manifest, the
+    // same way. Matching takes each one's temporal window; the mapper trusts
+    // neighbours first. Empty leaves both exactly as they were.
+    std::vector<SequenceDef> sequences;
     bool merge_ba = true;               // merge: bundle-adjust across the seams
     bool in_place = false;              // merge: write back over the input
 
@@ -299,7 +304,8 @@ struct SfmConfig {
       "individual|video|internet", data_type)                                                      \
     F(pairs, "pairs", CMD_AUTO | CMD_MATCH, Tier::Basic, "pipeline", 0, 0,                         \
       "auto|exhaustive|sequential|prefilter", pairs)                                               \
-    F(overlap, "overlap", CMD_AUTO | CMD_MATCH, Tier::Advanced, "pipeline", 1, 1000000, "",        \
+    F(overlap, "overlap", CMD_AUTO | CMD_MATCH | CMD_MAP, Tier::Advanced, "pipeline", 1, 1000000, \
+      "",                                                                                          \
       overlap)                                                                                     \
     F(loop_closure, "loop-closure", CMD_AUTO | CMD_MATCH, Tier::Advanced, "pipeline", 0, 0, "",    \
       loop_closure)                                                                                \

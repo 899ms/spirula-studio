@@ -12,6 +12,7 @@
 
 #include "sfm/SfmConfig.h"
 #include "sfm/core/Rig.h"
+#include "sfm/core/Sequence.h"
 
 #include <set>
 #include <string>
@@ -57,6 +58,9 @@ struct Manifest {
     // images sharing a path under them; a member may carry its cam_from_rig
     // (quaternion w,x,y,z and a translation) when it is known.
     std::vector<RigDef> rigs;
+    // Sequences: `members:` path prefixes as a rig's, the images under them
+    // taken in file-name order (sfm/core/Sequence.h).
+    std::vector<SequenceDef> sequences;
 
     std::string image_gamut;         // empty = leave the run's own
     int image_linear = -1;           // -1 unset, 0 no, 1 yes

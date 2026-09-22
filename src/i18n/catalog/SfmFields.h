@@ -177,19 +177,41 @@ SS_MSG(pairs_help,
        "kapatmayla), diğer durumlarda exhaustive demektir"));
 
 SS_MSG(overlap_help,
-    EN("Neighbours each image is paired with under --pairs sequential"),
-    JA("--pairs sequential のとき各画像がペアを組む近傍の数"),
-    ZH_HANS("在 --pairs sequential 下，每张图像与多少个相邻图像配对"),
-    ZH_HANT("在 --pairs sequential 下，每張影像與多少個相鄰影像配對"),
-    KO("--pairs sequential 일 때 각 이미지가 짝을 이루는 이웃의 수"),
-    DE("Nachbarn, mit denen jedes Bild unter --pairs sequential gepaart wird"),
-    FR("Voisins avec lesquels chaque image est appariée sous --pairs sequential"),
-    ES("Vecinos con los que se empareja cada imagen bajo --pairs sequential"),
-    PT("Vizinhos com que cada imagem é emparelhada sob --pairs sequential"),
-    IT("Vicini con cui ogni immagine viene abbinata sotto --pairs sequential"),
-    NL("Buren waarmee elk beeld gepaard wordt onder --pairs sequential"),
-    RU("Сколько соседей получает каждое изображение при --pairs sequential"),
-    TR("--pairs sequential altında her görüntünün eşleştiği komşu sayısı"));
+    EN("Neighbours each image is paired with under --pairs sequential and along a "
+       "--sequence, and how far apart two images of a sequence still count as "
+       "neighbours in mapping"),
+    JA("--pairs sequential および --sequence に沿って各画像がペアを組む近傍の数、"
+       "またマッピングでシーケンスの 2 画像を近傍とみなす最大の間隔"),
+    ZH_HANS("在 --pairs sequential 下以及沿 --sequence，每张图像与多少个相邻图像配对；"
+            "也是建图时序列中两张图像相隔多远仍算相邻"),
+    ZH_HANT("在 --pairs sequential 下以及沿 --sequence，每張影像與多少個相鄰影像配對；"
+            "也是建圖時序列中兩張影像相隔多遠仍算相鄰"),
+    KO("--pairs sequential 일 때와 --sequence 를 따라 각 이미지가 짝을 이루는 이웃의 수, "
+       "그리고 매핑에서 시퀀스의 두 이미지가 얼마나 떨어져도 이웃으로 치는지"),
+    DE("Nachbarn, mit denen jedes Bild unter --pairs sequential und entlang einer "
+       "--sequence gepaart wird, und wie weit zwei Bilder einer Sequenz beim Mapping "
+       "noch als Nachbarn gelten"),
+    FR("Voisins avec lesquels chaque image est appariée sous --pairs sequential et le "
+       "long d'une --sequence, et jusqu'à quel écart deux images d'une séquence "
+       "comptent encore comme voisines au mapping"),
+    ES("Vecinos con los que se empareja cada imagen bajo --pairs sequential y a lo "
+       "largo de una --sequence, y a qué distancia dos imágenes de una secuencia aún "
+       "cuentan como vecinas al mapear"),
+    PT("Vizinhos com que cada imagem é emparelhada sob --pairs sequential e ao longo "
+       "de uma --sequence, e a que distância duas imagens de uma sequência ainda "
+       "contam como vizinhas no mapeamento"),
+    IT("Vicini con cui ogni immagine viene abbinata sotto --pairs sequential e lungo "
+       "una --sequence, e a quale distanza due immagini di una sequenza contano "
+       "ancora come vicine nel mapping"),
+    NL("Buren waarmee elk beeld gepaard wordt onder --pairs sequential en langs een "
+       "--sequence, en hoe ver twee beelden van een reeks bij het mappen nog als "
+       "buren gelden"),
+    RU("Сколько соседей получает каждое изображение при --pairs sequential и вдоль "
+       "--sequence, и на каком расстоянии два изображения последовательности ещё "
+       "считаются соседями при построении"),
+    TR("--pairs sequential altında ve bir --sequence boyunca her görüntünün eşleştiği "
+       "komşu sayısı ve haritalamada bir dizinin iki görüntüsünün ne kadar uzakken "
+       "hâlâ komşu sayıldığı"));
 
 SS_MSG(loop_closure_help,
     EN("Under --pairs sequential, also match the content-similar pairs GPU pair "

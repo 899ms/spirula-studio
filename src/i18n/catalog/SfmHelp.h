@@ -1958,6 +1958,100 @@ SS_MSG(ba_res_vram,
     RU("видеопамять: {0} МБ"),
     TR("VRAM: {0} MB"));
 
+
+SS_MSG(opt_sequence,
+    EN("Images under these path prefixes were taken in file-name order (a "
+       "video's frames, a folder shot in a walk). Their neighbours are matched, "
+       "and the mapper trusts a neighbour's correspondences before any other, "
+       "which keeps repeated structure from folding the model onto itself. "
+       "Images with the same name under two members share a position, so a "
+       "rig's lenses are one sequence (cam0,cam1). Repeat for several "
+       "sequences; `.` is the image directory itself."),
+    JA("これらのパス接頭辞の下の画像はファイル名順に撮影されたものです（動画の"
+       "フレーム、歩きながら撮ったフォルダー）。隣接画像同士をマッチングし、"
+       "マッパーは隣接画像との対応を他のどれよりも先に信頼するので、繰り返し"
+       "構造でモデルが自身の上に折り畳まれるのを防ぎます。2 つのメンバーの下で"
+       "同名の画像は同じ位置を共有するため、リグのレンズは 1 つのシーケンスです"
+       "（cam0,cam1）。複数のシーケンスには繰り返し指定します。`.` は画像"
+       "ディレクトリ自体です。"),
+    ZH_HANS("这些路径前缀下的图像按文件名顺序拍摄（视频帧、边走边拍的文件夹）。"
+            "相邻图像会被匹配，建图时先信任相邻图像的对应关系，再参考其他部分，"
+            "以免重复结构把模型折叠到自身上。两个成员下同名的图像共享同一位置，"
+            "所以一个装置的镜头是同一个序列（cam0,cam1）。多个序列可重复指定；"
+            "`.` 表示图像目录本身。"),
+    ZH_HANT("這些路徑前綴下的影像按檔名順序拍攝（影片影格、邊走邊拍的資料夾）。"
+            "相鄰影像會被比對，建圖時先信任相鄰影像的對應關係，再參考其他部分，"
+            "以免重複結構把模型摺疊到自身上。兩個成員下同名的影像共用同一位置，"
+            "所以一個裝置的鏡頭是同一個序列（cam0,cam1）。多個序列可重複指定；"
+            "`.` 表示影像目錄本身。"),
+    KO("이 경로 접두사 아래의 이미지는 파일 이름 순서로 촬영되었습니다(동영상 "
+       "프레임, 걸으며 찍은 폴더). 이웃끼리 매칭하고, 매퍼는 이웃과의 대응을 "
+       "다른 무엇보다 먼저 신뢰하므로 반복되는 구조가 모델을 자기 위로 접는 일을 "
+       "막습니다. 두 멤버 아래 같은 이름의 이미지는 같은 위치를 공유하므로 리그의 "
+       "렌즈들은 하나의 시퀀스입니다(cam0,cam1). 여러 시퀀스에는 반복해서 지정합니다. "
+       "`.`은 이미지 디렉터리 자체입니다."),
+    DE("Die Bilder unter diesen Pfadpräfixen wurden in Dateinamensreihenfolge "
+       "aufgenommen (die Frames eines Videos, ein im Gehen aufgenommener Ordner). "
+       "Ihre Nachbarn werden zugeordnet, und der Mapper vertraut den "
+       "Korrespondenzen eines Nachbarn vor allen anderen, was verhindert, dass "
+       "wiederholte Struktur das Modell auf sich selbst faltet. Bilder gleichen "
+       "Namens unter zwei Mitgliedern teilen eine Position, sodass die Objektive "
+       "eines Rigs eine Sequenz sind (cam0,cam1). Für mehrere Sequenzen "
+       "wiederholen; `.` ist das Bildverzeichnis selbst."),
+    FR("Les images sous ces préfixes de chemin ont été prises dans l'ordre des noms "
+       "de fichier (les images d'une vidéo, un dossier filmé en marchant). Leurs "
+       "voisines sont appariées, et le mapper fait confiance aux correspondances "
+       "d'une voisine avant toute autre, ce qui empêche une structure répétée de "
+       "replier le modèle sur lui-même. Les images de même nom sous deux membres "
+       "partagent une position, si bien que les objectifs d'un rig forment une "
+       "seule séquence (cam0,cam1). À répéter pour plusieurs séquences ; `.` "
+       "désigne le répertoire d'images lui-même."),
+    ES("Las imágenes bajo estos prefijos de ruta se tomaron en orden de nombre de "
+       "archivo (los fotogramas de un vídeo, una carpeta grabada caminando). Sus "
+       "vecinas se emparejan, y el mapeador confía en las correspondencias de una "
+       "vecina antes que en cualquier otra, lo que evita que una estructura "
+       "repetida pliegue el modelo sobre sí mismo. Las imágenes con el mismo "
+       "nombre bajo dos miembros comparten posición, así que las lentes de un rig "
+       "son una sola secuencia (cam0,cam1). Repítase para varias secuencias; `.` "
+       "es el propio directorio de imágenes."),
+    PT("As imagens sob estes prefixos de caminho foram captadas por ordem de nome "
+       "de ficheiro (os quadros de um vídeo, uma pasta gravada a andar). As suas "
+       "vizinhas são comparadas, e o mapeador confia nas correspondências de uma "
+       "vizinha antes de qualquer outra, o que impede que uma estrutura repetida "
+       "dobre o modelo sobre si mesmo. Imagens com o mesmo nome sob dois membros "
+       "partilham uma posição, pelo que as lentes de um rig são uma só sequência "
+       "(cam0,cam1). Repita para várias sequências; `.` é o próprio diretório de "
+       "imagens."),
+    IT("Le immagini sotto questi prefissi di percorso sono state riprese in ordine "
+       "di nome di file (i fotogrammi di un video, una cartella ripresa "
+       "camminando). Le vicine vengono abbinate e il mapper si fida delle "
+       "corrispondenze di una vicina prima di ogni altra, il che impedisce a una "
+       "struttura ripetuta di ripiegare il modello su se stesso. Le immagini con "
+       "lo stesso nome sotto due membri condividono una posizione, così gli "
+       "obiettivi di un rig sono una sola sequenza (cam0,cam1). Ripetere per più "
+       "sequenze; `.` è la directory delle immagini stessa."),
+    NL("De beelden onder deze padvoorvoegsels zijn in bestandsnaamvolgorde "
+       "opgenomen (de frames van een video, een al lopend opgenomen map). Hun "
+       "buren worden gematcht, en de mapper vertrouwt de correspondenties van een "
+       "buur vóór alle andere, wat voorkomt dat herhaalde structuur het model op "
+       "zichzelf vouwt. Beelden met dezelfde naam onder twee leden delen een "
+       "positie, zodat de lenzen van een rig één reeks zijn (cam0,cam1). Herhaal "
+       "voor meerdere reeksen; `.` is de beeldmap zelf."),
+    RU("Изображения под этими префиксами пути сняты в порядке имён файлов (кадры "
+       "видео, папка, снятая на ходу). Их соседи сопоставляются, а маппер доверяет "
+       "соответствиям соседа прежде всех остальных, что не даёт повторяющейся "
+       "структуре сложить модель саму на себя. Изображения с одинаковым именем под "
+       "двумя элементами делят одну позицию, поэтому объективы рига — одна "
+       "последовательность (cam0,cam1). Повторите для нескольких "
+       "последовательностей; `.` — сам каталог изображений."),
+    TR("Bu yol öneklerinin altındaki görüntüler dosya adı sırasıyla çekilmiştir "
+       "(bir videonun kareleri, yürürken çekilen bir klasör). Komşuları "
+       "eşleştirilir ve haritalayıcı bir komşunun eşleşmelerine diğer her şeyden "
+       "önce güvenir; bu, yinelenen yapının modeli kendi üzerine katlamasını "
+       "önler. İki üyenin altındaki aynı adlı görüntüler aynı konumu paylaşır, "
+       "bu yüzden bir rigin lensleri tek bir dizidir (cam0,cam1). Birden çok dizi "
+       "için yineleyin; `.` görüntü dizininin kendisidir."));
+
 }  // namespace sfmhelp
 }  // namespace msg
 }  // namespace i18n

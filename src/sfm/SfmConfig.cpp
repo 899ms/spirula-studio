@@ -428,6 +428,7 @@ std::string SfmConfig::finalize(uint32_t cmd) {
     // One tolerance, two fields (D47).
     twoview.ransac.max_error = max_error;
     mapper.max_reproj_error = max_error;
+    mapper.sequence_window = overlap;
 
     if (features != "sift" && !isAlikedType(features) && !isLomaType(features))
         return "unknown --features '" + features +
@@ -621,6 +622,14 @@ std::string stageSignature(const SfmConfig& cfg, uint32_t cmd) {
             if (o.has_model) out += camInfo(o.model).cli_name;
             if (o.has_focal) out += "," + valueString(o.focal);
             for (double e : o.extra) out += "," + valueString(e);
+            out += "\n";
+        }
+    // A sequence adds its temporal window to the pair list.
+    if (cmd & (CMD_MATCH | CMD_MAP))
+        for (const SequenceDef& d : cfg.sequences) {
+            out += "sequence ";
+            for (size_t m = 0; m < d.members.size(); m++)
+                out += (m ? "," : "") + d.members[m];
             out += "\n";
         }
     return out;

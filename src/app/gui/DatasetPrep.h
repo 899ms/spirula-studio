@@ -122,6 +122,10 @@ struct PrepInput {
     // as several clips is rarely shot at one pace, and a clip walked through
     // slowly wants fewer frames than the one that ran past the same wall.
     float fps = 0.0f;
+    // The photos were taken one after another and named in that order, so the
+    // reconstruction may trust neighbouring files first (a video's frames
+    // always are; SfmRunner::build_sequences).
+    bool sequential = false;
     int video_tracks = 0;            // 0 = not probed yet
     // The camera folders found under this input, when it arrived with more
     // than one. Empty means the lens above describes all of it.

@@ -613,7 +613,8 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("workspace", _workspace);
     line("photo_import", photo_import_name(_photo_import));
     for (const PrepInput& s : _sources)
-        line(s.is_video ? "video_source" : "photo_source", s.path);
+        line(s.is_video ? "video_source" : s.sequential ? "photo_source_in_order" : "photo_source",
+             s.path);
     line("use_found_masks", cfg_str(_use_found_masks));
     line("flip_found_masks", cfg_str(_flip_found_masks));
     line("masking_enabled", cfg_str(_mask_enable));
@@ -630,6 +631,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("overlap", std::to_string(j.overlap));
     line("loop_closure", cfg_str(j.loop_closure));
     line("prefilter_sequential", cfg_str(j.prefilter_sequential));
+    line("use_sequence", cfg_str(j.use_sequence));
     line("features", std::to_string(j.features));
     line("matcher", std::to_string(j.matcher));
     line("mapper", std::to_string(j.mapper));
@@ -3482,6 +3484,11 @@ void GuiApp::draw_dataset_source() {
                 ImGui::Dummy(ImVec2(px(84.0f), 0.0f));
             }
         }
+        if (!s.is_video) {
+            ImGui::SameLine();
+            ui::Checkbox(dmsg::frames_in_order, &s.sequential);
+            ui::help_on_hover(dmsg::frames_in_order_help);
+        }
         row_controls = std::max(row_controls, ImGui::GetItemRectMax().x - path_right +
                                                   ImGui::GetStyle().ItemSpacing.x);
         if (one_line) ImGui::SameLine();
@@ -5577,6 +5584,8 @@ void GuiApp::draw_sfm_advanced() {
         ui::Checkbox(dmsg::prefilter_sequential, &_sfm_job.prefilter_sequential);
         ui::help_on_hover(dmsg::prefilter_sequential_help);
     }
+    ui::Checkbox(dmsg::use_sequence, &_sfm_job.use_sequence);
+    ui::help_on_hover(dmsg::use_sequence_help);
     if (sequential_window_applies(_sfm_job)) {
         ImGui::SetNextItemWidth(px(260.0f));
         ui::InputInt(dmsg::sequential_overlap, &_sfm_job.overlap);

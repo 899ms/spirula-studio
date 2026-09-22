@@ -114,6 +114,9 @@ std::vector<Reconstruction> runMapper(Mapper& mapper, const MatchesDatabase& db,
 // verbose. Throws std::runtime_error on a definition that does not resolve.
 RigTable buildRigs(const MatchesDatabase& db, const SfmConfig& cfg, bool verbose);
 
+// The run's sequences the same way (sfm/core/Sequence.h).
+SequenceTable buildSequences(const MatchesDatabase& db, const SfmConfig& cfg, bool verbose);
+
 // The passes that run after the mapper: merge, audit, grow, prune, reseed.
 std::vector<Reconstruction> finishModels(Mapper& mapper,
                                          std::vector<Reconstruction> models,

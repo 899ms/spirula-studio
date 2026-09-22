@@ -159,6 +159,7 @@ static void ownOptionsAuto(FILE* out) {
              H::opt_auto_output.get());
     helpLine(out, "--manifest FILE", "", H::opt_manifest.get());
     helpLine(out, "--rig [KIND=]PREFIX,PREFIX,...", "", H::opt_rig.get());
+    helpLine(out, "--sequence PREFIX[,PREFIX...]", "", H::opt_sequence.get());
     helpLine(out, "--no-masks", "", H::opt_no_masks.get());
     helpLine(out, "--no-manage", "", H::opt_no_manage_auto.get());
     helpLine(out, "--progress-dir DIR", "", H::opt_progress_dir.get());
@@ -170,12 +171,14 @@ static void ownOptionsExtract(FILE* out) {
 }
 static void ownOptionsMatch(FILE* out) {
     helpLine(out, "-o, --output FILE", "", H::opt_match_output.get());
+    helpLine(out, "--sequence PREFIX[,PREFIX...]", "", H::opt_sequence.get());
     helpLine(out, "--progress-dir DIR", "", H::opt_progress_dir.get());
     helpLine(out, "-h, --help", "", H::opt_help.get());
 }
 static void ownOptionsMap(FILE* out) {
     helpLine(out, "-o, --output DIR", "", H::opt_map_output.get());
     helpLine(out, "--rig [KIND=]PREFIX,PREFIX,...", "", H::opt_rig.get());
+    helpLine(out, "--sequence PREFIX[,PREFIX...]", "", H::opt_sequence.get());
     helpLine(out, "--audit", "", H::opt_map_audit.get());
     helpLine(out, "--no-manage", "", H::opt_no_manage_map.get());
     helpLine(out, "--progress-dir DIR", "", H::opt_progress_dir.get());
@@ -694,6 +697,14 @@ static int cmdMatch(int argc, char** argv) {
                 return usageError("match", err);
             continue;
         }
+        if (a == "--sequence") {
+            if (i + 1 >= argc) return usageError("match", "--sequence: missing value");
+            SequenceDef d;
+            if (std::string err = parseSequenceArg(argv[++i], d); !err.empty())
+                return usageError("match", err);
+            cfg.sequences.push_back(std::move(d));
+            continue;
+        }
         int r = tableFlag(cfg, CMD_MATCH, "match", a, argc, argv, i, seen);
         if (r < 0) return 1;
         if (r > 0) continue;
@@ -776,6 +787,14 @@ static int cmdMap(int argc, char** argv) {
             if (std::string err = parseRigArg(argv[++i], d); !err.empty())
                 return usageError("map", err);
             cfg.rigs.push_back(std::move(d));
+            continue;
+        }
+        if (a == "--sequence") {
+            if (i + 1 >= argc) return usageError("map", "--sequence: missing value");
+            SequenceDef d;
+            if (std::string err = parseSequenceArg(argv[++i], d); !err.empty())
+                return usageError("map", err);
+            cfg.sequences.push_back(std::move(d));
             continue;
         }
         int r = tableFlag(cfg, CMD_MAP, "map", a, argc, argv, i, seen);
@@ -882,13 +901,15 @@ static int cmdMap(int argc, char** argv) {
     opt.measured_focal_cameras = cs.focal_measured;
 
     RigTable rigs;
+    SequenceTable seqs;
     try {
         rigs = buildRigs(db, cfg, opt.verbose);
+        seqs = buildSequences(db, cfg, opt.verbose);
     } catch (const std::runtime_error& e) {
         L::fail(Tag::Map, M::rig_bad, {e.what()});
         return 1;
     }
-    Mapper mapper(db, feats, opt, cs.ids, &rigs);
+    Mapper mapper(db, feats, opt, cs.ids, &rigs, &seqs);
     std::vector<Reconstruction> models;
     AssembleStats ast;
     if (cfg.resume.empty()) {

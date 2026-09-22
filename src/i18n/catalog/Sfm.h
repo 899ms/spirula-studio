@@ -3622,6 +3622,66 @@ SS_MSG(run_cancelled,
     RU("Отменено; в рабочем каталоге осталось то, что успел закончить запуск"),
     TR("İptal edildi; çalışma klasöründe çalışmanın bitirdiği kadarı duruyor"));
 
+
+SS_MSG(sequence_table,
+    EN("Sequence {0}: members {1}; images {2} over {3} positions; neighbours within {4}"),
+    JA("シーケンス {0}: メンバー {1}、画像 {2} 枚、位置 {3} 個、近傍は {4} 以内"),
+    ZH_HANS("序列 {0}: 成员 {1}; 图像 {2} 张，位置 {3} 个; 相邻范围 {4}"),
+    ZH_HANT("序列 {0}: 成員 {1}; 影像 {2} 張，位置 {3} 個; 相鄰範圍 {4}"),
+    KO("시퀀스 {0}: 멤버 {1}, 이미지 {2}개, 위치 {3}개, 이웃 범위 {4}"),
+    DE("Sequenz {0}: Mitglieder {1}; {2} Bilder über {3} Positionen; Nachbarn innerhalb {4}"),
+    FR("Séquence {0} : membres {1} ; {2} images sur {3} positions ; voisines à {4} au plus"),
+    ES("Secuencia {0}: miembros {1}; {2} imágenes en {3} posiciones; vecinas hasta {4}"),
+    PT("Sequência {0}: membros {1}; {2} imagens em {3} posições; vizinhas até {4}"),
+    IT("Sequenza {0}: membri {1}; {2} immagini su {3} posizioni; vicine entro {4}"),
+    NL("Reeks {0}: leden {1}; {2} beelden over {3} posities; buren binnen {4}"),
+    RU("Последовательность {0}: элементы {1}; изображений {2} на {3} позициях; соседи в пределах {4}"),
+    TR("Dizi {0}: üyeler {1}; {3} konumda {2} görüntü; {4} içindeki komşular"));
+
+SS_MSG(map_sequence_summary,
+    EN("Poses the sequence neighbours settled against the rest of the model: {0}; "
+       "registrations they carried past the inlier ratio: {1}"),
+    JA("モデルの他の部分に対してシーケンスの近傍が確定した姿勢: {0}、"
+       "近傍がインライア率の門を通した登録: {1}"),
+    ZH_HANS("由序列相邻帧而非模型其余部分决定的位姿: {0}; 由相邻帧担保通过内点率门槛的注册: {1}"),
+    ZH_HANT("由序列相鄰影格而非模型其餘部分決定的姿態: {0}; 由相鄰影格擔保通過內點率門檻的註冊: {1}"),
+    KO("모델의 나머지가 아닌 시퀀스 이웃이 정한 자세: {0}, 이웃이 인라이어 비율 문턱을 넘겨 준 등록: {1}"),
+    DE("Posen, die die Sequenznachbarn gegen den Rest des Modells entschieden: {0}; "
+       "Registrierungen, die sie über die Inlier-Quote trugen: {1}"),
+    FR("Poses tranchées par les voisines de séquence contre le reste du modèle : {0} ; "
+       "enregistrements qu'elles ont fait passer le taux d'inliers : {1}"),
+    ES("Poses decididas por las vecinas de la secuencia frente al resto del modelo: {0}; "
+       "registros que hicieron pasar la proporción de inliers: {1}"),
+    PT("Poses decididas pelas vizinhas da sequência contra o resto do modelo: {0}; "
+       "registos que elas levaram além da proporção de inliers: {1}"),
+    IT("Pose decise dalle vicine di sequenza contro il resto del modello: {0}; "
+       "registrazioni che hanno fatto passare la quota di inlier: {1}"),
+    NL("Poses die de reeksburen tegen de rest van het model beslisten: {0}; "
+       "registraties die zij voorbij de inlier-verhouding droegen: {1}"),
+    RU("Поз, решённых соседями по последовательности вопреки остальной модели: {0}; "
+       "регистраций, проведённых ими мимо порога доли инлайеров: {1}"),
+    TR("Dizi komşularının modelin geri kalanına karşı belirlediği pozlar: {0}; "
+       "iç nokta oranını aşmalarını sağladıkları kayıtlar: {1}"));
+
+SS_MSG(match_sequence_added,
+    EN("sequence windows added pairs: {0}, on top of chosen pairs: {1} (window pairs: {2})"),
+    JA("シーケンスのウィンドウで追加したペア: {0}、選択済みペア: {1}（ウィンドウのペア: {2}）"),
+    ZH_HANS("序列窗口新增的像对：{0}，此外已选像对：{1}（窗口像对：{2}）"),
+    ZH_HANT("序列視窗新增的影像對：{0}，此外已選影像對：{1}（視窗影像對：{2}）"),
+    KO("시퀀스 창으로 더한 쌍: {0}, 선택된 쌍: {1}(창 쌍: {2})"),
+    DE("Sequenzfenster ergänzten Paare: {0}, zu gewählten Paaren: {1} (Fensterpaare: {2})"),
+    FR("les fenêtres de séquence ont ajouté des paires : {0}, en plus des paires "
+       "choisies : {1} (paires de fenêtre : {2})"),
+    ES("las ventanas de secuencia añadieron pares: {0}, además de los pares elegidos: {1} "
+       "(pares de ventana: {2})"),
+    PT("as janelas de sequência acrescentaram pares: {0}, além dos pares escolhidos: {1} "
+       "(pares de janela: {2})"),
+    IT("le finestre di sequenza hanno aggiunto coppie: {0}, oltre alle coppie scelte: {1} "
+       "(coppie di finestra: {2})"),
+    NL("reeksvensters voegden paren toe: {0}, bovenop gekozen paren: {1} (vensterparen: {2})"),
+    RU("окна последовательностей добавили пар: {0}, к выбранным парам: {1} (пар в окнах: {2})"),
+    TR("dizi pencereleri çift ekledi: {0}, seçilmiş çiftlere ek olarak: {1} (pencere çifti: {2})"));
+
 }  // namespace sfm
 }  // namespace msg
 }  // namespace i18n

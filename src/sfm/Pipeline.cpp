@@ -841,6 +841,25 @@ RigTable buildRigs(const MatchesDatabase& db, const SfmConfig& cfg, bool verbose
     return rigs;
 }
 
+SequenceTable buildSequences(const MatchesDatabase& db, const SfmConfig& cfg, bool verbose) {
+    std::vector<std::string> names;
+    names.reserve(db.images.size());
+    for (const ImageEntry& im : db.images) names.push_back(im.name);
+    SequenceTable seqs = buildSequenceTable(names, cfg.sequences);
+    if (!verbose) return seqs;
+    for (size_t k = 0; k < seqs.length.size(); k++) {
+        size_t images = 0;
+        for (int32_t id : seqs.seq) images += id == (int32_t)k ? 1 : 0;
+        std::string members;
+        for (const std::string& m : seqs.members[k])
+            members += (members.empty() ? "" : ", ") + (m.empty() ? std::string(".") : m);
+        L::out(Tag::Map, M::sequence_table,
+               {(long long)k, members, (long long)images, (long long)seqs.length[k],
+                (long long)cfg.overlap});
+    }
+    return seqs;
+}
+
 std::vector<Reconstruction> runMapper(Mapper& mapper, const MatchesDatabase& db,
                                       const std::vector<FeatureSet>& feats, SfmConfig& cfg,
                                       AssembleStats& ast) {
@@ -1434,6 +1453,25 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                         format_duration(stats.select_seconds)});
         }
     }
+    // A sequence's temporal window is matched whatever the mode chose: the
+    // mapper trusts those pairs first, so they have to exist (D79).
+    if (!reused_pairs && !cfg.sequences.empty()) {
+        const size_t before = pairs.size();
+        try {
+            const SequenceTable st = buildSequenceTable(image_names, cfg.sequences);
+            const std::vector<std::pair<uint32_t, uint32_t>> win =
+                sequenceWindowPairs(st, cfg.overlap, cfg.quadratic_overlap);
+            pairs.insert(pairs.end(), win.begin(), win.end());
+            std::sort(pairs.begin(), pairs.end());
+            pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+            if (verbose)
+                L::err(Tag::Match, M::match_sequence_added,
+                       {(long long)(pairs.size() - before), (long long)before,
+                        (long long)win.size()});
+        } catch (const std::exception&) {
+            // A definition the names do not fit is the mapper's to report.
+        }
+    }
     if (res && !reused_pairs) resume::writePairs(res->dir / "pairs.bin", res->signature, pairs);
     stats.pairs = pairs.size();
     if (verbose)
@@ -1906,14 +1944,16 @@ AutoResult run_auto(SfmConfig& cfg, const AutoInputs& in) {
     events::stage_begin(Stage::Map, (int64_t)db.images.size());
     events::map_begin(db.images.size());
     RigTable rigs;
+    SequenceTable seqs;
     try {
         rigs = buildRigs(db, cfg, verbose);
+        seqs = buildSequences(db, cfg, verbose);
     } catch (const std::runtime_error& e) {
         L::fail(Tag::Map, M::rig_bad, {e.what()});
         r.exit_code = 2;
         return r;
     }
-    Mapper mapper(db, feats, mapopt, cs.ids, &rigs);
+    Mapper mapper(db, feats, mapopt, cs.ids, &rigs, &seqs);
     AssembleStats ast;
     std::vector<Reconstruction> models = runMapper(mapper, db, feats, cfg, ast);
     double t_map = now() - t0;
@@ -2140,6 +2180,14 @@ std::string parse_auto_args(const std::vector<std::string>& args, AutoRequest& o
             RigDef d;
             if (std::string err = parseRigArg(args[(size_t)++i], d); !err.empty()) return err;
             cfg.rigs.push_back(std::move(d));
+            continue;
+        }
+        if (a == "--sequence") {
+            if (i + 1 >= argc) return "--sequence: missing value";
+            SequenceDef d;
+            if (std::string err = parseSequenceArg(args[(size_t)++i], d); !err.empty())
+                return err;
+            cfg.sequences.push_back(std::move(d));
             continue;
         }
         if (a == "--progress-dir") {

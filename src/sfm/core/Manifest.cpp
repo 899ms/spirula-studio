@@ -165,6 +165,22 @@ Manifest manifest_read(const std::string& path) {
             m.rigs.push_back(std::move(d));
         }
     }
+    if (const JsonValue* seqs = root.find("sequences")) {
+        if (!seqs->is_array()) bad(path, "sequences: expected a list");
+        for (const JsonValue& e : seqs->arr) {
+            if (!e.is_object()) bad(path, "sequences: each entry is a mapping");
+            SequenceDef d;
+            const JsonValue* mem = e.find("members");
+            if (!mem || !mem->is_array()) bad(path, "sequences: an entry needs a members list");
+            for (const JsonValue& v : mem->arr) {
+                std::string p = str_of(v, path, "members");
+                while (!p.empty() && (p.back() == '/' || p.back() == '\\')) p.pop_back();
+                d.members.push_back(p == "." ? std::string() : p);
+            }
+            if (d.members.empty()) bad(path, "sequences: an entry needs at least one member");
+            m.sequences.push_back(std::move(d));
+        }
+    }
     if (const JsonValue* caps = root.find("captures")) {
         if (!caps->is_array()) bad(path, "captures: expected a list");
         for (const JsonValue& c : caps->arr) {
@@ -274,6 +290,20 @@ std::string manifest_write(const Manifest& m, bool json) {
         }
         root.obj.emplace_back("rigs", std::move(rigs));
     }
+    if (!m.sequences.empty()) {
+        JsonValue seqs;
+        seqs.type = JsonValue::Type::Array;
+        for (const SequenceDef& d : m.sequences) {
+            JsonValue mem;
+            mem.type = JsonValue::Type::Array;
+            for (const std::string& p : d.members) mem.arr.push_back(text(p.empty() ? "." : p));
+            JsonValue e;
+            e.type = JsonValue::Type::Object;
+            e.obj.emplace_back("members", std::move(mem));
+            seqs.arr.push_back(std::move(e));
+        }
+        root.obj.emplace_back("sequences", std::move(seqs));
+    }
     if (!m.captures.empty()) {
         JsonValue caps;
         caps.type = JsonValue::Type::Array;
@@ -342,6 +372,7 @@ std::string manifest_apply(const Manifest& m, SfmConfig& cfg,
     for (const ManifestCapture& c : m.captures)
         cfg.telemetry_inputs.push_back({c.prefix, resolve(c.telemetry, base), c.fps, c.time_offset});
     for (const RigDef& r : m.rigs) cfg.rigs.push_back(r);
+    for (const SequenceDef& d : m.sequences) cfg.sequences.push_back(d);
     return {};
 }
 

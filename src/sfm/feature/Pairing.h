@@ -18,6 +18,8 @@
 #include <utility>
 #include <vector>
 
+#include "sfm/core/Sequence.h"
+
 namespace sfm {
 
 enum class PairMode { Exhaustive, Sequential, Prefilter };
@@ -60,6 +62,40 @@ inline std::vector<uint32_t> folderRuns(const std::vector<std::string>& names) {
         run[i] = ids.emplace(dir, (uint32_t)ids.size()).first->second;
     }
     return run;
+}
+
+// The window along each sequence of a SequenceTable, one chain per member so
+// a rig's lenses each pair with their own; the rig-mate pass links across.
+inline std::vector<std::pair<uint32_t, uint32_t>> sequenceWindowPairs(const SequenceTable& st,
+                                                                       int overlap,
+                                                                       bool quadratic) {
+    const uint32_t n = (uint32_t)st.seq.size();
+    std::vector<uint32_t> order;
+    for (uint32_t i = 0; i < n; i++)
+        if (st.has(i)) order.push_back(i);
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+        if (st.seq[a] != st.seq[b]) return st.seq[a] < st.seq[b];
+        if (st.member[a] != st.member[b]) return st.member[a] < st.member[b];
+        return st.pos[a] != st.pos[b] ? st.pos[a] < st.pos[b] : a < b;
+    });
+    // sequentialPairs walks each run in index order, so the chains are laid
+    // out over a renumbering that follows the sequence positions.
+    std::vector<uint32_t> chain_of(n, UINT32_MAX);
+    for (uint32_t k = 0; k < order.size(); k++) chain_of[order[k]] = k;
+    std::vector<uint32_t> runs(order.size());
+    std::map<std::pair<int32_t, int32_t>, uint32_t> ids;
+    for (uint32_t k = 0; k < order.size(); k++)
+        runs[k] = ids.emplace(std::make_pair(st.seq[order[k]], st.member[order[k]]),
+                              (uint32_t)ids.size()).first->second;
+    std::vector<std::pair<uint32_t, uint32_t>> pairs =
+        sequentialPairs((uint32_t)order.size(), overlap, quadratic, runs);
+    for (auto& p : pairs) {
+        p.first = order[p.first];
+        p.second = order[p.second];
+        if (p.first > p.second) std::swap(p.first, p.second);
+    }
+    std::sort(pairs.begin(), pairs.end());
+    return pairs;
 }
 
 // Every pair for Exhaustive; the plain window (no quadratic links, one

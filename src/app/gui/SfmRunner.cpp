@@ -250,6 +250,7 @@ void SfmRunner::take_reconstruction(SfmJob& job) {
     job.overlap = _live.overlap;
     job.loop_closure = _live.loop_closure;
     job.prefilter_sequential = _live.prefilter_sequential;
+    job.use_sequence = _live.use_sequence;
     job.init_focal_px = _live.init_focal_px;
     job.init_distortion = _live.init_distortion;
     job.distortion_refine = _live.distortion_refine;
@@ -273,6 +274,7 @@ void SfmRunner::take_reconstruction(SfmJob& job) {
         job.prep.inputs[i].camera_model = _live.prep.inputs[i].camera_model;
         job.prep.inputs[i].focal_factor = _live.prep.inputs[i].focal_factor;
         job.prep.inputs[i].subcameras = _live.prep.inputs[i].subcameras;
+        job.prep.inputs[i].sequential = _live.prep.inputs[i].sequential;
     }
 }
 
@@ -488,7 +490,31 @@ sfm::Manifest SfmRunner::build_manifest(const SfmJob& job, const PrepResult& pre
         man.captures.push_back(std::move(c));
     }
     man.rigs = build_rigs(job.prep, &prep);
+    man.sequences = build_sequences(job);
     return man;
+}
+
+// One sequence per video (its lens folders, or its frames as they are) and
+// per folder marked as shot in order (its camera folders, or itself).
+std::vector<sfm::SequenceDef> SfmRunner::build_sequences(const SfmJob& job) {
+    std::vector<sfm::SequenceDef> out;
+    if (!job.use_sequence) return out;
+    auto join = [](const std::string& a, const std::string& b) {
+        return a.empty() ? b : b.empty() ? a : a + "/" + b;
+    };
+    for (const PrepInput& in : job.prep.inputs) {
+        if (!in.is_video && !in.sequential) continue;
+        sfm::SequenceDef d;
+        if (!in.subcameras.empty()) {
+            for (const SubCamera& sc : in.subcameras) d.members.push_back(join(in.subdir, sc.rel));
+        } else {
+            for (const std::string& lens : lens_dirs(job.prep, in))
+                d.members.push_back(join(in.subdir, lens));
+            if (d.members.empty()) d.members.push_back(in.subdir);
+        }
+        out.push_back(std::move(d));
+    }
+    return out;
 }
 
 namespace {

@@ -34,6 +34,7 @@
 #include "sfm/core/Progress.h"
 #include "sfm/core/Features.h"
 #include "sfm/core/Model.h"
+#include "sfm/core/Sequence.h"
 #include "sfm/geometry/AbsolutePose.h"
 #include "sfm/geometry/Triangulation.h"
 #include "sfm/geometry/TwoView.h"
@@ -347,19 +348,26 @@ struct MapperOptions {
     // pose from the frame, which is the coverage a rig is for.
     bool rig_complete_blind = true;
     RigCalibOptions rig_calib;
+    // Sequences (sfm/core/Sequence.h, D79): two images this many positions
+    // apart along one are neighbours, and a neighbour's correspondences are
+    // trusted before the rest of the model's. The matcher's `--overlap`.
+    int sequence_window = 10;
 };
 
 class Mapper {
 public:
     // `camera_ids[i]` is the (1-based) camera image i belongs to (empty = one
-    // shared camera, D17). `rigs` (sfm/core/Rig.h) is optional, must outlive
-    // the mapper, and numbers images as this database does.
+    // shared camera, D17). `rigs` (sfm/core/Rig.h) and `seqs` (sfm/core/Sequence.h)
+    // are optional, must outlive the mapper, and number images as this database does.
     Mapper(const MatchesDatabase& db, const std::vector<FeatureSet>& feats, MapperOptions opt,
-           std::vector<uint32_t> camera_ids = {}, const RigTable* rigs = nullptr)
+           std::vector<uint32_t> camera_ids = {}, const RigTable* rigs = nullptr,
+           const SequenceTable* seqs = nullptr)
         : db_(db), feats_(feats), opt_(opt), cam_ids_(std::move(camera_ids)),
-          rigs_(rigs && !rigs->empty() && opt.use_rigs ? rigs : nullptr) {}
+          rigs_(rigs && !rigs->empty() && opt.use_rigs ? rigs : nullptr),
+          seq_(seqs && !seqs->empty() ? seqs : nullptr) {}
 
     const RigTable* rigs() const { return rigs_; }
+    const SequenceTable* sequences() const { return seq_; }
 
     // All reconstructions the dataset supports, largest first (by 3D point
     // count -- COLMAP's ReconstructionManager::Write ordering, so models[0] is
@@ -984,7 +992,7 @@ public:
     // ineligible are not any more.
     void seedFurtherModels(std::vector<Reconstruction>& models, bool restart_relaxation = false) {
         ensureSetup();
-        if (restart_relaxation) init_relax_ = 0;
+        if (restart_relaxation) init_relax_ = seed_phase_ = 0;
         int trials = 0;
         // Not `unclaimedImages() > 0`: admitModel keeps a sub-model only if at
         // least min_model_size of its images are ones no kept model covers, and
@@ -1531,6 +1539,9 @@ public:
             shift = (cameraCenter(r.pose) - cameraCenter(im.pose)).norm() / modelScale();
             contradicted =
                 rot_deg > opt_.audit_min_rotation_deg || shift > opt_.audit_min_shift_frac;
+            // The sequence neighbours vouch for the pose in place: what a
+            // duplicate elsewhere explains does not unseat what they see (D79).
+            if (contradicted && seq_ && nearVouches(img, im.pose, r.pose)) contradicted = false;
             if (contradicted) alternative = r.pose;
         }
         if (audit_dump_)
@@ -1540,6 +1551,29 @@ public:
                        r.success ? r.num_inliers : 0, rot_deg, shift,
                        contradicted ? "CONTRADICTED" : "ok");
         return contradicted;
+    }
+
+    // Whether `cur` explains at least min_num_pnp_inliers of the image's
+    // correspondences to its sequence neighbours' points, and more than `alt`.
+    bool nearVouches(uint32_t img, const Pose& cur, const Pose& alt) const {
+        const double thr = camOf(img).errRad(opt_.max_reproj_error);
+        const double thr2 = thr * thr;
+        int n_cur = 0, n_alt = 0;
+        for (uint32_t f = 0; f < feats_[img].count(); f++)
+            for (const Correspondence& c : graph_.at(img, f)) {
+                if (!near(img, c.image_id)) continue;
+                const Image& oi = rec_.images.at(c.image_id);
+                if (!oi.registered) continue;
+                const uint64_t pid = oi.point3D_ids[c.feature_idx];
+                if (pid == kInvalidPoint3D) continue;
+                auto pt = rec_.points3D.find(pid);
+                if (pt == rec_.points3D.end()) continue;
+                const Vec3 b = bearing(img, f);
+                n_cur += pnpResidualSq(cur, pt->second.xyz, b) < thr2 ? 1 : 0;
+                n_alt += pnpResidualSq(alt, pt->second.xyz, b) < thr2 ? 1 : 0;
+                break;
+            }
+        return n_cur >= opt_.min_num_pnp_inliers && n_cur > n_alt;
     }
 
     // A length to measure pose differences against, since a reconstruction has
@@ -1592,7 +1626,7 @@ public:
         // belong to the last one and would otherwise carry over, starting the
         // next cluster at whatever relaxation the previous one had to reach.
         used_seeds_.clear();
-        init_relax_ = 0;
+        init_relax_ = seed_phase_ = 0;
         seed_pair_ = nullptr;
         seeded_.clear();
         seed_cand_valid_ = false;  // it is filtered by `allowed`
@@ -1760,6 +1794,9 @@ private:
             if (rigs_)
                 slog::out(slog::Tag::Map, spirula::i18n::msg::sfm::map_rig_summary,
                          {(long long)reg_by_rig_, (long long)reg_rig_word_});
+            if (seq_)
+                slog::out(slog::Tag::Map, spirula::i18n::msg::sfm::map_sequence_summary,
+                         {(long long)reg_near_won_, (long long)reg_vouched_});
             if (covered.size() < db_.images.size())
                 slog::diag(slog::Tag::Map,
                            "[map] registration attempts that failed: %u too few candidates, "
@@ -2614,7 +2651,7 @@ private:
         if (std::fabs(focal - probe_focal) > 1e-9) seed_geom_.clear();
         used_seeds_.clear();
         seed_pair_ = nullptr;
-        init_relax_ = 0;
+        init_relax_ = seed_phase_ = 0;
         resetModel();
     }
 
@@ -2650,18 +2687,24 @@ private:
 
     bool initialize(size_t& from) {
         init_tally_ = InitTally();
-        // The reached relaxation level is sticky across seed retries (D19's
-        // best-of-attempts loop): a fresh attempt resumes at the level that
-        // last produced a seed, keeping the `from` cursor's indexing valid.
+        // The relaxation level and, with sequences, the phase (neighbour pairs
+        // first, every pair once those are exhausted, D79) are sticky across
+        // seed retries, which keeps the `from` cursor's indexing valid (D19).
         const int levels = opt_.init_max_forward_motion >= 1.0 ? 4 : 8;
-        for (; init_relax_ < levels; init_relax_++, from = 0) {
-            const InitLevel l = initLevel(init_relax_);
-            if (init_relax_ && from == 0 && opt_.verbose)
-                slog::out(slog::Tag::Map,
-                         l.allow_forward ? spirula::i18n::msg::sfm::map_seed_relax_forward
-                                         : spirula::i18n::msg::sfm::map_seed_relax,
-                         {(long long)l.inliers, slog::num(l.angle, 0)});
-            if (initializeAttempt(from, l.angle, l.inliers, l.allow_forward)) return true;
+        const int phases = seq_ ? 2 : 1;
+        for (; seed_phase_ < phases; seed_phase_++, init_relax_ = 0, from = 0) {
+            for (; init_relax_ < levels; init_relax_++, from = 0) {
+                const InitLevel l = initLevel(init_relax_);
+                if (init_relax_ && from == 0 && opt_.verbose)
+                    slog::out(slog::Tag::Map,
+                             l.allow_forward ? spirula::i18n::msg::sfm::map_seed_relax_forward
+                                             : spirula::i18n::msg::sfm::map_seed_relax,
+                             {(long long)l.inliers, slog::num(l.angle, 0)});
+                if (initializeAttempt(from, l.angle, l.inliers, l.allow_forward)) return true;
+            }
+            if (seed_phase_ == 0 && seq_ && opt_.verbose)
+                slog::diag(slog::Tag::Map,
+                           "[map] no seed among sequence neighbours; trying every pair");
         }
         return false;
     }
@@ -2676,18 +2719,24 @@ private:
         // once per cluster -- a quarter of a bottom-up run's mapper time.
         if (!seed_cand_valid_) {
             seed_cand_.clear();
-            for (const TwoViewMatches& p : db_.pairs)
-                if (p.config == (int)TwoViewConfig::Uncalibrated && allowed(p.image1) &&
-                    allowed(p.image2))
-                    seed_cand_.push_back(&p);
-            std::sort(seed_cand_.begin(), seed_cand_.end(), [](auto* a, auto* b) {
+            seed_cand_far_.clear();
+            for (const TwoViewMatches& p : db_.pairs) {
+                if (p.config != (int)TwoViewConfig::Uncalibrated || !allowed(p.image1) ||
+                    !allowed(p.image2))
+                    continue;
+                // Sequence neighbours seed first; the rest wait for phase 1.
+                (!seq_ || near(p.image1, p.image2) ? seed_cand_ : seed_cand_far_).push_back(&p);
+            }
+            auto by_inliers = [](auto* a, auto* b) {
                 if (a->matches.size() != b->matches.size())
                     return a->matches.size() > b->matches.size();
                 return a->image1 != b->image1 ? a->image1 < b->image1 : a->image2 < b->image2;
-            });
+            };
+            std::sort(seed_cand_.begin(), seed_cand_.end(), by_inliers);
+            std::sort(seed_cand_far_.begin(), seed_cand_far_.end(), by_inliers);
             seed_cand_valid_ = true;
         }
-        const std::vector<const TwoViewMatches*>& cand = seed_cand_;
+        const std::vector<const TwoViewMatches*>& cand = seed_phase_ ? seed_cand_far_ : seed_cand_;
 
         // The scan is serial by construction -- the first candidate that clears
         // the level's thresholds wins, and each trial mutates rec_ -- but the
@@ -2972,11 +3021,19 @@ private:
             score_cache_.assign(db_.images.size(), 0);
             pyramid_.assign(db_.images.size(), std::vector<uint16_t>(kPyrCells, 0));
             pyramid_score_.assign(db_.images.size(), 0);
+            if (seq_) {
+                near_support_.resize(db_.images.size());
+                for (size_t i = 0; i < db_.images.size(); i++)
+                    near_support_[i].assign(feats_[i].count(), 0);
+                near_score_.assign(db_.images.size(), 0);
+            }
         } else {
             for (auto& s : support_) std::fill(s.begin(), s.end(), 0);
             std::fill(score_cache_.begin(), score_cache_.end(), 0);
             for (auto& p : pyramid_) std::fill(p.begin(), p.end(), 0);
             std::fill(pyramid_score_.begin(), pyramid_score_.end(), 0);
+            for (auto& s : near_support_) std::fill(s.begin(), s.end(), 0);
+            std::fill(near_score_.begin(), near_score_.end(), 0);
         }
         for (const auto& kv : rec_.images) {
             const Image& im = kv.second;
@@ -2989,11 +3046,28 @@ private:
     // Feature f of registered image img just joined a 3D point: every
     // correspondence of (img, f) gains one unit of support.
     void attachObservation(uint32_t img, uint32_t f) {
-        for (const Correspondence& c : graph_.at(img, f))
+        for (const Correspondence& c : graph_.at(img, f)) {
             if (++support_[c.image_id][c.feature_idx] == 1) {
                 score_cache_[c.image_id]++;
                 pyramidSet(c.image_id, c.feature_idx);
             }
+            if (seq_ && near(img, c.image_id) && ++near_support_[c.image_id][c.feature_idx] == 1)
+                near_score_[c.image_id]++;
+        }
+    }
+
+    // ---- sequences (D79) --------------------------------------------------
+    // A duplicate verifies against the wrong copy of itself; correspondences to
+    // sequence neighbours cannot, so they come first (README, "Sequences").
+    bool near(uint32_t a, uint32_t b) const {
+        return seq_ && seq_->near(a, b, opt_.sequence_window);
+    }
+
+    // Whether a candidate's neighbours alone could register it: the near score
+    // of its frame when the rig places frames whole, else its own.
+    bool nearReady(uint32_t img) const {
+        if (!seq_) return false;
+        return frameScoreOf(img, near_score_) >= opt_.min_num_pnp_inliers;
     }
 
     // ---- visibility pyramid (D52) -----------------------------------------
@@ -3043,6 +3117,24 @@ private:
     // not worth delaying a fresh candidate for.
     std::vector<uint32_t> chooseNextImages() const {
         static const bool score_check = spirula::env("SFM_SCORE_CHECK") != nullptr;
+        // Registered images per sequence position, for the frontier distance.
+        std::vector<std::vector<uint16_t>> at_pos;
+        if (seq_) {
+            at_pos.resize(seq_->length.size());
+            for (size_t k = 0; k < at_pos.size(); k++) at_pos[k].assign(seq_->length[k], 0);
+            for (const auto& kv : rec_.images)
+                if (kv.second.registered && seq_->has(kv.first))
+                    at_pos[seq_->seq[kv.first]][seq_->pos[kv.first]]++;
+        }
+        auto frontier = [&](uint32_t i) {
+            if (!seq_->has(i)) return opt_.sequence_window + 1;  // a rig-mate outside it
+            const int32_t sq = seq_->seq[i], p = seq_->pos[i];
+            for (int d = 0; d <= opt_.sequence_window; d++) {
+                if (p - d >= 0 && at_pos[sq][p - d]) return d;
+                if (p + d < (int32_t)at_pos[sq].size() && at_pos[sq][p + d]) return d;
+            }
+            return opt_.sequence_window + 1;
+        };
         std::vector<std::pair<uint64_t, uint32_t>> ranked;
         for (uint32_t i = 0; i < db_.images.size(); i++) {
             if (rec_.images.at(i).registered) continue;
@@ -3058,10 +3150,16 @@ private:
             // Off: the raw correspondence count, every candidate in one bucket.
             // On: COLMAP's policy -- spread-based rank, and an image that has
             // already failed once sorts behind every untried one.
-            const uint64_t rank =
-                opt_.rank_by_visibility
-                    ? ((reg_trials_[i] ? 0ull : 1ull) << 32) | pyramid_score_[i]
-                    : (uint64_t)s;
+            uint64_t rank = opt_.rank_by_visibility ? (uint64_t)pyramid_score_[i] : (uint64_t)s;
+            if (opt_.rank_by_visibility && !reg_trials_[i]) rank |= 1ull << 48;
+            // The sequence frontier -- images whose neighbours alone could
+            // place them -- ahead of everything, nearest to the model first,
+            // so growth is a sweep and each image meets its full support (D79).
+            if (nearReady(i)) {
+                const uint64_t closeness = (uint64_t)std::min(
+                    65535, std::max(0, opt_.sequence_window + 1 - frontier(i)));
+                rank |= (1ull << 49) | (closeness << 32);
+            }
             ranked.emplace_back(rank, i);
         }
         std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
@@ -3074,16 +3172,23 @@ private:
         return out;
     }
 
-    // The 2D-3D correspondences an unregistered image has to the model (one
-    // 3D point per feature: the first seen).
+    // The 2D-3D correspondences an unregistered image has to the model, one 3D
+    // point per feature: the first a sequence neighbour sees, else the first
+    // seen. `nearf`, when asked for, says which came from a neighbour.
     void gatherCorrespondences(uint32_t img, std::vector<Vec3>& X, std::vector<Vec3>& br,
-                               std::vector<uint32_t>& feat, std::vector<uint64_t>& pid) const {
+                               std::vector<uint32_t>& feat, std::vector<uint64_t>& pid,
+                               std::vector<char>* nearf = nullptr) const {
         for (uint32_t f = 0; f < feats_[img].count(); f++) {
             uint64_t chosen = kInvalidPoint3D;
+            bool from_near = false;
             for (const Correspondence& c : graph_.at(img, f)) {
                 const Image& oi = rec_.images.at(c.image_id);
-                if (oi.registered && oi.point3D_ids[c.feature_idx] != kInvalidPoint3D) {
+                if (!oi.registered || oi.point3D_ids[c.feature_idx] == kInvalidPoint3D) continue;
+                if (chosen == kInvalidPoint3D) chosen = oi.point3D_ids[c.feature_idx];
+                if (!seq_) break;
+                if (near(img, c.image_id)) {
                     chosen = oi.point3D_ids[c.feature_idx];
+                    from_near = true;
                     break;
                 }
             }
@@ -3092,7 +3197,74 @@ private:
             br.push_back(bearing(img, f));
             feat.push_back(f);
             pid.push_back(chosen);
+            if (nearf) nearf->push_back(from_near ? 1 : 0);
         }
+    }
+
+    // `r` comes in as the whole pool's pose and leaves as the winner against
+    // the one the near correspondences (`nearf`) support on their own, judged
+    // by near inliers first (D79). True when it changed.
+    bool preferNearPose(uint32_t img, const std::vector<Vec3>& X, const std::vector<Vec3>& br,
+                        const std::vector<char>& nearf, PnPResult& r) {
+        std::vector<Vec3> Xn, bn;
+        for (size_t k = 0; k < X.size(); k++)
+            if (nearf[k]) { Xn.push_back(X[k]); bn.push_back(br[k]); }
+        if ((int)Xn.size() < opt_.min_num_pnp_inliers) return false;
+        PnPResult n = ransacPnP(Xn, bn, camOf(img).focal(), errPx(img));
+        if (!n.success || n.num_inliers < opt_.min_num_pnp_inliers) return false;
+        int r_near = 0;
+        if (r.success)
+            for (size_t k = 0; k < X.size(); k++) r_near += (nearf[k] && r.inlier_mask[k]) ? 1 : 0;
+        if (n.num_inliers <= r_near) return false;
+        r.pose = n.pose;
+        r.success = true;
+        classify(img, X, br, r);
+        reg_near_won_++;
+        return true;
+    }
+
+    // Inliers of `r.pose` over the pool, at the image's own radius.
+    void classify(uint32_t img, const std::vector<Vec3>& X, const std::vector<Vec3>& br,
+                  PnPResult& r) const {
+        double thr = camOf(img).errRad(opt_.max_reproj_error);
+        thr *= thr;
+        r.inlier_mask.assign(X.size(), 0);
+        r.num_inliers = 0;
+        for (size_t k = 0; k < X.size(); k++) {
+            r.inlier_mask[k] = pnpResidualSq(r.pose, X[k], br[k]) < thr;
+            r.num_inliers += r.inlier_mask[k] ? 1 : 0;
+        }
+    }
+
+    // SS_SFM_SEQ_DUMP=1: one line per registration attempt under a sequence.
+    void seqDump(uint32_t img, const std::vector<Vec3>& X, const std::vector<char>& nearf,
+                 const PnPResult& r, const PnPResult& rival, const char* verdict) const {
+        if (!seq_dump_ || !seq_) return;
+        int near_pool = 0, near_inl = 0, rival_inl = 0;
+        for (size_t k = 0; k < X.size(); k++) {
+            near_pool += nearf[k] ? 1 : 0;
+            near_inl += (nearf[k] && r.inlier_mask[k]) ? 1 : 0;
+            rival_inl += (rival.success && rival.inlier_mask[k]) ? 1 : 0;
+        }
+        slog::diag(slog::Tag::Map, "[seq] %s: near %d/%d, whole %d/%zu, rival %d -> %s",
+                   db_.images[img].name.c_str(), near_inl, near_pool, r.num_inliers, X.size(),
+                   rival_inl, verdict);
+    }
+
+    // The ratio gate with a rival (the whole pool's pose the neighbours
+    // overruled): what the rival explains and this pose does not is the
+    // duplicate's evidence and leaves the denominator; noise stays (D79).
+    bool ratioOkRival(uint32_t img, const std::vector<Vec3>& X, const std::vector<Vec3>& br,
+                      const PnPResult& r, const PnPResult& rival, bool count = true) {
+        std::vector<char> vis;
+        const size_t pool = visibleMask(img, X, br, r.pose, vis);
+        if (!rival.success) return ratioOk(r.num_inliers, pool);
+        size_t excluded = 0;
+        for (size_t k = 0; k < X.size(); k++)
+            excluded += (vis[k] && rival.inlier_mask[k] && !r.inlier_mask[k]) ? 1 : 0;
+        if (!ratioOk(r.num_inliers, pool - excluded)) return false;
+        if (count && !ratioOk(r.num_inliers, pool)) reg_vouched_++;
+        return true;
     }
 
     // Commit a pose: register, continue the tracks its inliers belong to, and
@@ -3150,26 +3322,12 @@ private:
             return self;
         }
         if (registerFrame(img)) return true;
-        // Gather 2D-3D correspondences (one 3D point per feature: the first seen).
         std::vector<Vec3> X;
         std::vector<Vec3> br;   // observed unit bearings
         std::vector<uint32_t> feat;
         std::vector<uint64_t> pid;
-        for (uint32_t f = 0; f < feats_[img].count(); f++) {
-            uint64_t chosen = kInvalidPoint3D;
-            for (const Correspondence& c : graph_.at(img, f)) {
-                const Image& oi = rec_.images.at(c.image_id);
-                if (oi.registered && oi.point3D_ids[c.feature_idx] != kInvalidPoint3D) {
-                    chosen = oi.point3D_ids[c.feature_idx];
-                    break;
-                }
-            }
-            if (chosen == kInvalidPoint3D) continue;
-            X.push_back(rec_.points3D[chosen].xyz);
-            br.push_back(bearing(img, f));
-            feat.push_back(f);
-            pid.push_back(chosen);
-        }
+        std::vector<char> nearf;
+        gatherCorrespondences(img, X, br, feat, pid, seq_ ? &nearf : nullptr);
         if ((int)X.size() < opt_.min_num_pnp_inliers) { reg_fail_.few_corr++; return false; }
 
         const uint32_t cid = rec_.images[img].camera_id;
@@ -3183,8 +3341,13 @@ private:
         // lets a second camera group depart from a focal that was measured
         // over the first. The runaway is caught by sanitizeCameras and by the
         // joint refinement (D45), so the sweep stays.
+        PnPResult rival;  // the whole pool's answer, when the neighbours overruled it
         if (focal_known_.count(cid) || opt_.focal_search_samples <= 0) {
             r = ransacPnP(X, br, camOf(img).focal(), errPx(img));
+            if (seq_) {
+                const PnPResult whole = r;
+                if (preferNearPose(img, X, br, nearf, r)) rival = whole;
+            }
         } else {
             // First image of this camera: its focal is still the no-EXIF guess,
             // and P3P consumes *calibrated* bearings, so a wrong focal fails
@@ -3213,9 +3376,9 @@ private:
             reg_fail_.few_inliers++;
             return false;
         }
-        if (!ratioOk(r.num_inliers, visiblePool(img, X, br, r.pose)) &&
-            !strongUnambiguous(img, X, br, r)) {
+        if (!ratioOkRival(img, X, br, r, rival, false) && !strongUnambiguous(img, X, br, r)) {
             reg_fail_.low_ratio++;
+            seqDump(img, X, nearf, r, rival, "refused (ratio)");
             return false;
         }
 
@@ -3248,21 +3411,18 @@ private:
         }
         // Re-classify against the refined pose; the gates apply to the final
         // consensus, not the RANSAC one.
-        double thr = camOf(img).errRad(opt_.max_reproj_error);
-        thr *= thr;
-        r.num_inliers = 0;
-        for (size_t k = 0; k < X.size(); k++) {
-            r.inlier_mask[k] = pnpResidualSq(r.pose, X[k], br[k]) < thr;
-            r.num_inliers += r.inlier_mask[k] ? 1 : 0;
-        }
+        classify(img, X, br, r);
         if (r.num_inliers < opt_.min_num_pnp_inliers) { reg_fail_.refined_out++; return false; }
         const size_t pool = visiblePool(img, X, br, r.pose);
-        if (!ratioOk(r.num_inliers, pool)) {
+        const uint32_t vouched_before = reg_vouched_;
+        if (!ratioOkRival(img, X, br, r, rival)) {
             reg_fail_.refined_out++;
+            seqDump(img, X, nearf, r, rival, "refused (ratio after refinement)");
             return false;
         }
-        if ((double)r.num_inliers < opt_.min_pnp_inlier_ratio * (double)pool)
-            reg_fail_.strong++;
+        if (!ratioOk(r.num_inliers, pool) && reg_vouched_ == vouched_before) reg_fail_.strong++;
+        seqDump(img, X, nearf, r, rival, reg_vouched_ > vouched_before ? "placed (rival excluded)"
+                                                                        : "placed");
         if (pool < X.size()) reg_fail_.occluded += (uint32_t)(X.size() - pool);
         focal_known_.insert(cid);
 
@@ -3431,12 +3591,13 @@ private:
             std::vector<Vec3> X, br;
             std::vector<uint32_t> feat;
             std::vector<uint64_t> pid;
-            std::vector<char> inl;
+            std::vector<char> inl, nearf;
+            std::vector<Vec3> Xn, bn;   // the sequence neighbours' share of X, br
             int n = 0;
             size_t pool = 0;
         };
         std::vector<Member> ms;
-        size_t total = 0;
+        size_t total = 0, total_near = 0;
         for (uint32_t m = 0; m < rigs_->frameOf(sl).size(); m++) {
             const uint32_t j = rigs_->frameOf(sl)[m];
             if (j == kNoImage || !c.usable(m) || rec_.rig_detached.count(j) || !allowed(j))
@@ -3445,9 +3606,12 @@ private:
             Member e;
             e.img = j;
             e.m = m;
-            gatherCorrespondences(j, e.X, e.br, e.feat, e.pid);
+            gatherCorrespondences(j, e.X, e.br, e.feat, e.pid, seq_ ? &e.nearf : nullptr);
             e.inl.assign(e.X.size(), 0);
+            for (size_t k = 0; k < e.nearf.size(); k++)
+                if (e.nearf[k]) { e.Xn.push_back(e.X[k]); e.bn.push_back(e.br[k]); }
             total += e.X.size();
+            total_near += e.Xn.size();
             ms.push_back(std::move(e));
         }
         if (ms.size() < 2 || (int)total < opt_.min_num_pnp_inliers) return false;
@@ -3463,21 +3627,67 @@ private:
             }
             return n;
         };
-        std::vector<RigPnPMember> gm;
+        auto nearInliers = [&](const Pose& F) {
+            int n = 0;
+            for (const Member& e : ms) {
+                const Pose p = c.camFromWorld(e.m, F);
+                const double t = camOf(e.img).errRad(opt_.max_reproj_error);
+                for (size_t k = 0; k < e.Xn.size(); k++)
+                    n += pnpResidualSq(p, e.Xn[k], e.bn[k]) < t * t ? 1 : 0;
+            }
+            return n;
+        };
+        std::vector<RigPnPMember> gm, gm_near;
         gm.reserve(ms.size());
-        for (Member& e : ms)
-            gm.push_back({&e.X, &e.br, c.cam_from_rig[e.m],
-                          camOf(e.img).errRad(opt_.max_reproj_error)});
-        const RigPnPResult r = ransacRigPnP(gm);
-        if (!r.success || r.num_inliers < opt_.min_num_pnp_inliers) return false;
-        Pose best = r.rig_from_world;
-        const int n = consensus(best);
-        size_t pool = 0;
         for (Member& e : ms) {
-            e.pool = visiblePool(e.img, e.X, e.br, c.camFromWorld(e.m, best));
-            pool += e.pool;
+            const double t = camOf(e.img).errRad(opt_.max_reproj_error);
+            gm.push_back({&e.X, &e.br, c.cam_from_rig[e.m], t});
+            gm_near.push_back({&e.Xn, &e.bn, c.cam_from_rig[e.m], t});
         }
-        const bool ok = n >= opt_.min_num_pnp_inliers && ratioOk(n, pool);
+        const RigPnPResult r = ransacRigPnP(gm);
+        bool have = r.success && r.num_inliers >= opt_.min_num_pnp_inliers;
+        Pose best = r.rig_from_world;
+        // The neighbours' pose against the whole pool's, as preferNearPose;
+        // the whole pool's then stands as the rival, as in ratioOkRival.
+        std::vector<std::vector<char>> rival;
+        if (seq_ && (int)total_near >= opt_.min_num_pnp_inliers) {
+            const RigPnPResult rn = ransacRigPnP(gm_near);
+            if (rn.success && rn.num_inliers >= opt_.min_num_pnp_inliers &&
+                rn.num_inliers > (have ? nearInliers(best) : -1)) {
+                if (have) {
+                    consensus(best);
+                    for (const Member& e : ms) rival.push_back(e.inl);
+                }
+                best = rn.rig_from_world;
+                have = true;
+                reg_near_won_++;
+            }
+        }
+        if (!have) return false;
+        const int n = consensus(best);
+        size_t pool = 0, excluded = 0;
+        int near_pool = 0, near_inl = 0, rival_inl = 0;
+        for (size_t mi = 0; mi < ms.size(); mi++) {
+            Member& e = ms[mi];
+            std::vector<char> vis;
+            e.pool = visibleMask(e.img, e.X, e.br, c.camFromWorld(e.m, best), vis);
+            pool += e.pool;
+            for (size_t k = 0; k < e.X.size(); k++) {
+                if (!rival.empty() && vis[k] && rival[mi][k] && !e.inl[k]) excluded++;
+                if (!rival.empty()) rival_inl += rival[mi][k] ? 1 : 0;
+                if (!e.nearf.empty()) {
+                    near_pool += e.nearf[k] ? 1 : 0;
+                    near_inl += (e.nearf[k] && e.inl[k]) ? 1 : 0;
+                }
+            }
+        }
+        const bool ok = n >= opt_.min_num_pnp_inliers && ratioOk(n, pool - excluded);
+        if (ok && !ratioOk(n, pool)) reg_vouched_++;
+        if (seq_dump_ && seq_)
+            slog::diag(slog::Tag::Map, "[seq] frame of %s: near %d/%d, whole %d/%zu, rival %d -> %s",
+                       db_.images[img].name.c_str(), near_inl, near_pool, n, total, rival_inl,
+                       ok ? (ratioOk(n, pool) ? "placed" : "placed (rival excluded)")
+                          : "refused (ratio)");
         if (rig_dump_) {
             std::string per;
             for (Member& e : ms)
@@ -3508,8 +3718,10 @@ private:
 
     // What a candidate is worth to try: its own correspondences, or its
     // frame's when the rig can place the frame as one thing.
-    int frameScore(uint32_t img) const {
-        const int s = score_cache_[img];
+    int frameScore(uint32_t img) const { return frameScoreOf(img, score_cache_); }
+
+    int frameScoreOf(uint32_t img, const std::vector<int>& scores) const {
+        const int s = scores[img];
         if (!rigs_ || rec_.rig_detached.count(img)) return s;
         const RigSlot sl = rigs_->slot(img);
         if (!sl.valid() || sl.rig >= rec_.rigs.size()) return s;
@@ -3520,7 +3732,7 @@ private:
             const uint32_t j = rigs_->frameOf(sl)[m];
             if (j == kNoImage || !c.usable(m) || rec_.rig_detached.count(j)) continue;
             if (rec_.images.at(j).registered) return s;
-            sum += score_cache_[j];
+            sum += scores[j];
         }
         return std::max(s, sum);
     }
@@ -4354,6 +4566,7 @@ private:
     // SS_SFM_RIG_DUMP=1 prints every rig placement's verdict and by how much
     // the refinement moved it, which is how the tolerance above was set.
     const bool rig_dump_ = spirula::env("SFM_RIG_DUMP") != nullptr;
+    const bool seq_dump_ = spirula::env("SFM_SEQ_DUMP") != nullptr;  // seqDump()
     mutable double scale_cache_ = 0;  // modelScale(), reset by resetModel()
     int init_relax_ = 0;              // reached seed-threshold relaxation level
     InitTally init_tally_;            // why the last initialize() found nothing
@@ -4383,6 +4596,32 @@ private:
     // How many of the offered correspondences this pose could explain at all:
     // the point in front of the camera and projecting inside the frame. See
     // pnp_ratio_visible_only -- this is the ratio's denominator.
+    size_t visibleMask(uint32_t img, const std::vector<Vec3>& X, const std::vector<Vec3>& br,
+                       const Pose& pose, std::vector<char>& vis) const {
+        vis.assign(X.size(), 1);
+        if (!opt_.pnp_ratio_visible_only) return X.size();
+        const Camera& cam = camOf(img);
+        const double w = cam.width > 0 ? (double)cam.width : 1e9;
+        const double h = cam.height > 0 ? (double)cam.height : 1e9;
+        const double mx = 0.05 * w, my = 0.05 * h;
+        size_t n = 0;
+        for (size_t k = 0; k < X.size(); k++) {
+            vis[k] = 0;
+            const Vec3 pc = mul(pose.R, X[k]) + pose.t;
+            if (cam.wideFov()) {
+                if (k < br.size() && pc.dot(br[k]) <= 0) continue;
+            } else if (pc.z < 1e-8) {
+                continue;
+            }
+            const Vec2 px = cam.project(pc);
+            if (!std::isfinite(px.x) || !std::isfinite(px.y)) continue;
+            if (px.x < -mx || px.y < -my || px.x > w + mx || px.y > h + my) continue;
+            vis[k] = 1;
+            n++;
+        }
+        return n;
+    }
+
     size_t visiblePool(uint32_t img, const std::vector<Vec3>& X,
                        const std::vector<Vec3>& br, const Pose& pose) const {
         if (!opt_.pnp_ratio_visible_only) return X.size();
@@ -4457,6 +4696,12 @@ private:
         uint32_t occluded = 0;   // correspondences the accepted pose could not see at all
     } reg_fail_;
     const RigTable* rigs_ = nullptr;  // null = no rigs, or --no-use-rigs
+    const SequenceTable* seq_ = nullptr;  // null = no sequences
+    std::vector<std::vector<uint16_t>> near_support_;  // support_ over sequence neighbours only
+    std::vector<int> near_score_;                      // per image, features with near support
+    uint32_t reg_vouched_ = 0;   // registrations the neighbours carried past the pool's ratio
+    uint32_t reg_near_won_ = 0;  // ... where the neighbours' pose beat the whole pool's
+    int seed_phase_ = 0;         // 0: seed among neighbour pairs, 1: among every pair
     uint32_t reg_by_rig_ = 0;         // registrations the rig placed, summed over the run
     uint32_t reg_rig_word_ = 0;       // ... of them with no inlier of their own
     uint32_t frame_regs_ = 0;         // rig-mates placed beside the candidate
@@ -4475,8 +4720,9 @@ private:
     size_t allow_count_ = 0;          // ... and how many are set
     std::vector<uint32_t> model_count_;
     std::vector<uint8_t> seeded_;     // blockSeeds(); images an attempt reached
-    // Seed candidates for the current restriction, most inliers first.
-    std::vector<const TwoViewMatches*> seed_cand_;
+    // Seed candidates for the current restriction, most inliers first; with
+    // sequences, the neighbour pairs and then every other pair (D79).
+    std::vector<const TwoViewMatches*> seed_cand_, seed_cand_far_;
     bool seed_cand_valid_ = false;
     // Persistent BA context (D38): device + pipelines survive across the
     // mapper's many global BAs; each solve only creates/frees its own

@@ -109,6 +109,10 @@ struct SfmJob {
     // Pair selection only: also match each image with its neighbours in file
     // order, the converse of the above.
     bool prefilter_sequential = false;
+    // Hand the reconstruction the frame order of every video and of every
+    // folder marked as shot in order (the manifest's `sequences:`), so the
+    // mapper places an image among its neighbours before it consults the rest.
+    bool use_sequence = true;
     float init_focal_px = 0.0f;       // 0 = guess from EXIF / image size
     // Starting distortion, "k1,k2,..." in the lens model's own order; empty
     // starts at zero.
@@ -275,6 +279,7 @@ private:
 #ifdef SS_TOOL_SFM
     // The panel's per-input lens and focal rows, as the file the run reads.
     sfm::Manifest build_manifest(const SfmJob& job, const PrepResult& prep);
+    static std::vector<sfm::SequenceDef> build_sequences(const SfmJob& job);
     static std::vector<sfm::RigDef> build_rigs(const PrepJob& prep,
                                                const PrepResult* res = nullptr);
 #endif

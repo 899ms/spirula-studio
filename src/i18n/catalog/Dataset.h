@@ -12574,6 +12574,154 @@ inline const DatasetPresetText* preset_text(const char* name) {
     return nullptr;
 }
 
+
+SS_MSG(frames_in_order,
+    EN("Shot in order"),
+    JA("撮影順に並んでいる"),
+    ZH_HANS("按拍摄顺序"),
+    ZH_HANT("按拍攝順序"),
+    KO("촬영 순서대로"),
+    DE("In Reihenfolge aufgenommen"),
+    FR("Prises dans l'ordre"),
+    ES("Tomadas en orden"),
+    PT("Captadas por ordem"),
+    IT("Scattate in ordine"),
+    NL("In volgorde opgenomen"),
+    RU("Сняты по порядку"),
+    TR("Sırayla çekildi"));
+
+SS_MSG(frames_in_order_help,
+    EN("The photos in this folder were taken one after another and are named in "
+       "shooting order, so the reconstruction may treat neighbouring files as "
+       "neighbouring views. A video's frames always are."),
+    JA("このフォルダーの写真は続けて撮影され、ファイル名が撮影順になっているため、"
+       "再構成では隣り合うファイルを隣り合う視点として扱えます。動画のフレームは"
+       "常にそうです。"),
+    ZH_HANS("这个文件夹里的照片是连续拍摄的，且文件名按拍摄顺序排列，重建时可以把"
+            "相邻的文件当作相邻的视角。视频帧总是如此。"),
+    ZH_HANT("這個資料夾裡的相片是連續拍攝的，且檔名按拍攝順序排列，重建時可以把"
+            "相鄰的檔案當作相鄰的視角。影片影格總是如此。"),
+    KO("이 폴더의 사진은 연속으로 촬영되었고 파일 이름이 촬영 순서대로여서, "
+       "재구성에서 이웃한 파일을 이웃한 시점으로 다룰 수 있습니다. 동영상 프레임은 "
+       "항상 그렇습니다."),
+    DE("Die Fotos in diesem Ordner wurden nacheinander aufgenommen und sind in "
+       "Aufnahmereihenfolge benannt, sodass die Rekonstruktion benachbarte Dateien "
+       "als benachbarte Ansichten behandeln darf. Die Frames eines Videos sind es "
+       "immer."),
+    FR("Les photos de ce dossier ont été prises l'une après l'autre et sont nommées "
+       "dans l'ordre de prise de vue, si bien que la reconstruction peut traiter des "
+       "fichiers voisins comme des vues voisines. Les images d'une vidéo le sont "
+       "toujours."),
+    ES("Las fotos de esta carpeta se tomaron una tras otra y están nombradas en orden "
+       "de captura, así que la reconstrucción puede tratar archivos vecinos como "
+       "vistas vecinas. Los fotogramas de un vídeo siempre lo son."),
+    PT("As fotografias desta pasta foram captadas uma após a outra e têm nomes por "
+       "ordem de captação, pelo que a reconstrução pode tratar ficheiros vizinhos "
+       "como vistas vizinhas. Os quadros de um vídeo são-no sempre."),
+    IT("Le foto in questa cartella sono state scattate una dopo l'altra e sono "
+       "nominate in ordine di scatto, quindi la ricostruzione può trattare file "
+       "vicini come viste vicine. I fotogrammi di un video lo sono sempre."),
+    NL("De foto's in deze map zijn na elkaar genomen en in opnamevolgorde benoemd, "
+       "zodat de reconstructie naburige bestanden als naburige gezichtspunten mag "
+       "behandelen. De frames van een video zijn dat altijd."),
+    RU("Фотографии в этой папке сняты одна за другой и названы в порядке съёмки, "
+       "поэтому реконструкция может считать соседние файлы соседними ракурсами. "
+       "Кадры видео таковы всегда."),
+    TR("Bu klasördeki fotoğraflar art arda çekilmiş ve çekim sırasına göre "
+       "adlandırılmıştır; bu yüzden yeniden oluşturma komşu dosyaları komşu "
+       "bakış açıları olarak ele alabilir. Bir videonun kareleri her zaman "
+       "öyledir."));
+
+SS_MSG(use_sequence,
+    EN("Use the frame order"),
+    JA("フレームの順序を使う"),
+    ZH_HANS("利用帧的顺序"),
+    ZH_HANT("利用影格的順序"),
+    KO("프레임 순서 사용"),
+    DE("Bildreihenfolge nutzen"),
+    FR("Utiliser l'ordre des images"),
+    ES("Usar el orden de los fotogramas"),
+    PT("Usar a ordem dos quadros"),
+    IT("Usare l'ordine dei fotogrammi"),
+    NL("Beeldvolgorde gebruiken"),
+    RU("Учитывать порядок кадров"),
+    TR("Kare sırasını kullan"));
+
+SS_MSG(use_sequence_help,
+    EN("For video frames and folders marked as shot in order: the mapper places "
+       "each image among its neighbours in the sequence before it consults the "
+       "rest of the model, and starts the model from a neighbouring pair. That is "
+       "what keeps a repeated structure -- one turn of a spiral staircase, a "
+       "symmetric gate seen from both sides -- from being folded onto its twin. "
+       "Off reconstructs from image content alone."),
+    JA("動画のフレームと「撮影順に並んでいる」フォルダーに対して、マッパーは各"
+       "画像をまずシーケンス内の隣接画像の間に配置してからモデルの残りを参照し、"
+       "モデルも隣接ペアから始めます。らせん階段の一周や両側から撮った対称的な"
+       "ゲートのような繰り返し構造が、そっくりな相手の上に折り畳まれるのを防ぎ"
+       "ます。オフでは画像の内容だけで再構成します。"),
+    ZH_HANS("对视频帧和标记为“按拍摄顺序”的文件夹：建图时先把每张图像放到序列中"
+            "相邻图像之间，再参考模型的其余部分，并从一对相邻图像开始建模。这样"
+            "重复的结构——螺旋楼梯的一圈、从两侧拍摄的对称门框——就不会被折叠到"
+            "它的孪生结构上。关闭后仅凭图像内容重建。"),
+    ZH_HANT("對影片影格和標記為「按拍攝順序」的資料夾：建圖時先把每張影像放到序列中"
+            "相鄰影像之間，再參考模型的其餘部分，並從一對相鄰影像開始建模。這樣"
+            "重複的結構——螺旋樓梯的一圈、從兩側拍攝的對稱門框——就不會被摺疊到"
+            "它的孿生結構上。關閉後僅憑影像內容重建。"),
+    KO("동영상 프레임과 '촬영 순서대로'로 표시한 폴더에 대해: 매퍼는 각 이미지를 "
+       "먼저 시퀀스의 이웃 사이에 놓은 뒤 모델의 나머지를 참고하고, 이웃한 한 쌍에서 "
+       "모델을 시작합니다. 나선 계단의 한 바퀴나 양쪽에서 본 대칭 게이트 같은 "
+       "반복 구조가 쌍둥이 구조 위로 접히는 것을 막아 줍니다. 끄면 이미지 내용만으로 "
+       "재구성합니다."),
+    DE("Für Videoframes und als in Reihenfolge aufgenommen markierte Ordner: Der "
+       "Mapper setzt jedes Bild zuerst zwischen seine Nachbarn in der Sequenz, "
+       "bevor er den Rest des Modells befragt, und beginnt das Modell mit einem "
+       "benachbarten Paar. Das verhindert, dass eine wiederholte Struktur -- eine "
+       "Windung einer Wendeltreppe, ein symmetrisches Tor von beiden Seiten -- auf "
+       "ihren Zwilling gefaltet wird. Aus rekonstruiert allein aus dem Bildinhalt."),
+    FR("Pour les images d'une vidéo et les dossiers marqués comme pris dans l'ordre : "
+       "le mapper place chaque image parmi ses voisines de la séquence avant de "
+       "consulter le reste du modèle, et démarre le modèle sur une paire voisine. "
+       "C'est ce qui empêche une structure répétée -- un tour d'escalier en "
+       "colimaçon, un portique symétrique vu des deux côtés -- d'être repliée sur "
+       "sa jumelle. Désactivé, la reconstruction ne se fonde que sur le contenu des "
+       "images."),
+    ES("Para fotogramas de vídeo y carpetas marcadas como tomadas en orden: el "
+       "mapeador coloca cada imagen entre sus vecinas de la secuencia antes de "
+       "consultar el resto del modelo, y arranca el modelo desde un par vecino. Eso "
+       "evita que una estructura repetida -- una vuelta de una escalera de caracol, "
+       "una puerta simétrica vista desde ambos lados -- se pliegue sobre su gemela. "
+       "Desactivado, reconstruye solo a partir del contenido de las imágenes."),
+    PT("Para quadros de vídeo e pastas marcadas como captadas por ordem: o mapeador "
+       "coloca cada imagem entre as suas vizinhas na sequência antes de consultar o "
+       "resto do modelo, e começa o modelo a partir de um par vizinho. É isso que "
+       "impede que uma estrutura repetida -- uma volta de uma escada em caracol, um "
+       "portal simétrico visto de ambos os lados -- seja dobrada sobre a sua gémea. "
+       "Desligado, reconstrói apenas a partir do conteúdo das imagens."),
+    IT("Per i fotogrammi di un video e le cartelle segnate come scattate in ordine: "
+       "il mapper colloca ogni immagine tra le sue vicine nella sequenza prima di "
+       "consultare il resto del modello, e avvia il modello da una coppia vicina. È "
+       "ciò che impedisce a una struttura ripetuta -- un giro di scala a chiocciola, "
+       "un portale simmetrico visto da entrambi i lati -- di essere ripiegata sulla "
+       "sua gemella. Spento, ricostruisce dal solo contenuto delle immagini."),
+    NL("Voor videoframes en mappen gemarkeerd als in volgorde opgenomen: de mapper "
+       "plaatst elk beeld eerst tussen zijn buren in de reeks voordat hij de rest "
+       "van het model raadpleegt, en begint het model met een naburig paar. Dat "
+       "voorkomt dat een herhaalde structuur -- één winding van een wenteltrap, een "
+       "symmetrische poort van beide kanten gezien -- op zijn tweeling wordt "
+       "gevouwen. Uit reconstrueert alleen uit de beeldinhoud."),
+    RU("Для кадров видео и папок, помеченных как снятые по порядку: маппер сначала "
+       "ставит каждое изображение среди его соседей по последовательности и лишь "
+       "затем обращается к остальной модели, а саму модель начинает с соседней "
+       "пары. Именно это не даёт повторяющейся структуре -- витку винтовой "
+       "лестницы, симметричным воротам, снятым с двух сторон -- сложиться на своего "
+       "двойника. Выключено: реконструкция только по содержимому изображений."),
+    TR("Video kareleri ve sırayla çekildi olarak işaretlenen klasörler için: "
+       "haritalayıcı her görüntüyü modelin geri kalanına bakmadan önce dizideki "
+       "komşularının arasına yerleştirir ve modeli komşu bir çiftten başlatır. "
+       "Yinelenen bir yapının -- bir döner merdivenin bir turu, iki yandan görülen "
+       "simetrik bir kapı -- ikizinin üzerine katlanmasını önleyen budur. Kapalıyken "
+       "yalnızca görüntü içeriğinden yeniden oluşturur."));
+
 }  // namespace dataset
 }  // namespace msg
 }  // namespace i18n

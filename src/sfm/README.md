@@ -697,6 +697,99 @@ lockstep under one sharpness window, so every frame is a rig frame; without it
 each track keeps its own sharpest frame and only the coincidences are. A
 `.360` is always extracted in lockstep, and its ten views share a stem.
 
+## Sequences
+
+A sequence is a range of images the user says were taken in file-name order:
+a video's frames, or a folder shot in a walk. It is told to the run as path
+prefixes, exactly as a rig is:
+
+```bash
+spirula sfm auto IMAGES/ -o ws/ --sequence .              # the whole folder, in name order
+spirula sfm auto IMAGES/ -o ws/ --sequence cam0,cam1      # a dual-fisheye video's two tracks
+spirula sfm auto IMAGES/ -o ws/ --sequence clip1 --sequence clip2   # two clips, each in order
+```
+
+Images under two members with the same path share one *position* (cam0/00017
+and cam1/00017), so a rig's lenses are one sequence and not two. The manifest's
+`sequences:` list spells the same thing (`members:` per entry), and Spirula
+Studio writes one entry per video and per photo folder ticked "Shot in order",
+unless "Use the frame order" is off. `match` and `map` take `--sequence` too.
+With no sequence given nothing below runs and the pipeline is byte-for-byte
+the one before sequences existed.
+
+**What it is for.** A repeated structure -- one turn of a spiral staircase
+against the next, the two identical faces of a racing gate, the same corridor
+one floor up -- verifies against the wrong copy of itself with as many
+inliers as against the right one, and two-view verification cannot tell,
+because the geometry is genuinely consistent. The incremental mapper then
+ranks candidates by how much triangulated structure they see, so an image of
+the copy is placed on the original as soon as the original is in the model,
+and every image that registers through it follows. The model is
+self-consistent (0.5 px of reprojection), and wrong: a 488-frame walk up and
+down a spiral staircase came out with the turns stacked on one another, and a
+walk around four gates with all cameras on one side.
+
+What the view graph lacks is which images were taken *next to each other*,
+and a duplicate cannot fake that: the correspondences between an image and
+its neighbours in the sequence are to the copy the camera was actually in
+front of. So those are consulted first, and the rest of the model only where
+they are silent (D79):
+
+- **Seeding.** The seed pair is searched among neighbour pairs (positions at
+  most `--overlap` apart) through the whole relaxation ladder; every other
+  pair is offered only once those are exhausted. The seed is the one decision
+  no consensus can check afterwards.
+- **Ordering.** A candidate whose neighbours' points alone could register it
+  (at least `min_num_pnp_inliers` of them) ranks ahead of every other,
+  whatever its visibility spread, so the model grows along the sequence from
+  its frontier and reaches the copy through the walk that connects them,
+  rather than by content. Within the frontier the visibility ranking stands.
+- **The pose.** An image's 2D-3D pool prefers the neighbour's point for a
+  feature both a neighbour and a far image have triangulated, and each pool
+  entry is marked near or far. Beside the whole pool's PnP a second one runs
+  over the near entries alone; the two poses are judged by *near* inliers
+  first and total inliers second, so a pose that explains three hundred
+  points of the duplicate and none of the neighbours' loses to one that
+  explains the neighbours'. A rig frame does the same over every lens's
+  near entries at once.
+- **The ratio gate.** Under the sequence, far correspondences the pose does
+  not explain are the duplicate elsewhere, not evidence against; so when the
+  near entries carry the pose by themselves (their own count and their own
+  inlier ratio pass the ordinary gates) the whole pool's ratio is not
+  required. When they do not, everything is judged as before.
+- **The audit.** An alternative pose that explains more of what the image did
+  not bring cannot unseat one its neighbours' points support better.
+
+Nothing assumes a frame rate or smooth motion. Two neighbours with no
+verified correspondence between them are simply not near for any purpose
+above; an image none of whose neighbours is placed, or whose neighbours'
+points cannot register it, takes the ordinary path with the whole pool -- so
+a cut in the walk costs what it always cost, a second model to merge, and
+never a folded one. What the sequence cannot repair is a neighbour that was
+itself placed wrongly: the chain then follows it, as a tracker's would.
+
+`--overlap` is the one number: the matcher's window along each sequence
+(matched whatever `--pairs` chose, so the pairs the mapper trusts exist) and
+how far apart two images still count as neighbours in mapping. The run
+reports one line per sequence and, at the end, how many poses the neighbours
+settled against the whole pool and how many registrations they carried past
+the ratio gate; both are zero on a capture with no duplicate structure, where
+the sequence changes the order of registration and nothing else.
+`sfm_sequence_test` walks a synthetic corridor whose far room repeats the
+near one feature for feature: without the sequence the copy folds onto the
+original, with it the walk comes out at its true length.
+
+Measured on a 488-frame dual-fisheye walk up and down a spiral staircase
+(976 images), the turns that used to stack came out as a helix climbing 24 m
+and returning, with one residual: at a feature-poor landing a few frames sit
+one floor up before the chain rejoins, because on either floor a pose explains
+only a quarter of their neighbours' correspondences and the two-view links
+across the landing are as thin. That is the limit of what the order alone can
+say; what would decide it is evidence the mapper does not use yet -- the
+adjacent pairs' own two-view geometry, or the video's IMU. `SS_SFM_SEQ_DUMP=1`
+prints one line per registration attempt (near and whole-pool inliers, and
+the rival's) to read such a spot from the log.
+
 ### The finishing passes
 
 Reconstruction ends with up to two more global bundle adjustments, on models
@@ -775,6 +868,7 @@ PASS/FAIL and returns 0/1 — the same convention as `src/backend/tests/`.
 | `sfm_attitude_test` | the XMP attitude, its angle convention, the gauge's vote and refusals | no |
 | `sfm_mask_test` | mask uv sampling, decode, file discovery | no |
 | `sfm_telemetry_test` | the four telemetry carriers on synthetic files, and the sanity checks; `sfm_telemetry_test FILE` prints what a video carries | no |
+| `sfm_sequence_test` | the sequence table and its window pairs (`--no-gpu` stops there); a synthetic walk past a duplicated room through the mapper | yes |
 
 End to end, the check that matters is a reconstruction on a public dataset
 scored against the reference that ships with it: `tools/sfm/eval_poses.py` reads
