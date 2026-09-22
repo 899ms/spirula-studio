@@ -630,7 +630,7 @@ void GuiApp::write_run_settings(std::ofstream& f) {
     line("pairs", std::to_string(j.pairs));
     line("overlap", std::to_string(j.overlap));
     line("loop_closure", cfg_str(j.loop_closure));
-    line("prefilter_sequential", cfg_str(j.prefilter_sequential));
+    // line("prefilter_sequential", cfg_str(j.prefilter_sequential));
     line("use_sequence", cfg_str(j.use_sequence));
     line("features", std::to_string(j.features));
     line("matcher", std::to_string(j.matcher));
@@ -3405,6 +3405,7 @@ void GuiApp::draw_dataset_source() {
     // below, so a list of clips reads as the one decision it usually is.
     bool any_video = false;
     for (const PrepInput& s : _sources) any_video = any_video || s.is_video;
+    any_video = true;  // TODO: "Shot in order" button
     // The path box takes what the rows leave, measured on the frame before: a
     // translated label or a badge still being read has no width until drawn.
     // Below a dozen characters, the label and badge get a line of their own.
@@ -3442,7 +3443,7 @@ void GuiApp::draw_dataset_source() {
         }
         ImGui::SameLine();
         if (ui::Button(dmsg::remove)) remove = (int)i;
-        if (any_video) {
+        {
             ImGui::SameLine();
             if (s.is_video) {
                 ImGui::BeginDisabled(dataset_locked(Stage::Frames));
@@ -3481,13 +3482,9 @@ void GuiApp::draw_dataset_source() {
                                        : dmsg::video_fps_this_one_help);
                 ImGui::EndDisabled();
             } else {
-                ImGui::Dummy(ImVec2(px(84.0f), 0.0f));
+                ui::Checkbox(dmsg::frames_in_order, &s.sequential);
+                ui::help_on_hover(dmsg::frames_in_order_help);
             }
-        }
-        if (!s.is_video) {
-            ImGui::SameLine();
-            ui::Checkbox(dmsg::frames_in_order, &s.sequential);
-            ui::help_on_hover(dmsg::frames_in_order_help);
         }
         row_controls = std::max(row_controls, ImGui::GetItemRectMax().x - path_right +
                                                   ImGui::GetStyle().ItemSpacing.x);

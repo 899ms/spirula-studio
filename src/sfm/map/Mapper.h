@@ -351,7 +351,7 @@ struct MapperOptions {
     // Sequences (sfm/core/Sequence.h, D79): two images this many positions
     // apart along one are neighbours, and a neighbour's correspondences are
     // trusted before the rest of the model's. The matcher's `--overlap`.
-    int sequence_window = 10;
+    int sequence_window = 2;
 };
 
 class Mapper {

@@ -1453,6 +1453,9 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
                         format_duration(stats.select_seconds)});
         }
     }
+    // makes the mapper trust the sequence pairs,
+    // but seems to make things less robust for datasets that already have a lot of pairs, so it's disabled for now
+#if 0
     // A sequence's temporal window is matched whatever the mode chose: the
     // mapper trusts those pairs first, so they have to exist (D79).
     if (!reused_pairs && !cfg.sequences.empty()) {
@@ -1472,6 +1475,7 @@ int matchFeatureDir(const std::string& featdir, const SfmConfig& cfg, PairMode m
             // A definition the names do not fit is the mapper's to report.
         }
     }
+#endif
     if (res && !reused_pairs) resume::writePairs(res->dir / "pairs.bin", res->signature, pairs);
     stats.pairs = pairs.size();
     if (verbose)

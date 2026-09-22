@@ -428,7 +428,7 @@ std::string SfmConfig::finalize(uint32_t cmd) {
     // One tolerance, two fields (D47).
     twoview.ransac.max_error = max_error;
     mapper.max_reproj_error = max_error;
-    mapper.sequence_window = overlap;
+    // mapper.sequence_window = overlap;
 
     if (features != "sift" && !isAlikedType(features) && !isLomaType(features))
         return "unknown --features '" + features +
