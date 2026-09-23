@@ -5093,18 +5093,22 @@ void GuiApp::poll_sfm_progress() {
 
     LiveModel lm;
     if (read_live_model(dir, _model_mtime, lm)) {
+    #if 0
         // Each snapshot is framed on its own cameras, and the last is re-gauged
         // as well; carrying the camera along keeps the picture still through
         // both, where re-framing would jump.
         float moved[12];
         if (_model_attached && snapshot_motion(_live_model, lm, moved))
             _model_view.move_view(moved);
+    #endif
         _live_model = std::move(lm);
+    #if 1
         // The mapper's frame is the seed pair's, upside down as often as not:
         // navigate about the cameras' up until the model is levelled.
         float up[3] = {0, 0, 1};
         if (!_live_model.ds.gauge_oriented) snapshot_up(_live_model, up);
         _model_view.set_nav_up(up);
+    #endif
         // The mapper's own output is a wall of per-registration detail, so the
         // default log used to go quiet for the longest step. These are the
         // model in hand, not the bar -- a seed retry starts one over.
