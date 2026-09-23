@@ -444,9 +444,9 @@ src/app/gui/edit/
   EditAttributes.cpp     ... the session's half: the brushable plot, the colour sampler
   TransformTool.{h,cpp}  the modal operator (G/R/S ...) and the handles at the pivot
   EditTransform.cpp      ... the session's half: frames, steps, the alignment helpers
-  AlignFit.{h,cpp}       RANSAC planes, the click fit, the corner fit, auto align
   WorldGrid.{h,cpp}      the grid that stands still while the model moves
 src/core/Similarity.h          Sim3: the one transform a rigid scene can be given
+src/core/SceneAlign.{h,cpp}    RANSAC planes, the click fit, the corner fit, auto align
 src/core/ShRotation.{h,cpp}    closed-form SH band rotation (Ivanic-Ruedenberg)
 src/checkpoint/SplatTransform.{h,cpp}   what a similarity does to one Gaussian
 src/app/gui/ViewportPanel      the navigation gizmo, the orthographic view, the

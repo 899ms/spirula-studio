@@ -1710,6 +1710,69 @@ SS_MSG(orient_help,
     TR("Modeli, başlangıç çiftinin gelişigüzel ölçeği yerine, kamera "
        "duruşlarından doğrultulmuş, ortalanmış ve birim ölçekli olarak yaz"));
 
+SS_MSG(level_help,
+    EN("What levels a model nothing measured, and where a measured one's ground "
+       "goes: `ground` finds the plane the points stand on, puts it at z = 0, "
+       "turns the walls onto the axes and centres the footprint (a sensor-"
+       "levelled model is only moved up or down); `cameras` levels on the "
+       "cameras' mean up axis"),
+    JA("何も測っていないモデルを何で水平にするか、また測ったモデルの地面をどこに置くか。"
+       "`ground` は点が立つ平面を見つけて z = 0 に置き、壁を軸にそろえ、足元を中心に"
+       "寄せます (センサーで水平にしたモデルは上下に動かすだけ)。`cameras` はカメラの"
+       "平均上方向で水平にします"),
+    ZH_HANS("未经测量的模型用什么调平，已测量的模型的地面放在哪里：`ground` 找到点所"
+            "在的平面，放到 z = 0，把墙对齐到坐标轴并让占地居中（由传感器调平的模型只"
+            "上下移动）；`cameras` 按相机的平均上方向调平"),
+    ZH_HANT("未經測量的模型用什麼調平，已測量的模型的地面放在哪裡：`ground` 找到點所"
+            "在的平面，放到 z = 0，把牆對齊到座標軸並讓佔地置中（由感測器調平的模型只"
+            "上下移動）；`cameras` 按相機的平均上方向調平"),
+    KO("아무것도 측정하지 않은 모델을 무엇으로 수평 맞출지, 측정한 모델의 바닥을 어디에 둘지: "
+       "`ground` 는 점들이 선 평면을 찾아 z = 0 에 두고 벽을 축에 맞추며 바닥 영역을 가운데로 "
+       "옮깁니다 (센서로 수평 맞춘 모델은 위아래로만 옮김). `cameras` 는 카메라의 평균 위 "
+       "방향으로 맞춥니다"),
+    DE("Womit ein Modell ausgerichtet wird, das nichts gemessen hat, und wohin der "
+       "Boden eines gemessenen kommt: `ground` sucht die Ebene, auf der die Punkte "
+       "stehen, legt sie auf z = 0, dreht die Wände auf die Achsen und zentriert "
+       "die Grundfläche (ein von Sensoren ausgerichtetes Modell wird nur auf- oder "
+       "abwärts verschoben); `cameras` richtet an der mittleren Oben-Achse der "
+       "Kameras aus"),
+    FR("Ce qui met de niveau un modèle que rien n'a mesuré, et où va le sol d'un "
+       "modèle mesuré : `ground` trouve le plan sur lequel reposent les points, le "
+       "place à z = 0, tourne les murs sur les axes et centre l'emprise (un modèle "
+       "mis de niveau par les capteurs est seulement monté ou descendu) ; "
+       "`cameras` met de niveau sur l'axe haut moyen des caméras"),
+    ES("Qué nivela un modelo que nada midió, y dónde va el suelo de uno medido: "
+       "`ground` encuentra el plano sobre el que están los puntos, lo pone en "
+       "z = 0, gira las paredes hacia los ejes y centra la planta (un modelo "
+       "nivelado por sensores solo se sube o se baja); `cameras` nivela según el "
+       "eje arriba medio de las cámaras"),
+    PT("O que nivela um modelo que nada mediu, e para onde vai o chão de um "
+       "medido: `ground` encontra o plano sobre o qual os pontos estão, põe-no em "
+       "z = 0, gira as paredes para os eixos e centra a planta (um modelo "
+       "nivelado por sensores só é subido ou descido); `cameras` nivela pelo "
+       "eixo para cima médio das câmeras"),
+    IT("Che cosa mette in bolla un modello che nulla ha misurato, e dove va il "
+       "suolo di uno misurato: `ground` trova il piano su cui poggiano i punti, "
+       "lo porta a z = 0, gira le pareti sugli assi e centra l'ingombro (un "
+       "modello livellato dai sensori viene solo alzato o abbassato); `cameras` "
+       "livella sull'asse alto medio delle camere"),
+    NL("Waarmee een model wordt waterpas gezet dat niets heeft gemeten, en waar "
+       "de grond van een gemeten model komt: `ground` zoekt het vlak waarop de "
+       "punten staan, legt het op z = 0, draait de muren op de assen en "
+       "centreert de voetafdruk (een door sensoren waterpas gezet model gaat "
+       "alleen omhoog of omlaag); `cameras` zet waterpas op de gemiddelde "
+       "omhoog-as van de camera's"),
+    RU("Чем выравнивать модель, которую ничто не измерило, и куда поместить землю "
+       "измеренной: `ground` находит плоскость, на которой стоят точки, кладёт её "
+       "на z = 0, поворачивает стены к осям и центрирует площадь (модель, "
+       "выровненную датчиками, только сдвигает вверх или вниз); `cameras` "
+       "выравнивает по средней оси «вверх» камер"),
+    TR("Hiçbir şeyin ölçmediği bir modeli neyin düzleyeceği ve ölçülmüş birinin "
+       "zemininin nereye gideceği: `ground` noktaların üzerinde durduğu düzlemi "
+       "bulur, z = 0'a koyar, duvarları eksenlere çevirir ve taban alanını "
+       "ortalar (sensörlerin düzlediği model yalnızca yukarı ya da aşağı "
+       "kaydırılır); `cameras` kameraların ortalama yukarı eksenine göre düzler"));
+
 SS_MSG(min_tri_angle_help,
     EN("Triangulation angle a 3D point must subtend to be kept"),
     JA("3D 点が残るために張るべき三角測量角"),

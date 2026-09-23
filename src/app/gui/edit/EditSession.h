@@ -61,6 +61,12 @@ public:
     }
     // Offered as a button when set: over to the render mode on this pane.
     void set_to_render(std::function<void()> f) { _to_render = std::move(f); }
+    // Offered as a button on a dataset's sparse reconstruction once it is
+    // saved: train on `dataset`, a copy of `source` when a save made one.
+    void set_to_trainer(std::function<void(const std::string& dataset,
+                                           const std::string& source)> f) {
+        _to_trainer = std::move(f);
+    }
     // Told after every successful save: what the document came from, where it
     // went, and the placement the file now carries in its own coordinates.
     void set_on_saved(std::function<void(const std::string& source, const std::string& saved,
@@ -334,6 +340,14 @@ private:
     std::function<void(int, const std::string&, bool, const std::string&)>
         _pick_save;
     std::function<void()> _to_render;
+    std::function<void(const std::string&, const std::string&)> _to_trainer;
+    // The save in flight, or the one being asked for, ends in the trainer.
+    bool _train_after_save = false;
+    bool _ask_train = false;
+    // The dataset the trainer button would open, "" when there is none.
+    std::string trainer_dataset() const;
+    int folder_target() const;
+    void draw_trainer_button(float full);
     std::function<void(const std::string&, const std::string&, const spirula::Sim3&)> _on_saved;
     spirula::Sim3 _save_placement;
     std::vector<std::string> _log;

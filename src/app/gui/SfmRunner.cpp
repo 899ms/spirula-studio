@@ -626,7 +626,7 @@ std::vector<sfm::RigDef> SfmRunner::build_rigs(const PrepJob& prep, const PrepRe
         }
         if (parts.empty()) continue;
         sfm::RigDef d;
-        d.name = std::string(1, (char)('A' + letter));
+        d.name = rig_letter(letter);
         bool same = parts.size() > 1 && parts[0].second.size() > 1;
         for (const auto& p : parts) same = same && p.second == parts[0].second;
         if (same) {

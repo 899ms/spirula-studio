@@ -1,13 +1,13 @@
-// AlignFit.cpp -- see AlignFit.h.
+// SceneAlign.cpp -- see SceneAlign.h.
 
-#include "app/gui/edit/AlignFit.h"
+#include "core/SceneAlign.h"
 
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <random>
 
-namespace gui {
+namespace spirula {
 namespace align {
 
 namespace {
@@ -366,6 +366,26 @@ int fit_corner(const double* pts, int64_t n, const double at[3], double r0,
     return m;
 }
 
+double robust_extent(const double* pts, int64_t n) {
+    if (n <= 0) return 0.0;
+    const int64_t step = std::max<int64_t>(1, n / (1 << 20));
+    std::vector<double> tmp;
+    double c[3];
+    for (int d = 0; d < 3; d++) {
+        tmp.clear();
+        for (int64_t i = 0; i < n; i += step) tmp.push_back(pts[i*3 + d]);
+        std::nth_element(tmp.begin(), tmp.begin() + tmp.size() / 2, tmp.end());
+        c[d] = tmp[tmp.size() / 2];
+    }
+    tmp.clear();
+    for (int64_t i = 0; i < n; i += step) {
+        const double v[3] = {pts[i*3] - c[0], pts[i*3+1] - c[1], pts[i*3+2] - c[2]};
+        tmp.push_back(dot(v, v));
+    }
+    std::nth_element(tmp.begin(), tmp.begin() + tmp.size() / 2, tmp.end());
+    return 2.0 * std::sqrt(tmp[tmp.size() / 2]);
+}
+
 AutoAlignResult auto_align(const double* pts, int64_t n, const double* up,
                            const float* normals, const float* weights,
                            const AutoAlignOptions& opt) {
@@ -418,6 +438,7 @@ AutoAlignResult auto_align(const double* pts, int64_t n, const double* up,
     const double zaxis[3] = {0, 0, 1};
     if (best >= 0) {
         const Plane& g = oriented[(size_t)best];
+        res.plane = g;
         rotation_between(g.n, zaxis, R);
         // After the turn the plane is z = -d.
         lift = g.d;
@@ -491,4 +512,4 @@ AutoAlignResult auto_align(const double* pts, int64_t n, const double* up,
 }
 
 }  // namespace align
-}  // namespace gui
+}  // namespace spirula

@@ -293,7 +293,10 @@ void EditSession::handle_keys() {
         }
         break;
     }
-    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) _ask_overwrite = true;
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
+        _ask_overwrite = true;
+        _train_after_save = false;
+    }
 }
 
 
@@ -584,12 +587,18 @@ void EditSession::draw_panel() {
     const SaveTarget& target = targets[(size_t)_save_target];
     const std::string home = d.default_save_path(_save_target);
     ImGui::BeginDisabled(home.empty());
-    if (key_button(msg::save_over, half, "Ctrl+S")) _ask_overwrite = true;
+    if (key_button(msg::save_over, half, "Ctrl+S")) {
+        _ask_overwrite = true;
+        _train_after_save = false;
+    }
     ImGui::EndDisabled();
     if (!home.empty()) ui::help_on_hover(msg::save_over_help, {home});
     ImGui::SameLine();
-    ImGui::BeginDisabled(target.folder || !_pick_save);
-    if (ui::Button(msg::save_copy, ImVec2(half, 0))) ask_save_copy();
+    ImGui::BeginDisabled(!target.copy || !_pick_save);
+    if (ui::Button(msg::save_copy, ImVec2(half, 0))) {
+        _train_after_save = false;
+        ask_save_copy();
+    }
     ImGui::EndDisabled();
     if (d.kind() == EditDoc::Kind::Points && target.folder)
         ui::TextDisabledWrapped(msg::sparse_edit_help);
@@ -604,6 +613,7 @@ void EditSession::draw_panel() {
         if (ui::Button(rmsg::edit_to_render, ImVec2(full, 0))) _to_render();
         ui::help_on_hover(rmsg::edit_to_render_help);
     }
+    draw_trainer_button(full);
 
     // Overwriting is the one action here that cannot be undone, so it is the
     // one that asks.
@@ -673,6 +683,51 @@ void EditSession::draw_panel() {
             ImGui::SameLine();
             if (ui::Button(msg::cancel_job)) cancel_work();
         }
+    }
+}
+
+// Training reads the reconstruction from disk, so an edit that is only in
+// memory is saved first -- over the model, or as a copy that becomes the
+// dataset trained on.
+void EditSession::draw_trainer_button(float full) {
+    const std::string dataset = trainer_dataset();
+    if (dataset.empty()) return;
+    const int target = folder_target();
+    ImGui::Spacing();
+    if (ui::Button(msg::to_trainer, ImVec2(full, 0))) {
+        if (!_doc->dirty()) {
+            _to_trainer(dataset, dataset);
+        } else {
+            _save_target = target;
+            _ask_train = true;
+        }
+    }
+    ui::help_on_hover(msg::to_trainer_help);
+    if (_ask_train) {
+        _ask_train = false;
+        ui::OpenPopup(msg::to_trainer_title);
+    }
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 28.0f, 0.0f),
+                             ImGuiCond_Appearing);
+    if (ui::BeginPopupModal(msg::to_trainer_title)) {
+        _save_target = target;
+        ui::TextWrapped(msg::to_trainer_body, {_doc->default_save_path(target)});
+        if (ui::Button(msg::save_over)) {
+            _train_after_save = true;
+            save_in_place();
+            ImGui::CloseCurrentPopup();
+        }
+        if (can_save_copy()) {
+            ImGui::SameLine();
+            if (ui::Button(msg::save_copy)) {
+                _train_after_save = true;
+                ImGui::CloseCurrentPopup();
+                ask_save_copy();
+            }
+        }
+        ImGui::SameLine();
+        if (ui::Button(msg::discard_no)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
 }
 

@@ -54,11 +54,13 @@ struct EditOp {
 };
 
 // What "Save a copy" can write this document as. `ext` is the extension a
-// file target expects ("" for a target that writes a folder).
+// file target expects ("" for a target that writes a folder). `copy` is false
+// for a target that can only be written back over its source.
 struct SaveTarget {
     const spirula::i18n::Msg* label = nullptr;
     std::string ext;
     bool folder = false;
+    bool copy = true;
 };
 
 class EditDoc {

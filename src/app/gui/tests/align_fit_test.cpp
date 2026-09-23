@@ -1,8 +1,8 @@
-// align_fit_test -- app/gui/edit/AlignFit.h over a room whose answer is known:
+// align_fit_test -- core/SceneAlign.h over a room whose answer is known:
 // a floor, two walls and a box standing on the floor, with noise and floaters,
 // tipped over by a rotation the fit then has to find its way back from.
 
-#include "app/gui/edit/AlignFit.h"
+#include "core/SceneAlign.h"
 
 #include <cmath>
 #include <cstdio>
@@ -11,7 +11,7 @@
 #include <vector>
 
 using spirula::Sim3;
-namespace al = gui::align;
+namespace al = spirula::align;
 
 namespace {
 

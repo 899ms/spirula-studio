@@ -29,13 +29,6 @@ namespace gui {
 
 namespace {
 
-bool is_image_file(const fs::path& p) {
-    std::string e = p.extension().string();
-    for (auto& c : e) c = (char)std::tolower((unsigned char)c);
-    return e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".webp" ||
-           e == ".tif" || e == ".tiff" || e == ".bmp" || e == ".exr";
-}
-
 fs::path temp_still(const char* tag) {
     return fs::temp_directory_path() /
            (std::string("spirula-") + tag + "-" +

@@ -103,12 +103,22 @@ void compose_3x4(const float a[12], const float b[12], float out[12]) {
 
 void ViewportPanel::reset_pose(float radius) {
     // The web viewer's cam.reset() about the chosen centre: target = centre,
-    // pos = centre + [0,0,1], then orbit(0, -250).
+    // pos = centre + up, looking down it, then orbit(0, -250).
     float c[3];
     center_shared(c);
-    _cam.pos[0] = c[0]; _cam.pos[1] = c[1]; _cam.pos[2] = c[2] + 1.0f;
-    _cam.rot[0] = _cam.rot[1] = _cam.rot[2] = 0; _cam.rot[3] = 1;
-    _cam.target[0] = c[0]; _cam.target[1] = c[1]; _cam.target[2] = c[2];
+    const float* u = _cam.world_up;
+    for (int k = 0; k < 3; k++) {
+        _cam.pos[k] = c[k] + u[k];
+        _cam.target[k] = c[k];
+    }
+    // The shortest turn taking the camera's back axis, +Z, onto `u`.
+    if (u[2] < -0.9999f) {
+        _cam.rot[0] = 1; _cam.rot[1] = _cam.rot[2] = _cam.rot[3] = 0;
+    } else {
+        const float w = 1.0f + u[2];
+        const float n = std::sqrt(u[1]*u[1] + u[0]*u[0] + w*w);
+        _cam.rot[0] = -u[1] / n; _cam.rot[1] = u[0] / n; _cam.rot[2] = 0; _cam.rot[3] = w / n;
+    }
     _cam.orbit(0, -250);
     _home = _cam;
     _home_dist = radius;
@@ -417,6 +427,26 @@ void ViewportPanel::set_edit_transform(const float a[12]) {
 
 void ViewportPanel::base_transform(float out[12]) const {
     std::memcpy(out, _m2s_base, sizeof _m2s_base);
+}
+
+void ViewportPanel::set_nav_up(const float up[3]) {
+    const float n = std::sqrt(up[0]*up[0] + up[1]*up[1] + up[2]*up[2]);
+    if (!(n > 1e-12f)) return;
+    const float u[3] = {up[0] / n, up[1] / n, up[2] / n};
+    const float* was = _cam.world_up;
+    if (u[0]*was[0] + u[1]*was[1] + u[2]*was[2] > 0.99999f) return;
+    for (NavCamera* c : {&_cam, &_home}) {
+        for (int k = 0; k < 3; k++) c->world_up[k] = u[k];
+        // What these modes keep level; the others roll where the user put them.
+        if (c->mode == NavCamera::Turntable || c->mode == NavCamera::Fps) c->level_roll();
+    }
+    _dirty = true;
+}
+
+void ViewportPanel::move_view(const float S[12]) {
+    _cam.transform(S);
+    _home.transform(S);
+    _dirty = true;
 }
 
 void ViewportPanel::set_level_cameras(bool on) {

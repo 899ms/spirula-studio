@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -83,7 +84,17 @@ struct SubCamera {
 
 // A row's rig choice: nothing, the lenses of its own input, or one of the
 // shared letters that join rows across inputs (SfmRunner::build_rigs).
-inline constexpr int kRigNone = 0, kRigOwn = 1, kRigFirstShared = 2, kRigShared = 4;
+inline constexpr int kRigNone = 0, kRigOwn = 1, kRigFirstShared = 2;
+// How many letters the rig picker may offer; it shows one per two rows.
+inline constexpr int kRigShared = 32;
+
+// A, B, ... Z, AA, AB, ...
+inline std::string rig_letter(int letter) {
+    std::string s;
+    for (int n = letter + 1; n > 0; n = (n - 1) / 26)
+        s.insert(s.begin(), (char)('A' + (n - 1) % 26));
+    return s;
+}
 
 // PrepInput::fps for "every frame" -- a 0 there already means "^". Everywhere
 // else, a rate of 0 is every frame.
@@ -560,6 +571,9 @@ inline constexpr size_t kMaxCameraFolders = 64;
 // symlinks (a prepared capture's images/ is often a link into the raw one) and
 // stops at the first hit, so it is cheap enough for the UI thread.
 bool folder_has_images(const std::string& dir);
+
+// The photo extensions an input folder is indexed for.
+bool is_image_file(const std::filesystem::path& p);
 
 // Is this folder an already-reconstructed dataset -- something the trainer's
 // dataparsers can read -- rather than raw input? True for a Nerfstudio

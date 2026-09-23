@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 
+namespace fs = std::filesystem;
 namespace msg = spirula::i18n::msg::edit;
 
 namespace gui {
@@ -276,7 +278,7 @@ std::vector<SaveTarget> PointsDoc::save_targets() const {
             break;
         case spirula::SparseFormat::Nerfstudio:
         case spirula::SparseFormat::Metashape:
-            t.push_back({&msg::target_nerfstudio, "", true});
+            t.push_back({&msg::target_nerfstudio, "", true, false});
             break;
         default:
             break;
@@ -303,7 +305,19 @@ void PointsDoc::save(int target, const std::string& path,
             if (!ck[i] && i < _ds.image_filenames.size())
                 keep.drop_images.push_back(_ds.image_filenames[i]);
         const spirula::Sim3 moved = file_placement();
-        spirula::sparse_write_filtered(path, keep, &moved, &_baseline);
+        std::error_code ec;
+        if (fs::equivalent(path, _dataset_dir, ec)) {
+            spirula::sparse_write_filtered(_dataset_dir, keep, &moved, &_baseline);
+        } else {
+            spirula::sparse_write_copy(_dataset_dir, path, keep, &moved, &_baseline);
+            // A copy trains from the same pictures. Best effort: where links
+            // cannot be made, the trainer is pointed at the source's folders.
+            for (const char* sub : {"images", "masks"}) {
+                const fs::path from = fs::path(_dataset_dir) / sub;
+                if (fs::is_directory(from, ec) && !fs::exists(fs::path(path) / sub, ec))
+                    fs::create_directory_symlink(fs::absolute(from, ec), fs::path(path) / sub, ec);
+            }
+        }
         if (progress) (*progress)++;
         return;
     }

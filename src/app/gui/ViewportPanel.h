@@ -158,6 +158,12 @@ public:
     bool has_levelling() const { return !_align_identity; }
     bool level_cameras() const { return _level_cameras; }
     void set_level_cameras(bool on);
+    // The scene's up, shared frame, for navigating only: the model, the grid
+    // and the axes stay in the frame the data is in. +Z until set.
+    void set_nav_up(const float up[3]);
+    // The scene moved by S (row-major 3x4 [sR | t], shared frame); the camera
+    // goes with it, so the picture does not change.
+    void move_view(const float S[12]);
 
     // Take the view along with a step of the shared frame (row-major 3x4
     // similarity), then stand it upright again: the model stays where it was

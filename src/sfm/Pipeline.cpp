@@ -353,6 +353,15 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
     // turned the pixels, so only `orient` corrects anything. The tags arrive on
     // the models; a caller that read them off disk calls fillExifOrientations.
     const bool exif_up = cfg.exif_orientation == "orient";
+    const bool on_ground = cfg.level == "ground";
+    // The frame a model nothing measured is written in: upright on the
+    // cameras, then levelled on its ground where one is found.
+    auto unmeasured = [&](size_t i, GroundFit& g) {
+        const Sim3 T = uprightTransform(models[i], exif_up);
+        g = on_ground ? groundTransform(models[i], true, T) : GroundFit{};
+        return g.found ? composeSim3(g.T, T) : T;
+    };
+    std::vector<GroundFit> levelled(models.size());
 
     // `gauge[i]` is the state, not just the record: `oriented` and `metric` say
     // what a source has already settled, and every source below reads them
@@ -452,8 +461,7 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
         // Horizontal mode takes the tilt from the caller's up axis, so its fit
         // -- scale, heading and place -- runs in an upright frame. Where a
         // sensor already levelled the model, that frame is the one it is in.
-        const Sim3 pre =
-            flat && !gauge[i].oriented ? uprightTransform(models[i], exif_up) : Sim3{};
+        const Sim3 pre = flat && !gauge[i].oriented ? unmeasured(i, levelled[i]) : Sim3{};
         for (Vec3& c : ref.centres) c = transformPoint(pre, c);
         const MetricFit fit =
             fitMetricGauge(ref, cfg.metric_max_error,
@@ -476,6 +484,9 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
         if (!flat) {
             gauge[i].oriented = true;
             gauge[i].up = file ? "positions" : "gps";
+        } else if (levelled[i].found) {
+            gauge[i].oriented = true;
+            gauge[i].up = "ground";
         } else if (!gauge[i].oriented) {
             gauge[i].up = "cameras";
         }
@@ -512,12 +523,38 @@ bool fixGauge(std::vector<Reconstruction>& models, const SfmConfig& cfg,
     // ---- whatever no source settled ---------------------------------------
     // The only place that falls back on the cameras' mean up axis, so a model
     // something measured cannot be re-levelled by the guess it replaced.
+    std::vector<char> placed(models.size(), 0);
     if (cfg.orient)
         for (size_t i = 0; i < models.size(); i++) {
             if (gauge[i].oriented || gauge[i].metric) continue;
-            const Sim3 T = orientModel(models[i], exif_up);
+            GroundFit g;
+            const Sim3 T = unmeasured(i, g);
+            applySim3(models[i], T);
+            placed[i] = 1;
+            const long long model = (long long)i;
+            if (g.found) {
+                gauge[i].oriented = true;
+                gauge[i].up = "ground";
+                L::out(Tag::Orient, M::orient_ground,
+                       {model, (long long)std::lround(g.share * 100.0), L::num(T.scale, 4)});
+                continue;
+            }
             gauge[i].up = exif_up ? "cameras+exif" : "cameras";
-            if (verbose) L::err(Tag::Orient, M::orient_done, {(long long)i, L::num(T.scale, 4)});
+            if (on_ground) L::out(Tag::Orient, M::orient_ground_missed, {model});
+            else if (verbose) L::err(Tag::Orient, M::orient_done, {model, L::num(T.scale, 4)});
+        }
+
+    // A measured up keeps its tilt; only its height is free, unless a
+    // reference measured that too (a positions file, GPS altitude).
+    const bool height_measured = file || cfg.metric_gps == "full";
+    if (cfg.orient && on_ground && !height_measured)
+        for (size_t i = 0; i < models.size(); i++) {
+            if (placed[i] || !gauge[i].oriented) continue;
+            const GroundFit g = groundTransform(models[i], false);
+            if (!g.found) continue;
+            applySim3(models[i], g.T);
+            L::out(Tag::Orient, M::orient_ground_height,
+                   {(long long)i, (long long)std::lround(g.share * 100.0)});
         }
     return true;
 }

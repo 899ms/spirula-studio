@@ -8,7 +8,7 @@
 #include "app/gui/Layout.h"
 #include "app/gui/Ui.h"
 #include "app/gui/ViewportPanel.h"
-#include "app/gui/edit/AlignFit.h"
+#include "core/SceneAlign.h"
 #include "app/gui/edit/WorldGrid.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/EditTransform.h"
@@ -22,6 +22,7 @@ namespace msg = spirula::i18n::msg::xform;
 namespace emsg = spirula::i18n::msg::edit;
 using spirula::Sim3;
 using spirula::i18n::Msg;
+namespace align = spirula::align;
 
 namespace gui {
 

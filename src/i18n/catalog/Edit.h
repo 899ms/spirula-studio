@@ -1722,6 +1722,107 @@ SS_MSG(hist_original,
     RU("До правок"),
     TR("Her değişiklikten önce"));
 
+SS_MSG(to_trainer,
+    EN("Open in trainer"),
+    JA("トレーナーで開く"),
+    ZH_HANS("在训练器中打开"),
+    ZH_HANT("在訓練器中開啟"),
+    KO("트레이너에서 열기"),
+    DE("Im Trainer öffnen"),
+    FR("Ouvrir dans l'entraîneur"),
+    ES("Abrir en el entrenador"),
+    PT("Abrir no treinador"),
+    IT("Apri nell'addestratore"),
+    NL("Openen in de trainer"),
+    RU("Открыть в тренере"),
+    TR("Eğiticide aç"));
+
+SS_MSG(to_trainer_help,
+    EN("Train on this dataset with the reconstruction as it is now. Unsaved "
+       "edits are saved first, over the reconstruction or as a copy."),
+    JA("今の状態の再構成でこのデータセットを学習します。未保存の編集は先に、"
+       "再構成へ上書きするかコピーとして保存します。"),
+    ZH_HANS("用当前的重建训练此数据集。未保存的编辑会先保存，覆盖重建或另存为副本。"),
+    ZH_HANT("用目前的重建訓練此資料集。未儲存的編輯會先儲存，覆寫重建或另存為副本。"),
+    KO("지금 상태의 재구성으로 이 데이터셋을 학습합니다. 저장하지 않은 편집은 먼저 "
+       "재구성에 덮어쓰거나 사본으로 저장합니다."),
+    DE("Trainiert diesen Datensatz mit der Rekonstruktion in ihrem jetzigen "
+       "Zustand. Ungespeicherte Änderungen werden zuerst gespeichert, über die "
+       "Rekonstruktion oder als Kopie."),
+    FR("Entraîne ce jeu de données avec la reconstruction telle qu'elle est. "
+       "Les modifications non enregistrées le sont d'abord, par-dessus la "
+       "reconstruction ou dans une copie."),
+    ES("Entrena este conjunto de datos con la reconstrucción tal como está. "
+       "Las ediciones sin guardar se guardan antes, sobre la reconstrucción o "
+       "como copia."),
+    PT("Treina este conjunto de dados com a reconstrução como está agora. As "
+       "edições não salvas são salvas antes, sobre a reconstrução ou como "
+       "cópia."),
+    IT("Addestra questo dataset con la ricostruzione così com'è. Le modifiche "
+       "non salvate vengono salvate prima, sopra la ricostruzione o come copia."),
+    NL("Traint deze dataset met de reconstructie zoals die nu is. Niet-"
+       "opgeslagen bewerkingen worden eerst opgeslagen, over de reconstructie "
+       "of als kopie."),
+    RU("Обучает этот набор данных на реконструкции в её нынешнем виде. "
+       "Несохранённые правки сначала сохраняются -- поверх реконструкции или "
+       "копией."),
+    TR("Bu veri kümesini yeniden yapılandırmanın şimdiki hâliyle eğitir. "
+       "Kaydedilmemiş düzenlemeler önce yeniden yapılandırmanın üzerine ya da "
+       "kopya olarak kaydedilir."));
+
+SS_MSG(to_trainer_title,
+    EN("Save before training?"),
+    JA("学習の前に保存しますか?"),
+    ZH_HANS("训练前要保存吗?"),
+    ZH_HANT("訓練前要儲存嗎?"),
+    KO("학습 전에 저장할까요?"),
+    DE("Vor dem Training speichern?"),
+    FR("Enregistrer avant l'entraînement ?"),
+    ES("¿Guardar antes de entrenar?"),
+    PT("Salvar antes de treinar?"),
+    IT("Salvare prima dell'addestramento?"),
+    NL("Opslaan voor het trainen?"),
+    RU("Сохранить перед обучением?"),
+    TR("Eğitimden önce kaydedilsin mi?"));
+
+SS_MSG(to_trainer_body,
+    EN("The trainer reads the reconstruction from disk, so the edits have to "
+       "be saved first: over {0}, or as a copy in a new folder that trains "
+       "from the same images."),
+    JA("トレーナーは再構成をディスクから読むので、編集を先に保存する必要があります。"
+       "{0} に上書きするか、同じ画像で学習する新しいフォルダにコピーとして保存します。"),
+    ZH_HANS("训练器从磁盘读取重建，所以要先保存编辑：覆盖 {0}，或另存为新文件夹中"
+            "的副本，使用同样的图像训练。"),
+    ZH_HANT("訓練器從磁碟讀取重建，所以要先儲存編輯：覆寫 {0}，或另存為新資料夾中"
+            "的副本，使用同樣的影像訓練。"),
+    KO("트레이너는 디스크에서 재구성을 읽으므로 편집을 먼저 저장해야 합니다. {0} 에 "
+       "덮어쓰거나, 같은 이미지로 학습하는 새 폴더에 사본으로 저장합니다."),
+    DE("Der Trainer liest die Rekonstruktion von der Festplatte, also müssen "
+       "die Änderungen zuerst gespeichert werden: über {0} oder als Kopie in "
+       "einem neuen Ordner, der mit denselben Bildern trainiert."),
+    FR("L'entraîneur lit la reconstruction sur le disque, les modifications "
+       "doivent donc d'abord être enregistrées : par-dessus {0}, ou dans une "
+       "copie placée dans un nouveau dossier qui s'entraîne sur les mêmes "
+       "images."),
+    ES("El entrenador lee la reconstrucción del disco, así que hay que guardar "
+       "antes las ediciones: sobre {0}, o como copia en una carpeta nueva que "
+       "entrena con las mismas imágenes."),
+    PT("O treinador lê a reconstrução do disco, então as edições precisam ser "
+       "salvas antes: sobre {0}, ou como cópia numa pasta nova que treina com "
+       "as mesmas imagens."),
+    IT("L'addestratore legge la ricostruzione dal disco, quindi le modifiche "
+       "vanno salvate prima: sopra {0}, o come copia in una nuova cartella che "
+       "si addestra sulle stesse immagini."),
+    NL("De trainer leest de reconstructie van schijf, dus de bewerkingen "
+       "moeten eerst worden opgeslagen: over {0}, of als kopie in een nieuwe "
+       "map die met dezelfde beelden traint."),
+    RU("Тренер читает реконструкцию с диска, поэтому правки нужно сначала "
+       "сохранить: поверх {0} или копией в новой папке, которая обучается на "
+       "тех же изображениях."),
+    TR("Eğitici yeniden yapılandırmayı diskten okur, bu yüzden düzenlemeler "
+       "önce kaydedilmeli: {0} üzerine ya da aynı görüntülerle eğitilen yeni "
+       "bir klasöre kopya olarak."));
+
 SS_MSG(save_confirm_title,
     EN("Overwrite it?"),
     JA("上書きしますか?"),

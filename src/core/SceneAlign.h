@@ -14,7 +14,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace gui {
+namespace spirula {
 namespace align {
 
 // n . x + d = 0, n unit.
@@ -58,10 +58,15 @@ struct AutoAlignOptions {
 };
 
 struct AutoAlignResult {
-    spirula::Sim3 T;
+    Sim3 T;
     bool ground = false, walls = false;
     double ground_share = 0.0;   // of the points, within tol of the ground
+    Plane plane;                 // the ground, in the input frame, facing up
 };
+
+// Twice the median distance from the per-axis median: a size floaters do not
+// inflate, which is what `AutoAlignOptions::tol` is best taken a fraction of.
+double robust_extent(const double* pts, int64_t n);
 
 // Ground to z = 0 with +Z up, walls onto the axes, footprint on the origin.
 // `up` is a prior (null for +Z). `normals` / `weights` are optional, one per
@@ -71,4 +76,4 @@ AutoAlignResult auto_align(const double* pts, int64_t n, const double* up,
                            const AutoAlignOptions& opt);
 
 }  // namespace align
-}  // namespace gui
+}  // namespace spirula

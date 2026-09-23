@@ -526,6 +526,18 @@ private:
     // the next model opened is being opened in order to edit it.
     int _edit_save_target = 0;
     bool _edit_after_open = false;
+    // The dataset screen's run behind a sparse edit it opened: its photos and
+    // masks may live outside the dataset, and training the edit needs them.
+    struct DatasetFolders {
+        std::string dir, image_dir, mask_dir;
+        bool mask_flipped = false;
+    };
+    DatasetFolders _sparse_edit_src;
+    // A saved sparse edit on its way to the trainer: the dataset to open and
+    // the one it was edited from. Taken up at the top of the next frame,
+    // outside the edit session that asked for it.
+    std::string _edit_train_dataset, _edit_train_source;
+    void open_edited_dataset();
     // The same, for a model opened in order to render it.
     bool _render_after_open = false;
     std::string _render_project_after_open;
@@ -586,6 +598,9 @@ private:
     // the options editor's "preset default" tooltips are relative to.
     std::string _preset = "3dgs";
     ConfigUIState _cfg_ui;
+    // Persisted: the last value the user gave save_full_checkpoint by hand. A
+    // preset only overrides it by turning it on.
+    bool _keep_full_ckpt = false;
 
     // Saved presets, one picker per kind.
     PresetPicker<TrainPreset> _train_presets;
@@ -687,6 +702,9 @@ private:
     // that runs instead of a parallel copy of it: a video file or photo folder
     // each, plus the sub-folder and the lens that belong to it.
     std::vector<PrepInput> _sources;
+    // The photo folders rigs were last guessed for; guessed again only when
+    // they change, so clearing the guessed letters sticks.
+    std::string _rig_guess_key;
     // Keep the committed source stable while a path is edited.
     std::vector<std::string> _source_path_edits;
     // What an input row draws after its path box, as last measured: the

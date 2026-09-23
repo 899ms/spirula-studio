@@ -39,6 +39,11 @@ void assign_source_subdirs(std::vector<PrepInput>& sources);
 // disk: a capture that arrives split into cam0/, cam1/ is several cameras.
 void refresh_subcameras(std::vector<PrepInput>& sources);
 
+// Give the photo folders that look like one rig's lenses (RigGuess.h) a shared
+// letter each. `force` replaces the rigs already chosen; otherwise a list
+// where any folder is on a rig is left alone, since that was the user's call.
+void guess_source_rigs(std::vector<PrepInput>& sources, bool force);
+
 // The output folder this list implies, and whether that folder is the dataset
 // itself (a picked images/ has its reconstruction written beside it) rather
 // than a fresh one to be created next to the input.

@@ -426,6 +426,18 @@ model is written, so the trainer's own normalization comes out as the identity
 tilted with no way left to recover the transform. `map/Orient.h` has the
 algebra and the caveats; `--no-orient` keeps the mapper's raw gauge.
 
+`--level ground` (the default) then levels that frame on the ground rather
+than on how the cameras were held: the editor's Auto align
+(`core/SceneAlign.h`) finds the plane the points stand on within 60 degrees of
+the cameras' up, puts it at z = 0, turns the walls onto the axes and centres
+the footprint, keeping the scale. A model levelled this way says `oriented 1`,
+`up ground` in `gauge.txt`, so the viewer shows it in its own frame. Where the
+ground is not found the camera frame stands and the log says so. A model whose
+up something measured (the sensors, the attitude, GPS without altitude) keeps
+its tilt and is only moved along Z to put its ground at 0; `horizontal` GPS
+takes its tilt from the ground too. `--level cameras` is the camera frame
+alone, as the trainer would compute it.
+
 Which up that is, is `--exif-orientation`'s business. A phone held upright
 writes a landscape file plus a tag saying to turn it, so the frame's own up
 is 90 degrees from the photographer's; `orient` (the default) reads the tag

@@ -199,9 +199,10 @@ a latent bug in phase 1; the transform made it impossible to miss.)
 
 ## Finding the frame a scene wants
 
-`edit/AlignFit.{h,cpp}`: pure geometry over a point array, tested without a
+`core/SceneAlign.{h,cpp}`: pure geometry over a point array, tested without a
 window (`app/gui/tests/align_fit_test.cpp`, a tipped-over room with a box in
-it, noise and floaters).
+it, noise and floaters). `spirula sfm` levels every model it writes with the
+same auto align (`sfm/map/Orient.h`).
 
 - **Auto align.** Up to six planes by sequential RANSAC, each refit by least
   squares. The ground is the best-supported plane with the scene ON it (which

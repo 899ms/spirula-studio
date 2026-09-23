@@ -154,6 +154,9 @@ struct SfmConfig {
     // Write the finished model in an upright, centred, unit-sized frame rather
     // than in whatever gauge the seed pair left it in (map/Orient.h).
     bool orient = true;
+    // What levels a model nothing measured: "ground" (the plane its points
+    // stand on, the walls and the footprint) or "cameras" (their mean up axis).
+    std::string level = "ground";
     // What each image's EXIF Orientation is worth: "none", "orient" (the up
     // direction only, pixels untouched) or "apply" (turn the pixels).
     // docs/datasets.md, "EXIF orientation".
@@ -431,6 +434,8 @@ struct SfmConfig {
       Tier::Advanced, "mapper", 0, 0, "", final_per_image_intrinsics)                              \
     F(orient, "orient", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, 0, "",        \
       orient)                                                                                      \
+    F(level, "level", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, 0,              \
+      "ground|cameras", level)                                                                     \
     F(metric_positions, "metric-positions", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced,        \
       "mapper", 0, 0, "", metric_positions)                                                        \
     F(metric_gps, "metric-gps", CMD_AUTO | CMD_MAP | CMD_MERGE, Tier::Advanced, "mapper", 0, 0,    \

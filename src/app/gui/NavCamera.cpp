@@ -53,6 +53,9 @@ void v_cross(const float a[3], const float b[3], float o[3]) {
     o[1] = a[2]*b[0] - a[0]*b[2];
     o[2] = a[0]*b[1] - a[1]*b[0];
 }
+float v_dot(const float a[3], const float b[3]) {
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
 float v_len(const float a[3]) {
     return std::sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]);
 }
@@ -124,12 +127,43 @@ void mat3_to_quat(const float m[9], float o[4]) {
     }
 }
 
-const float kWorldUp[3] = {0, 0, 1};
-
 }  // namespace
 
 
 float NavCamera::speed() const { return std::pow(10.0f, speed_exp); }
+
+void NavCamera::transform(const float S[12]) {
+    const float s = std::sqrt(S[0]*S[0] + S[4]*S[4] + S[8]*S[8]);
+    if (!(s > 1e-20f)) return;
+    auto apply = [&](float p[3]) {
+        const float q[3] = {p[0], p[1], p[2]};
+        for (int r = 0; r < 3; r++)
+            p[r] = S[r*4]*q[0] + S[r*4+1]*q[1] + S[r*4+2]*q[2] + S[r*4+3];
+    };
+    apply(pos);
+    apply(target);
+    float m[9];   // column-major, for mat3_to_quat
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) m[c*3 + r] = S[r*4 + c] / s;
+    float q[4];
+    mat3_to_quat(m, q);
+    q_norm(q);
+    q_mul(q, rot, rot);
+    q_norm(rot);
+    // speed_exp += std::log10(s);
+}
+
+void NavCamera::level_roll() {
+    float f[3], r[3], want[3];
+    axis_forward(f);
+    axis_right(r);
+    v_cross(f, world_up, want);
+    if (v_len(want) < 1e-3f) return;
+    v_norm(want, want);
+    float c[3];
+    v_cross(r, want, c);
+    roll(std::atan2(v_dot(c, f), v_dot(r, want)));
+}
 
 void NavCamera::c2w(float out[12]) const {
     float x = rot[0], y = rot[1], z = rot[2], w = rot[3];
@@ -157,7 +191,7 @@ void NavCamera::orbit(float dx, float dy) {
     float right[3], up[3];
     axis_right(right);
     if (mode == Trackball) axis_up(up);
-    else { up[0] = kWorldUp[0]; up[1] = kWorldUp[1]; up[2] = kWorldUp[2]; }
+    else { up[0] = world_up[0]; up[1] = world_up[1]; up[2] = world_up[2]; }
     float qa[4], qb[4], qab[4];
     q_from_axis_angle(up, -dx * sensitivity, qa);
     q_from_axis_angle(right, -dy * sensitivity, qb);
@@ -244,7 +278,7 @@ bool NavCamera::keyboard_tick(float dt, const Keys& k) {
     axis_forward(fwd);
     axis_right(right);
     if (mode == Turntable || mode == Fps) {
-        up[0] = kWorldUp[0]; up[1] = kWorldUp[1]; up[2] = kWorldUp[2];
+        up[0] = world_up[0]; up[1] = world_up[1]; up[2] = world_up[2];
     } else {
         axis_up(up);
     }
@@ -297,7 +331,7 @@ bool NavCamera::gamepad_tick(float dt) {
             v_scale(fwd, -ly * s, step);
             v_add(move, step, move);
             float up_step[3];
-            v_scale(kWorldUp, (rt - lt) * s, up_step);
+            v_scale(world_up, (rt - lt) * s, up_step);
             v_add(move, up_step, move);
             v_add(pos, move, pos);
             v_add(target, move, target);

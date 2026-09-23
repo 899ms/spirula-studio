@@ -372,8 +372,7 @@ if(SS_BUILD_GUI)
     ss_configure_app(command_argv_test)
 
     add_executable(align_fit_test
-        ${SS_SRC}/app/gui/tests/align_fit_test.cpp
-        ${SS_SRC}/app/gui/edit/AlignFit.cpp)
+        ${SS_SRC}/app/gui/tests/align_fit_test.cpp)
     ss_configure_app(align_fit_test)
 
     add_executable(attributes_test
@@ -383,6 +382,11 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/edit/ElementGrid.cpp
         ${SS_SRC}/app/gui/edit/Selection.cpp)
     ss_configure_app(attributes_test)
+
+    add_executable(rig_guess_test
+        ${SS_SRC}/app/gui/tests/rig_guess_test.cpp
+        ${SS_SRC}/app/gui/RigGuess.cpp)
+    ss_configure_app(rig_guess_test)
 
     add_executable(render_project_test
         ${SS_SRC}/app/gui/tests/render_project_test.cpp

@@ -8308,6 +8308,76 @@ SS_MSG(rig_help,
        "satırlar dosya adına göre tek rig olur -- her girdi aynı lensleri "
        "veriyorsa girdiler arasında birkaç videonun ardındaki tek rig olarak."));
 
+SS_MSG(rig_guess,
+    EN("Guess rigs from folder names"), JA("フォルダ名からリグを推定"),
+    ZH_HANS("按文件夹名推断装置"), ZH_HANT("按資料夾名稱推斷裝置"),
+    KO("폴더 이름으로 리그 추정"), DE("Rigs aus Ordnernamen erraten"),
+    FR("Deviner les rigs d'après les noms de dossier"),
+    ES("Deducir los rigs por el nombre de las carpetas"),
+    PT("Deduzir os rigs pelos nomes das pastas"),
+    IT("Dedurre i rig dai nomi delle cartelle"),
+    NL("Rigs afleiden uit mapnamen"), RU("Определить риги по именам папок"),
+    TR("Düzenekleri klasör adlarından tahmin et"));
+
+SS_MSG(rig_guess_help,
+    EN("Puts photo folders whose names differ in one part only (left and "
+       "right, cam0 and cam1) and whose images share file names on one rig, "
+       "a letter per rig, and takes every other folder off its rig. Done "
+       "once by itself when folders are added and none is on a rig yet."),
+    JA("名前が 1 か所だけ異なり（left と right、cam0 と cam1）、画像のファイル名が"
+       "共通する写真フォルダを 1 つのリグにまとめ、リグごとに文字を割り当てます。"
+       "それ以外のフォルダはリグから外します。フォルダを追加したとき、まだどれも"
+       "リグに入っていなければ自動で 1 回行われます。"),
+    ZH_HANS("把名称只有一处不同（left 与 right、cam0 与 cam1）且图像文件名相同的"
+            "照片文件夹归入同一装置，每个装置一个字母，其余文件夹移出装置。添加"
+            "文件夹时若还没有任何文件夹属于装置，会自动执行一次。"),
+    ZH_HANT("把名稱只有一處不同（left 與 right、cam0 與 cam1）且影像檔名相同的"
+            "照片資料夾歸入同一裝置，每個裝置一個字母，其餘資料夾移出裝置。新增"
+            "資料夾時若還沒有任何資料夾屬於裝置，會自動執行一次。"),
+    KO("이름이 한 부분만 다르고(left 와 right, cam0 와 cam1) 이미지 파일 이름이 "
+       "같은 사진 폴더들을 한 리그로 묶고 리그마다 글자를 붙이며, 나머지 폴더는 "
+       "리그에서 뺍니다. 폴더를 추가했을 때 아직 리그에 든 폴더가 없으면 한 번 "
+       "자동으로 실행됩니다."),
+    DE("Legt Fotoordner, deren Namen sich nur in einem Teil unterscheiden (left "
+       "und right, cam0 und cam1) und deren Bilder dieselben Dateinamen tragen, "
+       "auf ein Rig, einen Buchstaben je Rig, und nimmt alle anderen Ordner von "
+       "ihrem Rig. Geschieht einmal von selbst, wenn Ordner hinzukommen und noch "
+       "keiner auf einem Rig liegt."),
+    FR("Place sur un même rig les dossiers de photos dont les noms ne diffèrent "
+       "que d'une partie (left et right, cam0 et cam1) et dont les images portent "
+       "les mêmes noms de fichier, une lettre par rig, et retire les autres "
+       "dossiers de leur rig. Fait automatiquement une fois quand des dossiers "
+       "sont ajoutés et qu'aucun n'est encore sur un rig."),
+    ES("Pone en un mismo rig las carpetas de fotos cuyos nombres difieren en una "
+       "sola parte (left y right, cam0 y cam1) y cuyas imágenes comparten nombre "
+       "de archivo, una letra por rig, y saca del rig a las demás carpetas. Se "
+       "hace solo una vez al añadir carpetas si ninguna está aún en un rig."),
+    PT("Coloca num mesmo rig as pastas de fotos cujos nomes diferem numa só "
+       "parte (left e right, cam0 e cam1) e cujas imagens partilham nomes de "
+       "ficheiro, uma letra por rig, e tira as restantes pastas do seu rig. É "
+       "feito sozinho uma vez ao adicionar pastas, se nenhuma estiver ainda num "
+       "rig."),
+    IT("Mette su uno stesso rig le cartelle di foto i cui nomi differiscono in "
+       "una sola parte (left e right, cam0 e cam1) e le cui immagini hanno gli "
+       "stessi nomi di file, una lettera per rig, e toglie le altre cartelle dal "
+       "loro rig. Avviene da solo una volta quando si aggiungono cartelle e "
+       "nessuna è ancora su un rig."),
+    NL("Zet fotomappen waarvan de namen in één deel verschillen (left en right, "
+       "cam0 en cam1) en waarvan de beelden dezelfde bestandsnamen hebben op één "
+       "rig, een letter per rig, en haalt alle andere mappen van hun rig. Gebeurt "
+       "één keer vanzelf wanneer mappen worden toegevoegd en er nog geen op een "
+       "rig staat."),
+    RU("Объединяет в один риг папки с фото, имена которых отличаются только "
+       "одной частью (left и right, cam0 и cam1), а снимки имеют одинаковые "
+       "имена файлов, по букве на риг, и снимает остальные папки с их ригов. "
+       "Выполняется само один раз при добавлении папок, если ни одна ещё не "
+       "на риге."),
+    TR("Adları yalnızca bir kısımda farklı olan (left ve right, cam0 ve cam1) "
+       "ve görüntüleri aynı dosya adlarını taşıyan fotoğraf klasörlerini tek bir "
+       "düzeneğe koyar, her düzeneğe bir harf verir ve diğer klasörleri "
+       "düzeneklerinden çıkarır. Klasörler eklendiğinde henüz hiçbiri bir "
+       "düzenekte değilse bir kez kendiliğinden yapılır."));
+
 SS_MSG(sync_lenses,
     EN("Synchronize lenses"), JA("レンズを同期"), ZH_HANS("同步镜头"), ZH_HANT("同步鏡頭"),
     KO("렌즈 동기화"), DE("Objektive synchronisieren"), FR("Synchroniser les objectifs"),

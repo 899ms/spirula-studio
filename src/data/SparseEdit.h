@@ -57,6 +57,15 @@ std::vector<std::string> sparse_write_filtered(const std::string& dataset_dir,
                                                const Sim3* moved = nullptr,
                                                SparseBaseline* base = nullptr);
 
+// The same edit written as a new COLMAP dataset at `out_dir`/sparse/0, beside
+// copies of the model's other files; `dataset_dir` is left alone. Throws when
+// it is not a COLMAP model or `out_dir` already holds a sparse/ folder.
+std::vector<std::string> sparse_write_copy(const std::string& dataset_dir,
+                                           const std::string& out_dir,
+                                           const SparseKeep& keep,
+                                           const Sim3* moved = nullptr,
+                                           SparseBaseline* base = nullptr);
+
 // What a COLMAP model knows about its own quality and the parser does not
 // keep: who saw each point, and how well. Points are in the file's order --
 // ParsedDataset::points' -- and images are NAMED, as in SparseKeep.

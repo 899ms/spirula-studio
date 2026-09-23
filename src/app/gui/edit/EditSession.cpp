@@ -5,6 +5,7 @@
 #include "app/gui/Layout.h"
 #include "app/gui/ViewportPanel.h"
 #include "i18n/Message.h"
+#include "app/gui/edit/PointsDoc.h"
 #include "app/gui/edit/WorldGrid.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/EditTransform.h"
@@ -81,6 +82,8 @@ void EditSession::close() {
     _fly_block_key = 0;
     _xform.cancel();
     _pick = Pick::None;
+    _train_after_save = false;
+    _ask_train = false;
     if (_panel) {
         _panel->set_interactor(nullptr);
         _panel->set_center_provider(nullptr);
@@ -591,6 +594,8 @@ void EditSession::poll() {
     }
     if (!_save_busy.load() && _save_worker.joinable()) {
         _save_worker.join();
+        const bool to_trainer = _train_after_save;
+        _train_after_save = false;
         if (_save_error.empty()) {
             if (_on_saved) _on_saved(_doc->source_path(), _save_path, _save_placement);
             _doc->mark_saved();
@@ -600,6 +605,9 @@ void EditSession::poll() {
             _status = spirula::i18n::format(msg::saved_to,
                                             {_doc->default_save_path(_save_target)});
             _status_err = false;
+            // Last: the owner is free to end this session in answer.
+            if (to_trainer && _to_trainer)
+                _to_trainer(_save_path, trainer_dataset());
         } else {
             _status = spirula::i18n::format(msg::save_failed, {_save_error});
             _status_err = true;
@@ -630,6 +638,20 @@ void EditSession::poll() {
 // Saving
 // ---------------------------------------------------------------------------
 
+std::string EditSession::trainer_dataset() const {
+    if (!_to_trainer || !_doc || _doc->kind() != EditDoc::Kind::Points) return {};
+    if (folder_target() < 0) return {};
+    return static_cast<const PointsDoc*>(_doc.get())->dataset_dir();
+}
+
+int EditSession::folder_target() const {
+    if (!_doc) return -1;
+    const std::vector<SaveTarget> t = _doc->save_targets();
+    for (size_t i = 0; i < t.size(); i++)
+        if (t[i].folder) return (int)i;
+    return -1;
+}
+
 bool EditSession::can_save_in_place() const {
     return _doc && !_doc->default_save_path(_save_target).empty();
 }
@@ -638,7 +660,7 @@ bool EditSession::can_save_copy() const {
     if (!_doc || !_pick_save) return false;
     const std::vector<SaveTarget> t = _doc->save_targets();
     return _save_target >= 0 && _save_target < (int)t.size() &&
-           !t[(size_t)_save_target].folder;
+           t[(size_t)_save_target].copy;
 }
 
 void EditSession::save_in_place() {
@@ -651,7 +673,7 @@ void EditSession::ask_save_copy() {
     const std::vector<SaveTarget> t = _doc->save_targets();
     if (_save_target < 0 || _save_target >= (int)t.size()) return;
     const SaveTarget& target = t[(size_t)_save_target];
-    if (target.folder) return;
+    if (!target.copy) return;
     const std::string home = _doc->default_save_path(_save_target);
     std::string stem =
         std::filesystem::path(home.empty() ? _doc->source_path() : home)

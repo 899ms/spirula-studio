@@ -1,6 +1,7 @@
 // SourceList.cpp -- see SourceList.h.
 
 #include "app/gui/SourceList.h"
+#include "app/gui/RigGuess.h"
 
 #include <algorithm>
 #include <atomic>
@@ -181,6 +182,51 @@ void refresh_subcameras(std::vector<PrepInput>& sources) {
             next.push_back(std::move(sc));
         }
         s.subcameras.swap(next);
+    }
+}
+
+
+void guess_source_rigs(std::vector<PrepInput>& sources, bool force) {
+    const std::vector<CameraGroup> groups = camera_groups(sources);
+    std::vector<size_t> rows;
+    for (size_t i = 0; i < groups.size(); i++) {
+        if (sources[groups[i].input].is_video) continue;
+        const int rig = group_rig(sources, groups[i]);
+        if (!force && rig != kRigNone) return;
+        rows.push_back(i);
+    }
+    if (rows.size() < 2) return;
+
+    std::vector<RigCandidate> folders;
+    for (size_t i : rows) {
+        const CameraGroup& g = groups[i];
+        const PrepInput& in = sources[g.input];
+        RigCandidate c;
+        c.name = g.rel.empty() ? fs::path(in.path).filename().string() : g.rel;
+        fs::path dir(in.path);
+        if (g.sub >= 0) dir /= in.subcameras[(size_t)g.sub].rel;
+        std::error_code ec;
+        const auto opts = fs::directory_options::follow_directory_symlink |
+                          fs::directory_options::skip_permission_denied;
+        // A subcamera's images sit directly in its folder; an input's may be
+        // nested, and matching is by path relative to it, as the rig's is.
+        for (fs::recursive_directory_iterator it(dir, opts, ec), end;
+             !ec && it != end; it.increment(ec)) {
+            if (g.sub >= 0) it.disable_recursion_pending();
+            if (!it->is_regular_file(ec) || !is_image_file(it->path())) continue;
+            fs::path rel = it->path().lexically_relative(dir);
+            c.images.push_back(rel.replace_extension().generic_string());
+        }
+        std::sort(c.images.begin(), c.images.end());
+        c.images.erase(std::unique(c.images.begin(), c.images.end()), c.images.end());
+        folders.push_back(std::move(c));
+    }
+
+    const std::vector<int> rig = guess_rigs(folders);
+    for (size_t k = 0; k < rows.size(); k++) {
+        int& r = group_rig(sources, groups[rows[k]]);
+        if (rig[k] >= 0 && rig[k] < kRigShared) r = kRigFirstShared + rig[k];
+        else if (force && r >= kRigFirstShared) r = kRigNone;
     }
 }
 

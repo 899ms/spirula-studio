@@ -1,44 +1,20 @@
-// The gauge a finished model is written in.
+// The gauge a finished model is written in when nothing measured one.
 //
-// A monocular reconstruction has no absolute orientation, position or scale --
-// the mapper's answer is whatever the seed pair happened to be, so a capture
-// of a level room comes out tilted at a random angle, centred on nothing in
-// particular, and sized in units of "however far apart those first two frames
-// were". Everything downstream then has to carry that: the trainer computes a
-// normalizing similarity to place its viewer camera, the web viewer applies it
-// again, and an exported splat.ply or mesh -- which carries no cameras and so
-// no way to recover the transform -- is simply tilted forever.
-//
-// Fixing the gauge here, once, at the point where the model is written, gives
-// every consumer an upright, centred, unit-sized scene for free.
-//
-// The transform is the SAME one the trainer computes from the poses it loads
-// (dsparse::compute_normalized_transform, orientation_method="up" /
-// center_method="poses" / auto_scale_poses):
-//
-//     up     = normalize(mean camera up axis)
-//     R      = the rotation taking `up` to +Z
-//     centre = mean camera position
-//     scale  = 1 / max component of R (position - centre) over all cameras
-//
-// Two consequences worth knowing. The trainer's own normalization becomes a
-// near-identity, so `train_frame_scale` comes out ~1 and the learning-rate and
-// regularizer rescaling that hangs off it no longer has anything to undo --
-// the training frame IS the normalized frame. And a fragmented capture
-// normalizes each component separately, which is correct because separate
-// components share no gauge to begin with; a later `merge` estimates the Sim3
-// between them regardless.
-//
-// "Up" is a statistical claim about how the capture was held, not a
-// measurement -- a camera carried upside-down through half a capture gives a
-// mean up axis pointing at neither. It is the same claim the trainer has
-// always made, and `--no-orient` is how to decline it.
+// A monocular reconstruction has no absolute orientation, position or scale,
+// so the model is turned so the cameras' mean up axis is +Z, centred on the
+// cameras and sized so the furthest camera coordinate is 1 -- the similarity
+// the trainer computes from the poses it loads -- and then levelled on the
+// ground its points stand on (groundTransform). "Up" from the cameras is a
+// statistical claim about how the capture was held; src/sfm/README.md,
+// "--orient", has the reasoning and `--level cameras` / `--no-orient`.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include "core/SceneAlign.h"
 #include "sfm/core/Exif.h"
 #include "sfm/core/Model.h"
 #include "sfm/core/Pose.h"
@@ -156,12 +132,57 @@ inline void applySim3(Reconstruction& rec, const Sim3& T) {
     transformRigs(rec.rigs, T.scale);
 }
 
-// Returns the transform that was applied, so the caller can report it (and so
-// a caller that needs to map something else into the new frame still can).
-inline Sim3 orientModel(Reconstruction& rec, bool use_exif = false) {
-    const Sim3 T = uprightTransform(rec, use_exif);
-    applySim3(rec, T);
-    return T;
+// Levelled on the ground the points stand on rather than on how the cameras
+// were held: the editor's Auto align (core/SceneAlign.h). `rec`'s +Z is the
+// prior, and a ground more than 60 degrees from it is not taken.
+struct GroundFit {
+    Sim3 T;               // identity when no ground was found
+    bool found = false;
+    double share = 0.0;   // of the points, on the ground
+};
+
+// `full`: ground at z = 0 and level, walls onto the axes, footprint on the
+// origin, scale kept; otherwise only a move along Z putting the ground at 0.
+// `pre` is where the model is about to go, applied to the points sampled.
+inline GroundFit groundTransform(const Reconstruction& rec, bool full,
+                                 const Sim3& pre = Sim3{}) {
+    GroundFit out;
+    std::vector<double> pts;
+    const size_t step = std::max<size_t>(1, rec.points3D.size() / 250000);
+    size_t k = 0;
+    for (const auto& kv : rec.points3D) {
+        if (k++ % step) continue;
+        const Vec3 p = transformPoint(pre, kv.second.xyz);
+        pts.insert(pts.end(), {p.x, p.y, p.z});
+    }
+    const int64_t n = (int64_t)pts.size() / 3;
+    if (n < 16) return out;
+    namespace al = spirula::align;
+    al::AutoAlignOptions opt;
+    opt.tol = 0.01 * al::robust_extent(pts.data(), n);
+    opt.yaw = opt.centre = full;
+    const double up[3] = {0, 0, 1};
+    const al::AutoAlignResult r = al::auto_align(pts.data(), n, up, nullptr, nullptr, opt);
+    if (!r.ground || !(opt.tol > 0.0)) return out;
+    out.found = true;
+    out.share = r.ground_share;
+    if (full) {
+        for (int i = 0; i < 9; i++) out.T.R[(size_t)i] = r.T.R[i];
+        out.T.t = Vec3{r.T.t[0], r.T.t[1], r.T.t[2]};
+        return out;
+    }
+    // The plane's height under the middle of the footprint.
+    std::vector<double> xs, ys;
+    for (int64_t i = 0; i < n; i++) {
+        xs.push_back(pts[(size_t)i * 3]);
+        ys.push_back(pts[(size_t)i * 3 + 1]);
+    }
+    std::nth_element(xs.begin(), xs.begin() + xs.size() / 2, xs.end());
+    std::nth_element(ys.begin(), ys.begin() + ys.size() / 2, ys.end());
+    const al::Plane& g = r.plane;
+    const double z = -(g.n[0] * xs[xs.size() / 2] + g.n[1] * ys[ys.size() / 2] + g.d) / g.n[2];
+    out.T.t = Vec3{0, 0, -z};
+    return out;
 }
 
 }  // namespace sfm

@@ -820,4 +820,45 @@ std::vector<std::string> sparse_write_filtered(const std::string& dataset_dir,
     return written;
 }
 
+std::vector<std::string> sparse_write_copy(const std::string& dataset_dir,
+                                           const std::string& out_dir,
+                                           const SparseKeep& keep,
+                                           const Sim3* moved,
+                                           SparseBaseline* loaded) {
+    SparseBaseline local;
+    if (!loaded) loaded = &local;
+    if (!loaded->loaded()) *loaded = load_baseline(dataset_dir);
+    const SparseBaseline& base = *loaded;
+    if (base.format != SparseFormat::Colmap)
+        throw std::runtime_error("only a COLMAP reconstruction can be saved as a copy");
+    std::error_code ec;
+    const fs::path sparse = fs::path(out_dir) / "sparse";
+    if (fs::exists(sparse, ec))
+        throw std::runtime_error(sparse.string() + " already exists");
+    const fs::path model = sparse / "0";
+    fs::create_directories(model, ec);
+    if (ec) throw std::runtime_error("cannot create " + model.string());
+    const std::string ext = base.text ? ".txt" : ".bin";
+    const fs::path images = model / ("images" + ext);
+    const fs::path points = model / ("points3D" + ext);
+    const fs::path frames = model / "frames.bin";
+    for (fs::directory_iterator it(base.model_dir, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        const fs::path name = it->path().filename();
+        if (!it->is_regular_file(ec) || it->path().extension() == ".orig" ||
+            name == images.filename() || name == points.filename() ||
+            name == frames.filename())
+            continue;
+        fs::copy_file(it->path(), model / name, ec);
+        if (ec) throw std::runtime_error("cannot copy " + it->path().string());
+    }
+    SparseBaseline b = base;
+    b.model_dir = model.string();
+    std::vector<std::string> written = sparse_write_filtered(out_dir, keep, moved, &b);
+    // Only what the edit changed was written; the rest is the model as found.
+    if (!fs::exists(images, ec)) write_file(images, b.images);
+    if (!b.frames.empty() && !fs::exists(frames, ec)) write_file(frames, b.frames);
+    return written;
+}
+
 }  // namespace spirula

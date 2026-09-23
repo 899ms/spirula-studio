@@ -204,6 +204,11 @@ GuiApp::GuiApp() {
             if (o == path) return outs;
         return std::vector<std::string>{};
     });
+    _compare.edit().set_to_trainer(
+        [this](const std::string& dataset, const std::string& source) {
+            _edit_train_dataset = dataset;
+            _edit_train_source = source;
+        });
     _compare.edit().set_pick_save(
         [this](int target, const std::string& ext, bool folder,
                const std::string& suggested) {
@@ -383,6 +388,7 @@ void GuiApp::load_settings() {
         // Absent -- an upgrade from a build that did not write it -- leaves the
         // default, which is ON: the files are what makes a run resumable.
         else if (k == "keep_intermediate") _sfm_job.keep_intermediate = v != "0";
+        else if (k == "save_full_checkpoint") _keep_full_ckpt = v != "0";
         else if (k.rfind(kDirPrefix, 0) == 0 && !v.empty())
             _dialog_dirs[k.substr(sizeof kDirPrefix - 1)] = v;
     }
@@ -429,6 +435,7 @@ void GuiApp::save_settings() {
     std::fprintf(f, "show_settings=%d\n", _show_settings ? 1 : 0);
     std::fprintf(f, "native_dialogs=%d\n", _dialog.native_enabled() ? 1 : 0);
     std::fprintf(f, "keep_intermediate=%d\n", _sfm_job.keep_intermediate ? 1 : 0);
+    std::fprintf(f, "save_full_checkpoint=%d\n", _keep_full_ckpt ? 1 : 0);
     for (const auto& [key, dir] : _dialog_dirs)
         std::fprintf(f, "%s%s=%s\n", kDirPrefix, key.c_str(), dir.c_str());
     for (const auto& l : _accepted_licenses)
@@ -756,6 +763,7 @@ void GuiApp::apply_preset(const std::string& preset) {
     // The native viewport replaces the web viewer by default; it can be
     // re-enabled in Basic Options for remote monitoring.
     fresh.disable_viewer = true;
+    fresh.save_full_checkpoint = _keep_full_ckpt;
     _preset = preset;
     _train_presets.file.clear();
     _train_presets.display.clear();
@@ -788,6 +796,7 @@ void GuiApp::apply_user_preset(const TrainPreset& p) {
     if (fresh.image_dir == stock.image_dir) fresh.image_dir = _cfg.image_dir;
     if (fresh.mask_dir == stock.mask_dir) fresh.mask_dir = _cfg.mask_dir;
     fresh.disable_viewer = true;   // as apply_preset: the native viewport
+    fresh.save_full_checkpoint = p.cfg.save_full_checkpoint || _keep_full_ckpt;
 
     _preset = p.base;
     _train_presets.file = p.path;
@@ -1074,6 +1083,36 @@ void GuiApp::open_dataset(std::string dir, std::string image_dir,
     reset_dataset_preview();
     _runner.load_dataset(_cfg, _preset);
     _screen = Screen::Train;
+}
+
+void GuiApp::open_edited_dataset() {
+    const std::string dataset = std::exchange(_edit_train_dataset, {});
+    const std::string source = std::exchange(_edit_train_source, {});
+    if (native_work_busy()) return;
+    auto same = [](const std::string& a, const std::string& b) {
+        std::error_code ec;
+        return !a.empty() && !b.empty() && fs::equivalent(a, b, ec);
+    };
+    DatasetFolders from;
+    if (same(source, _sparse_edit_src.dir) ||
+        same(source, spirula::resolve_sparse_dir(_sparse_edit_src.dir)))
+        from = _sparse_edit_src;
+    else if (same(source, _cfg.data))
+        from = {_cfg.data, _cfg.image_dir, _cfg.mask_dir, _cfg.flip_mask};
+    // A copy sits elsewhere, so the source's folders are named absolutely;
+    // the dataparser's own defaults are what an unnamed one means.
+    if (!same(dataset, source)) {
+        const TrainConfig stock;
+        auto absolute = [&](std::string d, const std::string& fallback) {
+            if (d.empty()) d = fallback;
+            const fs::path p = fs::path(source) / d;
+            std::error_code ec;
+            return fs::is_directory(p, ec) ? p.lexically_normal().string() : std::string();
+        };
+        from.image_dir = absolute(from.image_dir, stock.image_dir);
+        from.mask_dir = absolute(from.mask_dir, stock.mask_dir);
+    }
+    open_dataset(dataset, from.image_dir, from.mask_dir, from.mask_flipped);
 }
 
 void GuiApp::request_open_dataset(std::string dir) {
@@ -2066,6 +2105,13 @@ void GuiApp::refresh_sources() {
     }
 
     refresh_subcameras(_sources);
+    std::string rig_key;
+    for (const CameraGroup& g : camera_groups(_sources))
+        if (!_sources[g.input].is_video) rig_key += _sources[g.input].path + '\n' + g.rel + '\n';
+    if (rig_key != _rig_guess_key) {
+        _rig_guess_key = rig_key;
+        guess_source_rigs(_sources, /*force=*/false);
+    }
     normalize_source_lenses(_sources, _sfm_job.camera_model);
     normalize_source_fps(_sources, _sfm_job.prep.video_fps);
 
@@ -2579,6 +2625,7 @@ void GuiApp::frame() {
 
     append_logs();
     run_pending_if_stopped();
+    if (!_edit_train_dataset.empty()) open_edited_dataset();
     // vit-giant2 is two files, and so is ALIKED with LightGlue: both fetches
     // are queues, stepped on from somewhere that runs whatever screen is up.
     _geom_download.pump();
@@ -3924,6 +3971,14 @@ void GuiApp::draw_source_cameras() {
     }
     col = std::min(col, px(420.0f));
 
+    // One letter per two rows, and never fewer than a row already holds.
+    int letters = std::max<int>(1, (int)groups.size() / 2);
+    for (const CameraGroup& g : groups)
+        letters = std::max(letters, group_rig(_sources, g) - kRigFirstShared + 1);
+    letters = std::min(letters, kRigShared);
+    std::vector<std::string> letter_names;
+    for (int l = 0; l < letters; l++) letter_names.push_back(rig_letter(l));
+
     bool edited = false;
     for (size_t i = 0; i < groups.size(); i++) {
         const CameraGroup& g = groups[i];
@@ -3966,21 +4021,32 @@ void GuiApp::draw_source_cameras() {
             // "This input's lenses" only means something for an input with
             // several: a lone photo folder or a one-lens video has none to rig.
             const bool multi = g.sub >= 0 || !lens_dirs(_sfm_job.prep, in).empty();
-            const char* const items[] = {ui::detail::label(dmsg::rig_none),
-                                         ui::detail::label(dmsg::rig_own), "A", "B", "C", "D"};
             int& rig = group_rig(_sources, g);
             if (!multi && rig == kRigOwn) rig = kRigNone;
-            const int first = multi ? 0 : 1;
-            int idx = rig - first;
-            if (idx < 0) idx = 0;
-            if (ui::ComboRaw("##rig", &idx, items + first, kRigFirstShared + kRigShared - first))
-                rig = idx + first;
+            std::vector<const char*> items = {ui::detail::label(dmsg::rig_none)};
+            std::vector<int> ids = {kRigNone};
+            if (multi) {
+                items.push_back(ui::detail::label(dmsg::rig_own));
+                ids.push_back(kRigOwn);
+            }
+            for (int l = 0; l < letters; l++) {
+                items.push_back(letter_names[(size_t)l].c_str());
+                ids.push_back(kRigFirstShared + l);
+            }
+            int idx = (int)(std::find(ids.begin(), ids.end(), rig) - ids.begin());
+            if (idx >= (int)ids.size()) idx = 0;
+            if (ui::ComboRaw("##rig", &idx, items.data(), (int)items.size()))
+                rig = ids[(size_t)idx];
             ui::help_on_hover(dmsg::rig_help);
         }
         draw_lens_warning(dir, in.is_video, models[i], /*builtin=*/true);
         ImGui::PopID();
     }
     draw_rig_kinds(groups, names);
+    if (groups.size() >= 2) {
+        if (ui::SmallButton(dmsg::rig_guess)) guess_source_rigs(_sources, /*force=*/true);
+        ui::help_on_hover(dmsg::rig_guess_help);
+    }
     ImGui::Unindent();
     // Only now: the edit is the row's own, and collapsing it into the row above
     // rewrites what the loop was holding references into.
@@ -4015,7 +4081,7 @@ void GuiApp::draw_rig_kinds(const std::vector<CameraGroup>& groups,
             if (own.filename().empty()) own = own.parent_path();
             const std::string rig_name =
                 id == kRigOwn ? own.filename().string()
-                              : std::string(1, (char)('A' + id - kRigFirstShared));
+                              : rig_letter(id - kRigFirstShared);
             const std::string label =
                 i18n::format(dmsg::rig_dual_fisheye, {rig_name, names[rows[0]], names[rows[1]]}) +
                 "###rig_dual_fisheye_" + std::to_string(id) + "_" + std::to_string(input);
@@ -5027,7 +5093,18 @@ void GuiApp::poll_sfm_progress() {
 
     LiveModel lm;
     if (read_live_model(dir, _model_mtime, lm)) {
+        // Each snapshot is framed on its own cameras, and the last is re-gauged
+        // as well; carrying the camera along keeps the picture still through
+        // both, where re-framing would jump.
+        float moved[12];
+        if (_model_attached && snapshot_motion(_live_model, lm, moved))
+            _model_view.move_view(moved);
         _live_model = std::move(lm);
+        // The mapper's frame is the seed pair's, upside down as often as not:
+        // navigate about the cameras' up until the model is levelled.
+        float up[3] = {0, 0, 1};
+        if (!_live_model.ds.gauge_oriented) snapshot_up(_live_model, up);
+        _model_view.set_nav_up(up);
         // The mapper's own output is a wall of per-registration detail, so the
         // default log used to go quiet for the longest step. These are the
         // model in hand, not the bar -- a seed retry starts one over.
@@ -5168,11 +5245,11 @@ void GuiApp::draw_dataset_preview(float height) {
         const float side =
             std::min(h - px(8.0f) - ImGui::GetTextLineHeightWithSpacing(),
                      avail > px(520.0f) ? avail * 0.5f : avail);
-        uint32_t a = 0, b = 0;
+        PairBlock block;
         // Grouped so the pair view sits beside the map rather than beside the
         // legend under it.
         ImGui::BeginGroup();
-        if (_matrix.draw(side, a, b)) _pairs_view.show(a, b);
+        if (_matrix.draw(side, block)) _pairs_view.show(block);
         ImGui::EndGroup();
         const float rest = avail - side - ImGui::GetStyle().ItemSpacing.x;
         if (rest > px(160.0f)) {
@@ -6029,6 +6106,7 @@ void GuiApp::draw_dataset_form(float height, bool running) {
         ImGui::SameLine();
         if (ui::Button(emsg::sparse_edit)) {
             _edit_after_open = true;
+            _sparse_edit_src = {st.dir, st.image_dir, st.mask_dir, st.mask_flipped};
             request_open_splat(st.dir);
         }
         ui::help_on_hover(emsg::sparse_edit_help);
@@ -7763,6 +7841,10 @@ void GuiApp::draw_train_settings() {
         // cannot make the snapshot below think the dataset went stale.
         train_resolve_macros(_cfg, _cfg_ui.touched);
 
+        if (_cfg.save_full_checkpoint != parse_before.save_full_checkpoint) {
+            _keep_full_ckpt = _cfg.save_full_checkpoint;
+            save_settings();
+        }
         if (!parse_settings_equal(parse_before, _cfg)) _parse_dirty = true;
     }
 

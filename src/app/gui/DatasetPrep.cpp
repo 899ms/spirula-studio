@@ -71,6 +71,13 @@ const char* const kVideoExtensions[kNumVideoExtensions] = {
     ".mts", ".m2ts", ".360", ".ts", ".wmv",
 };
 
+bool is_image_file(const fs::path& p) {
+    std::string e = p.extension().string();
+    for (auto& c : e) c = (char)std::tolower((unsigned char)c);
+    return e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".webp" ||
+           e == ".tif" || e == ".tiff" || e == ".bmp" || e == ".exr";
+}
+
 namespace {
 
 // NOT std::filesystem::remove_all -- on the torch build libtorch.so interposes
@@ -85,13 +92,6 @@ void remove_tree(const fs::path& p) {
     std::error_code ec;
     std::filesystem::remove_all(p, ec);
 #endif
-}
-
-bool is_image_file(const fs::path& p) {
-    std::string e = p.extension().string();
-    for (auto& c : e) c = (char)std::tolower((unsigned char)c);
-    return e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".webp" ||
-           e == ".tif" || e == ".tiff" || e == ".bmp" || e == ".exr";
 }
 
 // Candidates ffmpeg resamples per frame kept. Adaptive selection picks from

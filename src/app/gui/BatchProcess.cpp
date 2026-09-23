@@ -681,6 +681,7 @@ bool batch_build_dataset_job(const BatchRow& row, const std::string& ffmpeg_exe,
     resolve_source_lenses(sources, settings.sfm, settings.colmap);
     assign_source_subdirs(sources);
     refresh_subcameras(sources);
+    guess_source_rigs(sources, /*force=*/false);
     normalize_source_lenses(sources, settings.sfm.camera_model);
 
     workspace = batch_dataset_workspace(row);

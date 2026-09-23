@@ -51,6 +51,7 @@ public:
     }
 
     spirula::SparseFormat format() const { return _fmt; }
+    const std::string& dataset_dir() const { return _dataset_dir; }
 
 protected:
     void publish_impl(bool geometry) override;
