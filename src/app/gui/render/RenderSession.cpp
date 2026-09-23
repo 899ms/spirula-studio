@@ -1473,12 +1473,15 @@ bool RenderSession::on_viewport_input(const ViewportInput& in) {
     }
     if (_project.keys.empty() && !_pick_target) { _hot = _handle_hot = -1; return false; }
 
+    // Escape is routed as in handle_keys: a window over the viewer keeps it.
     if (_pick_target) {
         if (in.clicked) {
             _panel->request_pick(in.x / std::max(in.W, 1), in.y / std::max(in.H, 1));
             _pick_waiting = true;
             _pick_target = false;
-        } else if (in.right_clicked || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        } else if (in.right_clicked ||
+                   ImGui::Shortcut(ImGuiKey_Escape, ImGuiInputFlags_RouteFocused |
+                                                    ImGuiInputFlags_RouteFromRootWindow)) {
             _pick_target = false;
         }
         return true;

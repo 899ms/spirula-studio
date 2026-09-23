@@ -92,21 +92,57 @@ bool combo_msgs(const char* id, int* cur, const Msg* const* items, int n) {
 void RenderSession::handle_keys(bool over_view, bool over_list) {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput || ImGui::IsAnyItemActive() || _xform.active()) return;
-    const bool plain = !io.KeyCtrl && !io.KeyAlt && !io.KeyShift;
-    auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
+    // A chord reaches the panel only while focus is inside the main window,
+    // so a dialog keeps its own Ctrl+Z. Routed from the root so the viewport
+    // and timeline count.
+    const ImGuiInputFlags route = ImGuiInputFlags_RouteFocused |
+                                  ImGuiInputFlags_RouteFromRootWindow;
+    const ImGuiInputFlags repeat = route | ImGuiInputFlags_Repeat;
+    auto pressed = [&](ImGuiKeyChord k) { return ImGui::Shortcut(k, route); };
+    // All asked for before any acts, wherever the pointer is: a chord not
+    // asked for this frame has no route on the next, and its press is lost.
+    const bool undo_k = pressed(ImGuiMod_Ctrl | ImGuiKey_Z);
+    const bool redo_y = pressed(ImGuiMod_Ctrl | ImGuiKey_Y);
+    const bool redo_z = pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z);
+    const bool save_k = pressed(ImGuiMod_Ctrl | ImGuiKey_S);
+    const bool all_k = pressed(ImGuiMod_Ctrl | ImGuiKey_A);
+    const bool none_k = pressed(ImGuiMod_Ctrl | ImGuiKey_D);
+    const bool play_k = pressed(ImGuiKey_Space);
+    const bool home_k = pressed(ImGuiKey_Home);
+    const bool end_k = pressed(ImGuiKey_End);
+    const bool fwd_k = ImGui::Shortcut(ImGuiKey_Period, repeat);
+    const bool back_k = ImGui::Shortcut(ImGuiKey_Comma, repeat);
+    const bool next_k = pressed(ImGuiKey_PageDown);
+    const bool prev_k = pressed(ImGuiKey_PageUp);
+    const bool del_k = pressed(ImGuiKey_Delete);
+    const bool bksp_k = pressed(ImGuiKey_Backspace);
+    const bool a_k = pressed(ImGuiKey_A);
+    const bool alt_a_k = pressed(ImGuiMod_Alt | ImGuiKey_A);
+    const bool x_k = pressed(ImGuiKey_X);
+    const bool k_k = pressed(ImGuiKey_K);
+    const bool i_k = pressed(ImGuiKey_I);
+    const bool zero_k = pressed(ImGuiKey_0);
+    const bool kp0_k = pressed(ImGuiKey_Keypad0);
+    const bool t_k = pressed(ImGuiKey_T);
+    const bool g_k = pressed(ImGuiKey_G);
+    const bool r_k = pressed(ImGuiKey_R);
+    const bool s_k = pressed(ImGuiKey_S);
     // Flying: every other key is the flight's.
     if (_flying) {
-        if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter)) stop_flight(true);
-        else if (pressed(ImGuiKey_Escape)) stop_flight(false);
+        const bool keep = pressed(ImGuiKey_Enter);
+        const bool keep_kp = pressed(ImGuiKey_KeypadEnter);
+        const bool drop = pressed(ImGuiKey_Escape);
+        if (keep || keep_kp) stop_flight(true);
+        else if (drop) stop_flight(false);
         return;
     }
 
-    if (io.KeyCtrl && !io.KeyShift && pressed(ImGuiKey_Z)) { undo(); return; }
-    if (io.KeyCtrl && (pressed(ImGuiKey_Y) || (io.KeyShift && pressed(ImGuiKey_Z)))) {
+    if (undo_k) { undo(); return; }
+    if (redo_y || redo_z) {
         redo();
         return;
     }
-    if (io.KeyCtrl && pressed(ImGuiKey_S)) {
+    if (save_k) {
         if (_project_path.empty()) {
             if (_pick) _pick(Pick::SaveProject, default_project_dir(_sources.empty() ? "" : _sources[0].path), suggested_project_name());
         } else {
@@ -114,29 +150,28 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
         }
         return;
     }
-    if (io.KeyCtrl && !io.KeyShift && pressed(ImGuiKey_A)) {
+    if (all_k) {
         _sel.assign(_project.keys.size(), 1);
         return;
     }
-    if (io.KeyCtrl && !io.KeyShift && pressed(ImGuiKey_D)) {
+    if (none_k) {
         _sel.assign(_project.keys.size(), 0);
         return;
     }
-    if (plain && pressed(ImGuiKey_Space)) {
+    if (play_k) {
         set_playing(!_playing);
         return;
     }
     const double frame = 1.0 / std::max(_project.output.fps, 1.0);
-    if (plain && pressed(ImGuiKey_Home) && !_project.keys.empty()) _time = _project.keys.front().time;
-    if (plain && pressed(ImGuiKey_End)) _time = _project.duration();
-    if (plain && ImGui::IsKeyPressed(ImGuiKey_Period, true)) _time = std::min(_time + frame, _project.duration());
-    if (plain && ImGui::IsKeyPressed(ImGuiKey_Comma, true)) _time = std::max(_time - frame, 0.0);
-    if (plain && (pressed(ImGuiKey_PageDown) || pressed(ImGuiKey_PageUp))) {
-        const bool next = pressed(ImGuiKey_PageDown);
+    if (home_k && !_project.keys.empty()) _time = _project.keys.front().time;
+    if (end_k) _time = _project.duration();
+    if (fwd_k) _time = std::min(_time + frame, _project.duration());
+    if (back_k) _time = std::max(_time - frame, 0.0);
+    if (next_k || prev_k) {
         double best = _time;
         for (double t : trajectory().key_times()) {
-            if (next && t > _time + 1e-6 && (best == _time || t < best)) best = t;
-            if (!next && t < _time - 1e-6 && (best == _time || t > best)) best = t;
+            if (next_k && t > _time + 1e-6 && (best == _time || t < best)) best = t;
+            if (!next_k && t < _time - 1e-6 && (best == _time || t > best)) best = t;
         }
         _time = best;
     }
@@ -144,19 +179,19 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
     for (uint8_t v : _sel) any = any || v;
     // Deleting is about the selection, wherever the pointer is; over the
     // viewport the keys left are refitted to the path.
-    if (any && plain && (pressed(ImGuiKey_Delete) || pressed(ImGuiKey_Backspace))) {
+    if (any && (del_k || bksp_k)) {
         delete_selected(over_view && !over_list);
         return;
     }
     // Over the list or the timeline, the letters that pick and delete.
     if (over_list && !over_view) {
-        if (plain && pressed(ImGuiKey_A)) {
+        if (a_k) {
             bool all = !_project.keys.empty();
             for (uint8_t v : _sel) all = all && v;
             _sel.assign(_project.keys.size(), all ? 0 : 1);
-        } else if (!io.KeyCtrl && !io.KeyShift && io.KeyAlt && pressed(ImGuiKey_A)) {
+        } else if (alt_a_k) {
             _sel.assign(_project.keys.size(), 0);
-        } else if (any && plain && pressed(ImGuiKey_X)) {
+        } else if (x_k && any) {
             delete_selected();
         }
         return;
@@ -166,39 +201,38 @@ void RenderSession::handle_keys(bool over_view, bool over_list) {
     // Letters the camera also flies with are the camera's until a key is
     // selected, which is what G / R / S then act on.
     const bool letters = blocks_fly_keys();
-    if (plain && (pressed(ImGuiKey_K) || pressed(ImGuiKey_I))) {
+    if (k_k || i_k) {
         add_key(next_key_time(), true);
-        _fly_block_key = pressed(ImGuiKey_K) ? ImGuiKey_K : ImGuiKey_I;
+        _fly_block_key = k_k ? ImGuiKey_K : ImGuiKey_I;
         return;
     }
-    if (plain && (pressed(ImGuiKey_Keypad0) || pressed(ImGuiKey_0))) {
+    if (kp0_k || zero_k) {
         look_through(_time);
         return;
     }
-    if (plain && pressed(ImGuiKey_T)) {
+    if (t_k) {
         _pick_target = true;
         return;
     }
     if (!letters) return;
-    if (plain && pressed(ImGuiKey_A)) {
+    if (a_k) {
         bool all = true;
         for (uint8_t s : _sel) all = all && s;
         _sel.assign(_project.keys.size(), all ? 0 : 1);
         return;
     }
-    if (!io.KeyCtrl && !io.KeyShift && io.KeyAlt && pressed(ImGuiKey_A)) {
+    if (alt_a_k) {
         _sel.assign(_project.keys.size(), 0);
         return;
     }
-    if (plain && pressed(ImGuiKey_X)) {
+    if (x_k) {
         delete_selected(true);
         return;
     }
-    const struct { ImGuiKey key; XformKind kind; } ops[] = {
-        {ImGuiKey_G, XformKind::Move}, {ImGuiKey_R, XformKind::Rotate},
-        {ImGuiKey_S, XformKind::Scale}};
+    const struct { bool on; XformKind kind; } ops[] = {
+        {g_k, XformKind::Move}, {r_k, XformKind::Rotate}, {s_k, XformKind::Scale}};
     for (const auto& op : ops)
-        if (plain && pressed(op.key)) {
+        if (op.on) {
             begin_xform(op.kind, _mouse[0], _mouse[1], false);
             return;
         }
