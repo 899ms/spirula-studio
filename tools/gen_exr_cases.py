@@ -54,7 +54,7 @@ def reference(path):
     pixel types differ."""
     import Imath
     FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
-    with OpenEXR.File(path) as probe:
+    with OpenEXR.File(path, separate_channels=True) as probe:
         multipart = len(probe.parts) > 1
     if multipart:
         with OpenEXR.File(path) as f:

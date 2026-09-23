@@ -592,7 +592,7 @@ int run(int argc, char** argv) {
         testAgainstReference(3, 1, "huber", true, 7, 6, rig, true);
         testAgainstReference(7, 1, "huber", false, 7, -1, rig, true);
         testAgainstReference(6, 1, "cauchy", true, 7, -1, rig, true);
-        // A dual-fisheye lens: rotation and t.z, or t.z alone.
+        // `refine: axial` and `refine: baseline`.
         testAgainstReference(6, 1, "huber", false, 7, -1, rig, true, 0x27);
         testAgainstReference(3, 1, "huber", true, 7, 6, rig, true, 0x20);
     }

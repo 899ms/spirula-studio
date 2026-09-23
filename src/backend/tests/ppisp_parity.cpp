@@ -229,8 +229,8 @@ int main(int argc, char** argv) {
     }
 
     // Negative-intensity pixels, exposure and vignetting neutralized so the
-    // colour stage stands alone: ~half of them sit below the RGI denominator
-    // floor, which is the only thing holding intensity through that branch.
+    // colour stage stands alone: some sit on the RGI denominator floor, which
+    // is the only thing holding intensity through that branch.
     {
         const int64_t Bx = 2, np = Bx * H * W;
         const int n_params = 24;  // no_crf: exposure(1) + vignetting(15) + colour(8)
@@ -268,10 +268,11 @@ int main(int argc, char** argv) {
         std::printf("ppisp_parity: negative-intensity block, "
                     "max |sum(out) - sum(in)| %.3g, max |out| %.3g\n",
                     worst_di, worst_mag);
-        // Two-sided: unfloored these leave at |out| ~ 3 (H is near identity),
-        // floored they cap near 20x that, and without the floor at all the old
-        // 1e-5 denominator sent them past 1e5.
-        if (!(worst_di < 1e-3) || !(worst_mag > 10.0) || !(worst_mag < 1e3)) {
+        // Must match kColorNormMinZ in ppisp.slang: the chroma gain caps at its
+        // reciprocal, with |rgi_out.xy| up to ~2. Intensity drifts by float ulps of that.
+        const double kMinZ = 1e-4;
+        if (!(worst_di < 1e-6 * worst_mag + 1e-5) || !(worst_mag > 10.0) ||
+            !(worst_mag < 5.0 / kMinZ)) {
             std::fprintf(stderr, "ppisp_parity: colour stage lost intensity, or "
                                  "the denominator floor never bound / blew up\n");
             return 1;

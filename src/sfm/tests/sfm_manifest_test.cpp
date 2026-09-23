@@ -243,11 +243,11 @@ static int cmdManifestTest(int, char**) {
                    "        refine: translation\n");
         Manifest k = manifest_read(dir + "/kind.yaml");
         check(k.rigs.size() == 2 && k.rigs[0].kind == "dual-fisheye" &&
-                  k.rigs[0].members[1].has_ext && k.rigs[0].members[1].dof == kRigDofAxial &&
+                  k.rigs[0].members[1].has_ext && k.rigs[0].members[1].dof == kRigDofAll &&
                   !k.rigs[0].members[1].ext_fixed &&
                   std::fabs(k.rigs[0].members[1].ext.R[0] + 1.0) < 1e-12 &&
                   std::fabs(k.rigs[0].members[1].ext.R[8] + 1.0) < 1e-12,
-              "dual-fisheye: back to back, axial baseline");
+              "dual-fisheye: back to back, refined freely");
         check(k.rigs[1].members[1].dof == kRigDofTranslation, "refine: translation");
         write_file(dir + "/kind2.yaml", manifest_write(k));
         check(manifest_write(manifest_read(dir + "/kind2.yaml")) == manifest_write(k),
@@ -255,7 +255,7 @@ static int cmdManifestTest(int, char**) {
         RigDef d;
         check(parseRigArg("dual-fisheye=a/cam0,a/cam1", d).empty() && d.kind == "dual-fisheye" &&
                   d.members.size() == 2 && d.members[1].prefix == "a/cam1" &&
-                  d.members[1].dof == kRigDofAxial,
+                  d.members[1].dof == kRigDofAll,
               "--rig dual-fisheye=...");
         write_file(dir + "/badkind.yaml", "rigs:\n  - kind: trifocal\n    members: [a, b]\n");
         bool bad_kind = false;

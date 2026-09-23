@@ -67,7 +67,7 @@ struct BAProblem {
         uint32_t ext_col;     // column base; unused when n_free == 0
         uint32_t n_free;      // columns owned: popcount(mask), 0 = held
         // Which of the 6 stored parameters (angle-axis, t) own those columns,
-        // in order; a dual-fisheye lens refines its rotation and t.z alone.
+        // in order; `refine: axial` is the rotation and t.z alone.
         uint32_t mask = kExtAll;
     };
     std::vector<Member> members;
