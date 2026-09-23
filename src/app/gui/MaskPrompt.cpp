@@ -2,6 +2,8 @@
 
 #include "app/gui/MaskPrompt.h"
 
+#include "app/gui/Layout.h"
+#include "app/gui/ModelCache.h"
 #include "app/gui/Ui.h"
 #include "i18n/catalog/Dataset.h"
 
@@ -13,6 +15,10 @@ namespace dmsg = spirula::i18n::msg::dataset;
 namespace gui {
 
 namespace {
+
+// GuiApp.cpp's kOk and kErr, so the picker reads the same on both screens.
+const ImVec4 kPickerOk(0.35f, 0.85f, 0.45f, 1.0f);
+const ImVec4 kPickerErr(1.0f, 0.42f, 0.42f, 1.0f);
 
 // The English terms. Chosen for what SAM 3 actually responds to -- a concrete
 // countable noun, singular, optionally qualified -- rather than for what reads
@@ -170,6 +176,142 @@ bool draw_subject_palette(std::string& prompt, std::string& negative,
 
     ImGui::TreePop();
     return edited;
+}
+
+bool draw_margin_slider(float& dilate_ratio, float& shrink_ratio, bool keep, float width,
+                        bool inline_label) {
+    float& ratio = keep ? shrink_ratio : dilate_ratio;
+    float margin_pct = ratio * 100.0f;
+    const spirula::i18n::Msg& label = keep ? dmsg::mask_dilate_keep : dmsg::mask_dilate_remove;
+    bool changed = false;
+    if (inline_label) {
+        ImGui::SetNextItemWidth(width);
+        changed = ui::SliderFloat(label, &margin_pct, 0.0f, 50.0f, "%.0f%%");
+    } else {
+        ui::Text(label);
+        ImGui::SetNextItemWidth(width);
+        changed = ui::SliderFloatRaw("##dilate", &margin_pct, 0.0f, 50.0f, "%.0f%%");
+    }
+    if (changed) ratio = margin_pct / 100.0f;
+    ui::help_on_hover(keep ? dmsg::mask_shrink_help : dmsg::mask_dilate_help);
+    return changed;
+}
+
+// One colour per object, so a dot on the image and a row in the list are
+// obviously the same thing. Red is reserved for negative clicks.
+unsigned int mask_object_color(int object) {
+    static const ImU32 kColors[] = {
+        IM_COL32(80, 220, 110, 255),  IM_COL32(90, 170, 245, 255),
+        IM_COL32(245, 200, 70, 255),  IM_COL32(200, 130, 245, 255),
+        IM_COL32(80, 225, 220, 255),  IM_COL32(245, 150, 90, 255),
+    };
+    const int n = (int)(sizeof(kColors) / sizeof(kColors[0]));
+    return kColors[((object % n) + n) % n];
+}
+
+void draw_mask_objects(MaskSettings& settings, long long frame, const std::string& camera,
+                       const std::string& source, bool& edited) {
+    ui::Text(dmsg::objects_to_click);
+    ui::help_on_hover(dmsg::objects_to_click_help);
+
+    for (int o = 0; o < settings.object_count; ++o) {
+        ImGui::PushID(o);
+        int here = 0, elsewhere = 0;
+        for (const MaskClick& c : settings.clicks)
+            if (c.source == source && c.object == o)
+                (c.frame == frame && c.camera == camera ? here : elsewhere)++;
+
+        const ImU32 col = mask_object_color(o);
+        ImGui::ColorButton("##col", ImGui::ColorConvertU32ToFloat4(col),
+                           ImGuiColorEditFlags_NoTooltip |
+                               ImGuiColorEditFlags_NoDragDrop,
+                           ImVec2(12, 12));
+        ImGui::SameLine();
+        const std::string label =
+            (here || elsewhere)
+                ? spirula::i18n::format(dmsg::object_with_clicks,
+                                        {o + 1, here, elsewhere})
+                : spirula::i18n::format(dmsg::object_no_clicks, {o + 1});
+        // PushID(o) above already separates the rows, so the label carries no
+        // ID of its own.
+        if (ui::RadioButtonRaw(label.c_str(), settings.current_object == o))
+            settings.current_object = o;
+        if (here || elsewhere) {
+            ImGui::SameLine();
+            if (ui::SmallButton(dmsg::object_clear)) {
+                auto& v = settings.clicks;
+                v.erase(std::remove_if(v.begin(), v.end(),
+                                       [&](const MaskClick& c) {
+                                           return c.source == source && c.object == o;
+                                       }),
+                        v.end());
+                edited = true;
+            }
+        }
+        ImGui::PopID();
+    }
+
+    if (ui::SmallButton(dmsg::object_another)) {
+        settings.current_object = settings.object_count++;
+    }
+    ui::help_on_hover(dmsg::object_another_help);
+    if (settings.object_count > 1) {
+        ImGui::SameLine();
+        if (ui::SmallButton(dmsg::object_clear_all)) {
+            auto& v = settings.clicks;
+            v.erase(std::remove_if(v.begin(), v.end(),
+                                   [&](const MaskClick& c) { return c.source == source; }),
+                    v.end());
+            settings.object_count = 1;
+            settings.current_object = 0;
+            edited = true;
+        }
+    }
+}
+
+void draw_mask_model_picker(std::string& model_id, FileDownload& download,
+                            const std::function<void()>& request_download) {
+    int model_idx = 0;
+    const auto& catalog = model_catalog();
+    for (size_t i = 0; i < catalog.size(); i++)
+        if (model_id == catalog[i].id) model_idx = (int)i;
+    ImGui::SetNextItemWidth(px(260.0f));
+    if (ui::BeginCombo(dmsg::mask_model, catalog[model_idx].label->get())) {
+        for (size_t i = 0; i < catalog.size(); i++) {
+            const bool cached = model_is_cached(catalog[i]);
+            const std::string label =
+                cached ? std::string(catalog[i].label->get())
+                       : spirula::i18n::format(dmsg::mask_model_needs_download,
+                                               {catalog[i].label->get()});
+            if (ui::SelectableRaw(label, (int)i == model_idx)) model_id = catalog[i].id;
+            if (ImGui::IsItemHovered()) ui::SetTooltip(*catalog[i].blurb);
+        }
+        ImGui::EndCombo();
+    }
+    const ModelEntry* entry = find_model(model_id);
+    if (entry) ui::TextDisabled(*entry->blurb);
+    const bool downloading = download.state() == FileDownload::State::Running;
+    switch (mask_picker_row(entry != nullptr, entry && model_is_cached(*entry), downloading)) {
+        case PickerRow::GetModel:
+            if (ui::Button(dmsg::mask_get_model)) request_download();
+            ImGui::SameLine();
+            ui::TextDisabled(dmsg::mask_one_time_download);
+            break;
+        case PickerRow::Downloading:
+            // The overlay is a byte count from curl, not a sentence.
+            ui::ProgressBarRaw(std::max(download.progress(), 0.0f), ImVec2(260, 0),
+                               download.status().c_str());
+            ImGui::SameLine();
+            if (ui::Button(dmsg::stop)) download.cancel();
+            break;
+        case PickerRow::Ready:
+            ui::TextColored(kPickerOk, dmsg::mask_model_ready);
+            break;
+        case PickerRow::None:
+            break;
+    }
+    if (download.state() == FileDownload::State::Failed)
+        ui::TextColoredWrappedRaw(kPickerErr, download.status());
 }
 
 }  // namespace gui

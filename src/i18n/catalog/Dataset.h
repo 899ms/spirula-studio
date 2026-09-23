@@ -6019,6 +6019,83 @@ SS_MSG(stencil_shape_circle,
     PT("Círculo {0}"),   IT("Cerchio {0}"),  NL("Cirkel {0}"),   RU("Круг {0}"),
     TR("Daire {0}"));
 
+SS_MSG(stencil_shape_path,
+    EN("Path {0}"),       JA("パス {0}"),       ZH_HANS("路径 {0}"),  ZH_HANT("路徑 {0}"),
+    KO("패스 {0}"),        DE("Pfad {0}"),       FR("Tracé {0}"),
+    ES("Trazado {0}"),    PT("Traçado {0}"),    IT("Tracciato {0}"),
+    NL("Pad {0}"),        RU("Контур {0}"),     TR("Yol {0}"));
+
+// Keeps a verb in every language, unlike stencil_add_box/circle -- a bare
+// noun ("Pfad", "chemin") reads as a file path in a UI, not a draw action.
+SS_MSG(stencil_add_path,
+    EN("Draw a path"),
+    JA("パスを描く"),
+    ZH_HANS("画一条路径"),
+    ZH_HANT("畫一條路徑"),
+    KO("패스 그리기"),
+    DE("Pfad zeichnen"),
+    FR("Tracer un chemin"),
+    ES("Dibujar un trazado"),
+    PT("Desenhar um traçado"),
+    IT("Disegna un tracciato"),
+    NL("Pad tekenen"),
+    RU("Нарисовать контур"),
+    TR("Yol çiz"));
+
+SS_MSG(stencil_add_path_help,
+    EN("Click along an edge on the picture to drop anchors; the path snaps to the edge "
+       "between them. Click the first anchor, press Enter or right-click to close it. "
+       "Ctrl+Z takes the last anchor back; Esc cancels."),
+    JA("画像の輪郭に沿ってクリックすると点が置かれ、点と点の間はその輪郭に沿って結ばれます。"
+       "最初の点をクリックするか、Enter または右クリックで閉じます。Ctrl+Z で最後の点を"
+       "取り消し、Esc で中止します。"),
+    ZH_HANS("沿着图上的边缘点击放下锚点，锚点之间的路径会贴合边缘。点击第一个锚点、按 Enter "
+            "或右键即可闭合。Ctrl+Z 撤回最后一个锚点，Esc 取消。"),
+    ZH_HANT("沿著圖上的邊緣點擊放下錨點，錨點之間的路徑會貼合邊緣。點擊第一個錨點、按 Enter "
+            "或右鍵即可閉合。Ctrl+Z 收回最後一個錨點，Esc 取消。"),
+    KO("사진의 윤곽을 따라 클릭해 앵커를 놓으면 앵커 사이의 경로가 윤곽에 붙습니다. 첫 앵커를 "
+       "클릭하거나 Enter 또는 오른쪽 클릭으로 닫습니다. Ctrl+Z는 마지막 앵커를 되돌리고 "
+       "Esc는 취소합니다."),
+    DE("Entlang einer Kante im Bild klicken, um Ankerpunkte zu setzen; der Pfad legt sich "
+       "dazwischen an die Kante. Den ersten Anker anklicken, Eingabe drücken oder rechts "
+       "klicken schließt ihn. Strg+Z nimmt den letzten Anker zurück, Esc bricht ab."),
+    FR("Cliquez le long d'un contour de l'image pour poser des ancres ; le chemin épouse "
+       "le contour entre elles. Cliquez la première ancre, appuyez sur Entrée ou faites un "
+       "clic droit pour le fermer. Ctrl+Z retire la dernière ancre, Échap annule."),
+    ES("Haga clic a lo largo de un borde de la imagen para poner anclas; el trazado se "
+       "ajusta al borde entre ellas. Haga clic en la primera ancla, pulse Intro o haga clic "
+       "derecho para cerrarlo. Ctrl+Z quita la última ancla; Esc cancela."),
+    PT("Clique ao longo de um contorno da imagem para pôr âncoras; o traçado cola-se ao "
+       "contorno entre elas. Clique na primeira âncora, prima Enter ou clique com o botão "
+       "direito para fechar. Ctrl+Z retira a última âncora; Esc cancela."),
+    IT("Fai clic lungo un bordo dell'immagine per posare degli ancoraggi; il tracciato "
+       "segue il bordo tra l'uno e l'altro. Fai clic sul primo ancoraggio, premi Invio o "
+       "fai clic destro per chiuderlo. Ctrl+Z toglie l'ultimo ancoraggio; Esc annulla."),
+    NL("Klik langs een rand in het beeld om ankers te zetten; het pad volgt de rand "
+       "ertussen. Klik op het eerste anker, druk op Enter of klik rechts om het te "
+       "sluiten. Ctrl+Z neemt het laatste anker terug; Esc breekt af."),
+    RU("Щёлкайте вдоль края на снимке, чтобы ставить опорные точки; контур между ними "
+       "прилипает к краю. Щёлкните первую точку, нажмите Enter или правую кнопку, чтобы "
+       "замкнуть. Ctrl+Z убирает последнюю точку, Esc отменяет."),
+    TR("Resimde bir kenar boyunca tıklayarak çapa noktaları bırakın; yol aralarında kenara "
+       "yapışır. İlk çapaya tıklayın, Enter'a basın veya sağ tıklayarak kapatın. Ctrl+Z son "
+       "çapayı geri alır; Esc iptal eder."));
+
+SS_MSG(stencil_path_anchors,
+    EN("Path anchors: {0}"),
+    JA("パスの点: {0}"),
+    ZH_HANS("路径锚点：{0}"),
+    ZH_HANT("路徑錨點：{0}"),
+    KO("패스 앵커: {0}"),
+    DE("Pfadanker: {0}"),
+    FR("Ancres du chemin : {0}"),
+    ES("Anclas del trazado: {0}"),
+    PT("Âncoras do traçado: {0}"),
+    IT("Ancoraggi del tracciato: {0}"),
+    NL("Padankers: {0}"),
+    RU("Точек контура: {0}"),
+    TR("Yol çapaları: {0}"));
+
 SS_MSG(stencil_removes_inside,
     EN("removes the inside"),
     JA("内側を消す"),

@@ -22,6 +22,7 @@
 #include "data/SparseEdit.h"
 #include "i18n/catalog/Edit.h"
 #include "i18n/catalog/Gui.h"
+#include "i18n/catalog/MaskEdit.h"
 #include "i18n/catalog/Render.h"
 #include "i18n/catalog/Train.h"
 #include "i18n/catalog/TrainFields.h"
@@ -65,6 +66,7 @@ namespace dmsg = spirula::i18n::msg::dataset;
 namespace gmsg = spirula::i18n::msg::geometry;
 namespace tmsg = spirula::i18n::msg::train;
 namespace rmsg = spirula::i18n::msg::render;
+namespace mmsg = spirula::i18n::msg::maskedit;
 using spirula::i18n::Msg;
 using spirula::format_duration;
 
@@ -294,8 +296,12 @@ void GuiApp::shutdown() {
     _compare.destroy_gl();
     _compare.close();
     _mesh_preview_open = false;
-    close_native_previews();
+    stop_inference_users();
     _segment.destroy_gl();
+    // Same ordering as _compare above: destroy_gl while GL is still current.
+    _mask_editor.destroy_gl();
+    _mask_editor.close();
+    _mask_editor.sam_drain_retiring();   // before nn::shutdown() frees the device
     _geometry_panel.destroy_gl();
     _colmap.cancel();
     _sfm.cancel();
@@ -1255,9 +1261,17 @@ void GuiApp::close_native_previews() {
     _geometry_panel.close();
 }
 
+// Every site that starts inference (or tears it down) calls this, never the
+// bare close: the editor's SAM session shares the pool's slots and one
+// unsynchronised stream, and a dataset run ends in nn::shutdown().
+void GuiApp::stop_inference_users() {
+    close_native_previews();
+    _mask_editor.sam_yield();
+}
+
 void GuiApp::launch_training(const TrainConfig& cfg, const std::string& preset) {
     if (cfg.data.empty() || native_work_busy()) return;
-    close_native_previews();
+    stop_inference_users();
     close_splat();
 #ifdef SS_BACKEND_VULKAN
     if (!freeze_native_device()) return;
@@ -1682,7 +1696,7 @@ bool GuiApp::launch_batch_mesh(BatchTask& task, const BatchRow& row) {
     follow_batch_screen(BatchStage::Mesh);
     // The engine has to be free: the mesh child wants the VRAM, and both the
     // last preview and the run that trained this model are holding it.
-    close_native_previews();
+    stop_inference_users();
     close_mesh_preview();
     close_splat();
     _runner.release_engine();
@@ -2627,6 +2641,88 @@ std::string GuiApp::state_json() {
     out += _dialog.is_open() ? "true" : "false";
     out += ",\"models_open\":" + std::to_string(_compare.count());
     out += ",\"dataset\":" + quoted(_cfg.data);
+    out += ",\"mask_editor_open\":";
+    out += _mask_editor.is_open() ? "true" : "false";
+    // The app's one segmentation checkpoint, which both screens pick and fetch.
+    static const char* kDownload[] = {"idle", "running", "done", "failed", "cancelled"};
+    out += ",\"model_id\":" + quoted(_model_id);
+    out += ",\"model_path\":" + quoted(selected_model_path());
+    out += ",\"model_download\":\"";
+    out += kDownload[(int)_download.state()];
+    out += "\",\"license_prompt\":" + quoted(_license_prompt);
+    // Index order is the declaration order of mask::CanvasMode.
+    static const char* kCanvasModes[] = {"shape", "eraser", "path", "sam"};
+    const mask::MaskDoc* mdoc = _mask_editor.doc();
+    out += ",\"mask_editor_mode\":\"";
+    out += kCanvasModes[(int)_mask_editor.mode()];
+    out += "\",\"mask_editor_frame\":" + std::to_string(_mask_editor.frame_index());
+    out += ",\"mask_editor_key\":" + quoted(mdoc ? mdoc->key() : std::string());
+    out += ",\"mask_editor_history\":" + std::to_string(mdoc ? mdoc->history_size() : -1);
+    out += ",\"mask_editor_kept\":" + std::to_string(mdoc ? mdoc->kept() : (int64_t)-1);
+    out += ",\"mask_editor_clicks\":" + std::to_string(_mask_editor.sam_click_count());
+    out += ",\"mask_editor_model\":" + quoted(_mask_editor.sam_model_path());
+    out += ",\"sam_model_changes\":" + std::to_string(_mask_editor.sam_model_changes());
+    out += ",\"sam_text_ok\":";
+    out += _mask_editor.sam_text_supported() ? "true" : "false";
+    out += ",\"sam_busy\":";
+    out += _mask_editor.sam_busy() ? "true" : "false";
+    out += ",\"sam_results\":" + std::to_string(_mask_editor.sam_results());
+    out += ",\"sam_dropped\":" + std::to_string(_mask_editor.sam_dropped());
+    out += ",\"sam_last_ms\":" + std::to_string(_mask_editor.sam_last_ms());
+    out += ",\"sam_last_job_ms\":" + std::to_string(_mask_editor.sam_last_job_ms());
+    out += ",\"sam_last_area\":" + std::to_string(_mask_editor.sam_last_area());
+    out += ",\"sam_last_detections\":" + std::to_string(_mask_editor.sam_last_detections());
+    out += ",\"sam_last_score\":" + std::to_string(_mask_editor.sam_last_score());
+    out += ",\"sam_status\":" + quoted(_mask_editor.sam_status());
+    out += ",\"sam_error\":" + quoted(_mask_editor.sam_error());
+    out += ",\"sam_vram_mib\":" + std::to_string(_mask_editor.sam_vram_mib());
+    out += ",\"sam_pool_mib\":" + std::to_string(mask::MaskSession::sam_pool_mib());
+    out += ",\"sam_close_ms\":" + std::to_string(_mask_editor.sam_close_ms());
+    out += ",\"sam_retiring\":";
+    out += _mask_editor.sam_retiring() ? "true" : "false";
+    out += ",\"sam_retire_ms\":" + std::to_string(_mask_editor.sam_retire_ms());
+    out += ",\"sam_loads\":" + std::to_string(mask::MaskSession::sam_loads());
+    out += ",\"sam_ui_ms\":" + std::to_string(_mask_editor.sam_ui_ms());
+    out += ",\"sam_click\":[" + std::to_string(_mask_editor.sam_click_x()) + "," +
+           std::to_string(_mask_editor.sam_click_y()) + "]";
+    out += ",\"mask_editor_canvas_h\":" + std::to_string(_mask_editor.canvas_height());
+    out += ",\"mask_editor_anchors\":" + std::to_string(_mask_editor.path_anchors());
+    out += ",\"sam_margin\":" + std::to_string(_mask_editor.sam_margin());
+    out += ",\"mask_dilate_ratio\":" + std::to_string(_mask.dilate_ratio);
+    // The dataset screen's clicked objects, which no editor click may reach,
+    // beside the editor's own, which a widget wired to nothing leaves at zero.
+    out += ",\"mask_clicks\":" + std::to_string(_mask.clicks.size());
+    out += ",\"mask_object_count\":" + std::to_string(_mask.object_count);
+    out += ",\"mask_current_object\":" + std::to_string(_mask.current_object);
+    out += ",\"mask_prompt\":" + quoted(_mask.prompt);
+    out += ",\"mask_editor_objects\":" + std::to_string(_mask_editor.sam_object_count());
+    out += ",\"sam_reapply_ms\":" + std::to_string(_mask_editor.sam_reapply_ms());
+    out += ",\"sam_reapply_job_ms\":" + std::to_string(_mask_editor.sam_reapply_job_ms());
+    out += ",\"sam_margin_start_ms\":" + std::to_string(_mask_editor.sam_margin_start_ms());
+    out += ",\"sam_held_bytes\":" + std::to_string(_mask_editor.sam_held_bytes());
+    static const char* kPeek[] = {"none", "photo", "mask"};
+    out += ",\"mask_peek\":\"";
+    out += kPeek[(int)_mask_editor.peek()];
+    out += "\",\"mask_peek_total\":" + std::to_string(_mask_editor.peek_total());
+    out += ",\"nav_visible\":";
+    out += ImGui::GetIO().NavVisible ? "true" : "false";
+    static const char* kView[] = {"overlay", "mask", "side"};
+    out += ",\"mask_view\":\"";
+    out += kView[(int)_mask_editor.view_mode()];
+    out += "\",\"mask_slideshow\":";
+    out += _mask_editor.slideshow_playing() ? "true" : "false";
+    out += ",\"mask_slide_stop_ms\":" + std::to_string(_mask_editor.slide_stop_ms());
+    out += ",\"mask_slide_join_ms\":" + std::to_string(_mask_editor.slide_join_ms());
+    out += ",\"mask_slide_shown_fps\":" + std::to_string(_mask_editor.slide_shown_fps());
+    out += ",\"mask_slide_gap_ms\":" + std::to_string(_mask_editor.slide_max_gap_ms());
+    out += ",\"mask_slide_window\":" + std::to_string(_mask_editor.slide_window());
+    out += ",\"mask_slide_threads\":" + std::to_string(_mask_editor.slide_threads());
+    out += ",\"mask_slide_decoded\":" + std::to_string(_mask_editor.slide_decoded());
+    out += ",\"mask_slide_index\":" + std::to_string(_mask_editor.slide_index());
+    out += ",\"mask_scanned\":" + std::to_string(_mask_editor.scanned_count());
+    out += ",\"mask_missing\":" + std::to_string(_mask_editor.missing_count());
+    out += ",\"mask_scan_ms\":" + std::to_string(_mask_editor.scan_ms());
+    out += ",\"mask_editor_error\":" + quoted(_mask_editor.error());
     return out;
 }
 
@@ -2712,6 +2808,21 @@ void GuiApp::frame() {
         case Screen::Batch:  draw_batch();  break;
         case Screen::Mesh:   draw_mesh();   break;
     }
+
+    // A job cancelled by the editor's close finishes its stage off this thread.
+    _mask_editor.sam_poll_retiring();
+    if (_mask_editor.is_open()) {
+        // Read now, not at the top of the frame: a preview opened above has
+        // already taken the device.
+        _mask_editor.set_sam_blocker(mask::MaskSession::sam_blocker(
+            _segment.is_open(), _geometry_panel.is_open(), native_work_busy()));
+        // Every frame: a pick on either screen, or a finished download, lands now.
+        const ModelEntry* me = find_model(_model_id);
+        _mask_editor.set_sam_model(selected_model_path(), me && me->text_prompts);
+        _mask_editor.draw();
+    }
+    // After every screen and the editor, so either can raise the one consent modal.
+    draw_license_modal();
 
     if (_dialog.draw()) handle_dialog_result(_dialog.results());
     // The save dialog steps aside while the folder picker is up; bring it
@@ -3313,7 +3424,7 @@ bool GuiApp::launch_dataset_job() {
     // choice, before any preview, decode or child is dispatched. A rejected or
     // conflicting request is reported and the run does not start.
     if (native_work_busy()) return false;
-    close_native_previews();
+    stop_inference_users();
     close_splat();
     if (!freeze_native_device()) return false;
     app::set_crash_note("building dataset " + _workspace);
@@ -4509,7 +4620,7 @@ void GuiApp::open_mask_preview() {
     // A preview decodes and segments on the GPU, so it is a GPU-consuming
     // operation like the run itself: it freezes the same one choice first.
     // The other preview owns the same process-wide inference pool.
-    close_native_previews();
+    stop_inference_users();
     close_splat();
     if (!freeze_native_device()) return;
     _segment.open(preview_source((size_t)_mask_preview_input),
@@ -4561,44 +4672,8 @@ void GuiApp::draw_masking_options() {
     const bool builtin_masking = backends().builtin_masking;
 
     if (_mask_enable && builtin_masking) {
-        // ---- model selection + download ----
-        int model_idx = 0;
-        const auto& catalog = model_catalog();
-        for (size_t i = 0; i < catalog.size(); i++)
-            if (_model_id == catalog[i].id) model_idx = (int)i;
-        ImGui::SetNextItemWidth(px(260.0f));
-        if (ui::BeginCombo(dmsg::mask_model, catalog[model_idx].label->get())) {
-            for (size_t i = 0; i < catalog.size(); i++) {
-                const bool cached = model_is_cached(catalog[i]);
-                const std::string label =
-                    cached ? std::string(catalog[i].label->get())
-                           : i18n::format(dmsg::mask_model_needs_download,
-                                          {catalog[i].label->get()});
-                if (ui::SelectableRaw(label, (int)i == model_idx))
-                    _model_id = catalog[i].id;
-                if (ImGui::IsItemHovered()) ui::SetTooltip(*catalog[i].blurb);
-            }
-            ImGui::EndCombo();
-        }
+        draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
         entry = find_model(_model_id);
-        if (entry) ui::TextDisabled(*entry->blurb);
-
-        const bool downloading = _download.state() == ModelDownload::State::Running;
-        if (entry && !model_is_cached(*entry) && !downloading) {
-            if (ui::Button(dmsg::mask_get_model)) request_model_download();
-            ImGui::SameLine();
-            ui::TextDisabled(dmsg::mask_one_time_download);
-        } else if (downloading) {
-            // The overlay is a byte count from curl, not a sentence.
-            ui::ProgressBarRaw(std::max(_download.progress(), 0.0f),
-                               ImVec2(260, 0), _download.status().c_str());
-            ImGui::SameLine();
-            if (ui::Button(dmsg::stop)) _download.cancel();
-        } else if (entry) {
-            ui::TextColored(kOk, dmsg::mask_model_ready);
-        }
-        if (_download.state() == ModelDownload::State::Failed)
-            ui::TextColoredWrappedRaw(kErr, _download.status());
         if (entry && !entry->text_prompts && _mask.clicks.empty())
             ui::TextColored(kWarn, dmsg::mask_no_text_prompts);
         if (!_mask.clicks.empty()) {
@@ -4707,15 +4782,8 @@ void GuiApp::draw_masking_options() {
         if (ui::InputInt(dmsg::mask_max_size, &_mask.max_image_size))
             _mask.max_image_size = std::max(0, _mask.max_image_size);
         ui::help_on_hover(dmsg::mask_max_size_help);
-        ImGui::SetNextItemWidth(px(220.0f));
-        float& ratio = keep_subject ? _mask.shrink_ratio : _mask.dilate_ratio;
-        float margin_pct = ratio * 100.0f;
-        if (ui::SliderFloat(keep_subject ? dmsg::mask_dilate_keep
-                                         : dmsg::mask_dilate_remove,
-                            &margin_pct, 0.0f, 50.0f, "%.0f%%"))
-            ratio = margin_pct / 100.0f;
-        ui::help_on_hover(keep_subject ? dmsg::mask_shrink_help
-                                       : dmsg::mask_dilate_help);
+        draw_margin_slider(_mask.dilate_ratio, _mask.shrink_ratio, keep_subject, px(220.0f),
+                           /*inline_label=*/true);
 
         // The rest is the memory bank, which photos never get.
         bool any_video = false;
@@ -4774,7 +4842,7 @@ void GuiApp::open_geometry_preview() {
     }
     // One multi-gigabyte backbone at a time: the mask preview holds SAM and
     // this one holds Metric3D, and the inference layer's pool is process-wide.
-    close_native_previews();
+    stop_inference_users();
     close_splat();
     if (!freeze_native_device()) return;
     const size_t idx =
@@ -5358,6 +5426,45 @@ void GuiApp::draw_dataset_rerun(const WorkspaceState& prior) {
     // Every route but the last re-reconstructs: a model built from frames or
     // masks that have just been replaced describes neither.
     if (go) start_dataset_job();
+}
+
+// The correction editor, offered wherever the dataset already has masks.
+void GuiApp::draw_mask_editor_entry(const WorkspaceState& prior) {
+    if (!prior.masks) return;
+    ImGui::BeginDisabled(dataset_busy() || native_work_busy());
+    if (ui::Button(mmsg::correct_masks)) {
+        const fs::path ws(_workspace);
+        // The run's own masks/, which every branch of DatasetPrep writes in
+        // the app's convention -- only a bundled folder is ever left flipped.
+        open_mask_editor(_workspace, (ws / "images").string(), (ws / "masks").string(),
+                         /*mask_flipped=*/false);
+    }
+    ImGui::EndDisabled();
+    ui::help_on_hover(mmsg::correct_masks_help);
+}
+
+void GuiApp::open_mask_editor(const std::string& workspace, const std::string& image_dir,
+                              const std::string& mask_dir, bool mask_flipped) {
+    if (dataset_busy() || native_work_busy()) return;
+    close_native_previews();
+    _mask_editor.set_log([this](const std::string& s) { log(s); });
+    // The dataset screen's own picker, over the app's one model and download.
+    _mask_editor.set_model_picker([this] {
+        draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
+    });
+    // SAM loads on the device every other inference user freezes, never nn's
+    // default; a failed freeze refuses the prompt with the same sentence.
+    _mask_editor.set_sam_device_gate([this](std::string& device, std::string& error) {
+        if (!freeze_native_device()) {
+            error = _native_device_error.empty() ? msg::no_device_found.get()
+                                                 : _native_device_error;
+            return false;
+        }
+        device = _native_device_uuid;
+        return true;
+    });
+    std::string err;
+    if (!_mask_editor.open(workspace, image_dir, mask_dir, mask_flipped, err)) log(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -6073,6 +6180,7 @@ void GuiApp::draw_dataset_form(float height, bool running) {
             }
         }
         if (ready) {
+            draw_mask_editor_entry(workspace_state());
             draw_dataset_rerun(workspace_state());
             draw_dataset_reset();
         }
@@ -6219,7 +6327,6 @@ void GuiApp::draw_new_dataset() {
     draw_clear_project_modal();
     draw_drop_intermediate_modal();
     draw_mask_recon_modal();
-    draw_license_modal();
 }
 
 // ---------------------------------------------------------------------------
@@ -6313,6 +6420,30 @@ void GuiApp::draw_train() {
         ui::TextDisabledRaw(row ? row->dataset : std::string());
     } else {
         ui::TextDisabledRaw(_cfg.data);
+        // Offered when the dataset's mask folder exists; probed at most once
+        // a second, as workspace_state() does.
+        const std::string key = _cfg.data + "\n" + _cfg.mask_dir;
+        const double now = ImGui::GetTime();
+        if (key != _train_masks_key || now - _train_masks_at > 1.0) {
+            std::error_code ec;
+            fs::path md(_cfg.mask_dir);
+            if (md.is_relative()) md = fs::path(_cfg.data) / md;
+            _train_masks_key = key;
+            _train_masks_at = now;
+            _train_has_masks = !_cfg.data.empty() && fs::is_directory(md, ec) && !fs::is_empty(md, ec);
+        }
+        if (_train_has_masks) {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(training_busy() || native_work_busy());
+            if (ui::Button(mmsg::correct_masks)) {
+                fs::path id(_cfg.image_dir), md(_cfg.mask_dir);
+                if (id.is_relative()) id = fs::path(_cfg.data) / id;
+                if (md.is_relative()) md = fs::path(_cfg.data) / md;
+                open_mask_editor(_cfg.data, id.string(), md.string(), _cfg.flip_mask);
+            }
+            ImGui::EndDisabled();
+            ui::help_on_hover(mmsg::correct_masks_help);
+        }
     }
     // Two ways to watch a run: the scene in 3D, or one training photograph
     // beside the render of the same camera. Right-aligned on the header row so
@@ -6502,7 +6633,7 @@ bool GuiApp::mesh_dataset_found() {
 
 void GuiApp::start_meshing() {
     if (_mesh_job.checkpoint.empty() || native_work_busy()) return;
-    close_native_previews();
+    stop_inference_users();
     close_splat();
 #ifdef SS_BACKEND_VULKAN
     if (!freeze_native_device()) return;

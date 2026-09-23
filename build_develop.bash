@@ -49,6 +49,15 @@ fi
 # pointer reads exactly like a live one.
 bash tools/check_comments.sh >/dev/null || { bash tools/check_comments.sh; exit 1; }
 
+# The mask editor's testable half is built without SS_BUILD_SAM; an unguarded
+# sam/ include there is invisible to mask_doc_test's link-level symbol gate.
+bash tools/check_sam_guard.sh >/dev/null || { bash tools/check_sam_guard.sh; exit 1; }
+
+# The mask panel has no unit seam; this pins its gates as text, and names each
+# one that went missing.
+bash tools/mask_editor_checks/survivors.sh >/dev/null ||
+    { bash tools/mask_editor_checks/survivors.sh | command grep '^FAIL'; exit 1; }
+
 # Comment blocks in uncommitted work must fit the AGENTS.md budget. Also wired
 # into CMake (cmake/SsChecks.cmake), which covers a bare cmake/ninja build;
 # running it here fails before the configure step rather than after it.
@@ -123,6 +132,13 @@ echo ""
 if ! cmake --build "$build_dir" --verbose -j"${JOBS}"; then
     echo "BUILD FAILED" >&2
     exit 1
+fi
+
+# <windows.h> defines near, far and small; a local of that name breaks only
+# Windows. After the build, because the check reuses its compile commands.
+if command -v python3 >/dev/null 2>&1; then
+    python3 tools/check_winmacro.py --build "$build_dir" >/dev/null ||
+        { python3 tools/check_winmacro.py --build "$build_dir" | command grep -v '^ok'; exit 1; }
 fi
 
 echo ""

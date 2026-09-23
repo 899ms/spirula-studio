@@ -113,12 +113,12 @@ sharing an id.
 
 | | |
 |---|---|
-| `/ui/state` | frame counter, item count, queue depth, display and framebuffer size, plus what `GuiApp::state_json()` reports: screen, training phase and step, whether a dialog is open, how many models are loaded |
+| `/ui/state` | frame counter, item count, queue depth, display and framebuffer size, plus what `GuiApp::state_json()` reports: screen, training phase and step, whether a dialog is open, how many models are loaded. `app_ready` is false until that half exists; `launch` waits for it |
 | `/ui/tree` | the widgets of the last finished frame: `q=` substring, `window=`, `named=0` to include unnamed items |
 | `/ui/click` | `button=` 0/1/2, `double=1`, `settle=` |
 | `/ui/move` | hover, for tooltips and hover-only state |
-| `/ui/drag` | `from=`, `to=`, `steps=` — more steps for a path a tool has to follow |
-| `/ui/scroll` | `dy=` |
+| `/ui/drag` | `from=`, `to=`, `steps=` — more steps for a path a tool has to follow; `shift=1`, `ctrl=1`, `space=1` hold a key throughout, `esc_mid=1` presses Escape halfway |
+| `/ui/scroll` | `dy=`; `shift=1`, `ctrl=1`, `alt=1` hold a key |
 | `/ui/key` | `keys=Ctrl+Shift+A` |
 | `/ui/text` | focus, select all, type `value=`, `enter=0` to leave it open |
 | `/ui/wait` | `frames=` |

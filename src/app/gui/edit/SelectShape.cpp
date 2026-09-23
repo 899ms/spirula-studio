@@ -4,6 +4,7 @@
 
 #include "app/gui/edit/EditDoc.h"
 #include "app/webviewer/RenderWorker.h"
+#include "core/PolygonFill.h"
 
 #include <algorithm>
 #include <cmath>
@@ -34,34 +35,9 @@ void put_disc(Stencil& st, float cx, float cy, float r) {
 }
 
 // Even-odd scanline fill, which is what makes a lasso that crosses itself
-// behave the way the drawn outline looks.
+// behave the way the drawn outline looks. Shared with app/FrameMask.cpp.
 void fill_polygon(Stencil& st, const std::vector<float>& p) {
-    const size_t n = p.size() / 2;
-    if (n < 3) return;
-    float ymin = p[1], ymax = p[1];
-    for (size_t i = 1; i < n; i++) {
-        ymin = std::min(ymin, p[2 * i + 1]);
-        ymax = std::max(ymax, p[2 * i + 1]);
-    }
-    const int y0 = std::max(0, (int)std::floor(ymin));
-    const int y1 = std::min(st.H - 1, (int)std::ceil(ymax));
-    std::vector<float> xs;
-    for (int y = y0; y <= y1; y++) {
-        const float sy = (float)y + 0.5f;
-        xs.clear();
-        for (size_t i = 0, j = n - 1; i < n; j = i++) {
-            const float ay = p[2 * i + 1], by = p[2 * j + 1];
-            if ((ay > sy) == (by > sy)) continue;
-            const float t = (sy - ay) / (by - ay);
-            xs.push_back(p[2 * i] + t * (p[2 * j] - p[2 * i]));
-        }
-        std::sort(xs.begin(), xs.end());
-        for (size_t k = 0; k + 1 < xs.size(); k += 2) {
-            const int a = std::max(0, (int)std::ceil(xs[k] - 0.5f));
-            const int b = std::min(st.W - 1, (int)std::floor(xs[k + 1] - 0.5f));
-            for (int x = a; x <= b; x++) st.in[(size_t)y * st.W + x] = 1;
-        }
-    }
+    polyfill::fill_even_odd(p.data(), p.size() / 2, st.W, st.H, st.in.data(), 1);
 }
 
 }  // namespace

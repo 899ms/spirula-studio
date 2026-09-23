@@ -641,6 +641,10 @@ std::vector<std::string> workspace_artifacts(const std::string& workspace,
 // SfM default and `mask_dir = "masks"` the dataparsers'.
 bool is_mask_folder(const std::string& path);
 
+// The correction editor's layer folder (app/gui/mask/MaskLayer.h), which a
+// finished dataset carries beside images/ and masks/ and which holds PNGs.
+bool is_mask_edits_folder(const std::string& path);
+
 // One counter for a whole step, rather than one per input: a job with three
 // videos in it should fill the bar once and never wind it back, which is the
 // only thing a user watching a long extraction is reading it for.

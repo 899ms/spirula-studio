@@ -222,7 +222,7 @@ if(SS_BUILD_GUI)
 
     file(GLOB SS_GUI_SOURCES CONFIGURE_DEPENDS
         ${SS_SRC}/app/gui/*.cpp ${SS_SRC}/app/gui/edit/*.cpp
-        ${SS_SRC}/app/gui/render/*.cpp)
+        ${SS_SRC}/app/gui/render/*.cpp ${SS_SRC}/app/gui/mask/*.cpp)
     list(APPEND SS_TOOL_SOURCES ${SS_GUI_SOURCES})
     list(APPEND SS_TOOL_DEFS SS_TOOL_GUI=1)
     list(APPEND SS_TOOL_LIBS imgui_glfw OpenGL::GL)
@@ -357,6 +357,14 @@ add_executable(packed_lens_test
     ${SS_SRC}/app/Pano360.cpp)
 ss_configure_app(packed_lens_test)
 
+# The stencil shapes, spelling and fill, with no GUI: FrameMask.cpp is compiled
+# into the CLI too, so this must link without imgui.
+add_executable(frame_mask_test
+    ${SS_SRC}/app/tests/frame_mask_test.cpp
+    ${SS_SRC}/app/FrameMask.cpp
+    ${SS_SRC}/app/FrameLook.cpp)
+ss_configure_app(frame_mask_test)
+
 # The GUI files with no GUI in them: the stamp that decides whether a finished
 # reconstruction is kept or built again, and the preset serializers. Named
 # rather than globbed -- each such test names its own sources.
@@ -410,4 +418,40 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/PresetFile.cpp
         ${SS_SRC}/app/AppPaths.cpp)
     ss_configure_app(preset_roundtrip_test)
+
+    # The mask editor's layer, document and session, none of which draw.
+    add_executable(mask_doc_test
+        ${SS_SRC}/app/gui/tests/mask_doc_test.cpp
+        ${SS_SRC}/app/gui/mask/MaskLayer.cpp
+        ${SS_SRC}/app/gui/mask/MaskDoc.cpp
+        ${SS_SRC}/app/gui/mask/MaskAdd.cpp
+        ${SS_SRC}/app/gui/mask/MaskSam.cpp
+        ${SS_SRC}/app/gui/mask/MaskSession.cpp
+        ${SS_SRC}/app/gui/mask/MaskWindow.cpp
+        ${SS_SRC}/app/gui/edit/EditDoc.cpp
+        ${SS_SRC}/app/gui/edit/SelectShape.cpp
+        ${SS_SRC}/app/gui/edit/Selection.cpp
+        ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameLook.cpp
+        ${SS_SRC}/app/gui/mask/Livewire.cpp
+        ${SS_SRC}/app/gui/mask/PathTool.cpp
+        ${SS_SRC}/app/gui/Picture.cpp
+        ${SS_SRC}/app/gui/mask/MaskSlideshow.cpp)
+    ss_configure_app(mask_doc_test)
+
+    # DatasetPrep's two seams with the mask editor's layer folder, run for
+    # real. Built without SS_BUILD_SAM or the video decoder: no model.
+    add_executable(dataset_prep_test
+        ${SS_SRC}/app/gui/tests/dataset_prep_test.cpp
+        ${SS_SRC}/app/gui/DatasetPrep.cpp
+        ${SS_SRC}/app/gui/FrameSelect.cpp
+        ${SS_SRC}/app/gui/PrepProgress.cpp
+        ${SS_SRC}/app/gui/ReconStamp.cpp
+        ${SS_SRC}/app/gui/Subprocess.cpp
+        ${SS_SRC}/app/gui/mask/MaskLayer.cpp
+        ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameLook.cpp
+        ${SS_SRC}/app/FrameMotion.cpp
+        ${SS_SRC}/app/Pano360.cpp)
+    ss_configure_app(dataset_prep_test)
 endif()

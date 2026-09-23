@@ -30,6 +30,8 @@
 #include "app/gui/GlLoader.h"
 #include "app/gui/MaskSettings.h"
 #include "app/gui/PreviewFrames.h"
+#include "app/gui/mask/Livewire.h"
+#include "app/gui/mask/PathTool.h"
 
 #include <atomic>
 #include <memory>
@@ -66,6 +68,10 @@ private:
 
     void start_job(const MaskSettings& s, const app::FrameMask& stencil);
     void start_detect();
+    void start_livewire();
+    // The key the worker's Job uses for the shown frame, so the panel can
+    // tell whether the edge map it holds is this frame's.
+    std::string shown_frame_key() const;
     void upload_preview();
     void upload_stencil(const app::FrameMask& stencil);
     void draw_image(MaskSettings& settings, app::FrameStencil& stencil,
@@ -128,6 +134,17 @@ private:
     float _drag_from_u = 0.0f, _drag_from_v = 0.0f;
     GLuint _stencil_tex = 0;
     std::string _stencil_key;           // what _stencil_tex was built from
+
+    // ---- the pen tool ----
+    mask::PathTool _path;
+    bool _path_armed = false;
+    std::unique_ptr<mask::Livewire> _livewire;          // UI thread
+    std::string _livewire_key;                          // frame it was built for
+    std::unique_ptr<mask::Livewire> _livewire_pending;  // guarded by _mu
+    std::string _livewire_pending_key;                  // guarded by _mu
+    bool _livewire_ready = false;                       // guarded by _mu
+    double _livewire_ms = 0.0;                          // guarded by _mu
+    std::atomic<bool> _livewiring{false};
 
     // The composited RGB preview handed to GL, guarded by _mu.
     std::mutex _mu;

@@ -24,6 +24,7 @@
 #include "app/gui/MeshRunner.h"
 #include "app/gui/ModelCache.h"
 #include "app/gui/SegmentPanel.h"
+#include "app/gui/mask/MaskSession.h"
 #include "app/gui/SfmRunner.h"
 #include "app/gui/SourceList.h"
 #include "app/gui/SourceProbe.h"
@@ -74,7 +75,7 @@ public:
     void frame();
     // Something is moving without the user touching anything -- a render
     // playing back or being written -- so frames must keep coming.
-    bool animating() const { return _compare.animating(); }
+    bool animating() const { return _compare.animating() || _mask_editor.animating(); }
 
     // What a script needs to know that is not on screen as a widget: the
     // screen, what is running, what is open. A JSON object body without the
@@ -174,6 +175,8 @@ private:
     void close_splat();
     // Close GPU-backed previews before another native handoff.
     void close_native_previews();
+    // close_native_previews(), and the mask editor releases its SAM session.
+    void stop_inference_users();
 
 public:
     // Drag-and-drop entry (GLFW drop callback, main thread): auto-detects
@@ -359,6 +362,9 @@ private:
     // "Re-run masking only" and friends: what probe_workspace already knows,
     // as the actions it implies.
     void draw_dataset_rerun(const WorkspaceState& prior);
+    void draw_mask_editor_entry(const WorkspaceState& prior);
+    void open_mask_editor(const std::string& workspace, const std::string& image_dir,
+                          const std::string& mask_dir, bool mask_flipped);
     // Throwing the whole project away rather than one step of it: the run's
     // own files, and the options, each on its own button.
     void draw_dataset_reset();
@@ -748,6 +754,13 @@ private:
     bool _border_enable = false;
     MaskSettings _mask;
     SegmentPanel _segment;
+    // The mask correction editor (app/gui/mask/). Opened from the dataset
+    // screen and the train screen; drawn from frame() so both can reach it.
+    mask::MaskSession _mask_editor;
+    // draw_train()'s mask-folder probe: what it last checked, and when.
+    std::string _train_masks_key;
+    double _train_masks_at = -1.0;
+    bool _train_has_masks = false;
     // Which input "Try the mask" runs on: which input a new clicked object
     // prompts (MaskClick::source) and which one's stencil the panel edits.
     int _mask_preview_input = 0;

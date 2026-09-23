@@ -109,9 +109,13 @@ def cmd_launch(args):
         try:
             base, token = endpoint()
             q = urllib.parse.urlencode({"token": token} if token else {})
-            with urllib.request.urlopen("%s/ui/state?%s" % (base, q), timeout=1):
-                print(json.dumps({"ok": True, "pid": p.pid}))
-                return
+            with urllib.request.urlopen("%s/ui/state?%s" % (base, q), timeout=1) as r:
+                # app_ready is false until the first frame has published the
+                # app's own fields; an older build has no such key.
+                if json.loads(r.read().decode("utf-8")).get("app_ready", True):
+                    print(json.dumps({"ok": True, "pid": p.pid}))
+                    return
+                time.sleep(0.1)
         except Exception:
             time.sleep(0.25)
     sys.exit("the GUI did not answer within %gs" % args.wait)
@@ -153,12 +157,19 @@ def cmd_move(args):
 def cmd_drag(args):
     print(json.dumps(call("/ui/drag", {"from": args.start, "to": args.end,
                                        "button": args.button,
-                                       "steps": args.steps})))
+                                       "steps": args.steps,
+                                       "shift": "1" if args.shift else "0",
+                                       "ctrl": "1" if args.ctrl else "0",
+                                       "space": "1" if args.space else "0",
+                                       "esc_mid": "1" if args.esc_mid else "0"})))
 
 
 def cmd_scroll(args):
     p = target(args)
     p["dy"] = args.dy
+    for m in ("shift", "ctrl", "alt"):
+        if getattr(args, m):
+            p[m] = 1
     print(json.dumps(call("/ui/scroll", p)))
 
 
@@ -245,11 +256,18 @@ def build_parser():
     p.add_argument("end", help="x,y")
     p.add_argument("--button", type=int, default=0)
     p.add_argument("--steps", type=int, default=8)
+    p.add_argument("--shift", action="store_true", help="hold Shift for the gesture")
+    p.add_argument("--ctrl", action="store_true", help="hold Ctrl for the gesture")
+    p.add_argument("--space", action="store_true", help="hold Space for the gesture")
+    p.add_argument("--esc-mid", dest="esc_mid", action="store_true",
+                   help="press Escape halfway through, to test cancel")
     p.set_defaults(func=cmd_drag)
 
     p = sub.add_parser("scroll")
     add_target(p)
     p.add_argument("--dy", type=float, default=-1.0)
+    for m in ("shift", "ctrl", "alt"):
+        p.add_argument("--" + m, action="store_true")
     p.set_defaults(func=cmd_scroll)
 
     p = sub.add_parser("key", help='a chord, e.g. "Ctrl+S" or "Escape"')

@@ -4,6 +4,7 @@
 
 #include "app/FrameLook.h"
 #include "core/ExrImage.h"
+#include "core/PolygonFill.h"
 
 #include "external/stb_image.h"
 #include "external/stb_image_write.h"
@@ -13,6 +14,7 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -46,6 +48,42 @@ bool parse_four(const std::string& s, float v[4]) {
         }
     }
     return trim(p).empty();
+}
+
+// Comma-separated floats, any count; false on junk, an empty list or a
+// trailing comma.
+bool parse_floats(const std::string& s, std::vector<float>& out) {
+    out.clear();
+    const char* p = s.c_str();
+    while (true) {
+        char* end = nullptr;
+        const float v = std::strtof(p, &end);
+        if (end == p) return false;
+        out.push_back(v);
+        p = end;
+        while (*p == ' ') p++;
+        if (*p != ',') break;
+        p++;
+        while (*p == ' ') p++;
+    }
+    return trim(p).empty();
+}
+
+// Appends exactly what vsnprintf would produce, at any length: measures the
+// needed size first, so no fixed buffer can truncate a huge float.
+void append_printf(std::string& out, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    va_list probe;
+    va_copy(probe, args);
+    const int n = std::vsnprintf(nullptr, 0, fmt, probe);
+    va_end(probe);
+    if (n > 0) {
+        std::vector<char> buf((size_t)n + 1);
+        std::vsnprintf(buf.data(), buf.size(), fmt, args);
+        out.append(buf.data(), (size_t)n);
+    }
+    va_end(args);
 }
 
 // ---------------------------------------------------------------------------
@@ -531,8 +569,18 @@ bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
             return false;
         }
         const std::string kind = piece.substr(0, sp);
+        const std::string nums = trim(piece.substr(sp + 1));
+        if (kind == "path") {
+            s.kind = MaskShape::Kind::Path;
+            if (!parse_floats(nums, s.pts) || s.pts.size() < 6 || s.pts.size() % 2) {
+                error = piece;
+                return false;
+            }
+            out.push_back(s);
+            continue;
+        }
         float v[4];
-        if (!parse_four(trim(piece.substr(sp + 1)), v)) {
+        if (!parse_four(nums, v)) {
             error = piece;
             return false;
         }
@@ -555,14 +603,22 @@ bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
 
 std::string format_mask_shapes(const std::vector<MaskShape>& shapes) {
     std::string out;
+    char buf[96];
     for (const MaskShape& s : shapes) {
-        char buf[128];
-        std::snprintf(buf, sizeof buf, "%s%s %.4f,%.4f,%.4f,%.4f",
-                      s.remove ? "-" : "",
-                      s.kind == MaskShape::Kind::Rect ? "rect" : "ellipse",
-                      s.cx, s.cy, s.rx, s.ry);
+        std::string piece = s.remove ? "-" : "";
+        if (s.kind == MaskShape::Kind::Path) {
+            piece += "path ";
+            for (size_t i = 0; i < s.pts.size(); i++) {
+                std::snprintf(buf, sizeof buf, "%s%.4f", i ? "," : "", s.pts[i]);
+                piece += buf;
+            }
+        } else {
+            append_printf(piece, "%s %.4f,%.4f,%.4f,%.4f",
+                          s.kind == MaskShape::Kind::Rect ? "rect" : "ellipse",
+                          s.cx, s.cy, s.rx, s.ry);
+        }
         if (!out.empty()) out += "; ";
-        out += buf;
+        out += piece;
     }
     return out;
 }
@@ -615,6 +671,22 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
     }
     const bool base = m.shapes.empty() || m.shapes.front().remove;
 
+    // A path is filled once into its own plane; the pixel loop then reads it
+    // like any other inside test, so the ordering rule is untouched.
+    std::vector<std::vector<uint8_t>> paths(m.shapes.size());
+    std::vector<float> px;
+    for (size_t k = 0; k < m.shapes.size(); k++) {
+        const MaskShape& s = m.shapes[k];
+        if (s.kind != MaskShape::Kind::Path) continue;
+        paths[k].assign((size_t)width * height, 0);
+        px.resize(s.pts.size());
+        for (size_t i = 0; i + 1 < s.pts.size(); i += 2) {
+            px[i] = s.pts[i] * (float)width;
+            px[i + 1] = s.pts[i + 1] * (float)height;
+        }
+        polyfill::fill_even_odd(px.data(), px.size() / 2, width, height, paths[k].data(), 1);
+    }
+
     out.assign((size_t)width * height, 255);
     for (int y = 0; y < height; y++) {
         const float v = ((float)y + 0.5f) / (float)height;
@@ -622,9 +694,12 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
         for (int x = 0; x < width; x++) {
             const float u = ((float)x + 0.5f) / (float)width;
             bool keep = base;
-            for (const MaskShape& s : m.shapes) {
+            for (size_t k = 0; k < m.shapes.size(); k++) {
+                const MaskShape& s = m.shapes[k];
                 bool inside;
-                if (s.kind == MaskShape::Kind::Ellipse) {
+                if (s.kind == MaskShape::Kind::Path) {
+                    inside = paths[k][(size_t)y * width + x] != 0;
+                } else if (s.kind == MaskShape::Kind::Ellipse) {
                     if (s.rx <= 0.0f || s.ry <= 0.0f) continue;
                     const float du = (u - s.cx) / s.rx, dv = (v - s.cy) / s.ry;
                     inside = du * du + dv * dv <= 1.0f;

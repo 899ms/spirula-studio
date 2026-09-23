@@ -3,9 +3,11 @@
 #include "app/gui/DatasetPrep.h"
 
 #include "app/gui/ReconStamp.h"
+#include "app/gui/mask/MaskLayer.h"
 #include "sfm/core/Resume.h"
 
 #include "i18n/catalog/Log.h"
+#include "i18n/catalog/MaskEdit.h"
 
 #include "app/gui/FrameSelect.h"
 #include "app/gui/Subprocess.h"
@@ -55,6 +57,7 @@
 
 namespace fs = std::filesystem;
 namespace lmsg = spirula::i18n::msg::log;
+namespace mmsg = spirula::i18n::msg::maskedit;
 
 // Shorthand: most log lines here carry a path or a count, so they are
 // format() calls. See i18n/Message.h on why they are whole sentences with
@@ -827,7 +830,9 @@ void collect_image_folders(const fs::path& dir, const std::string& rel, int dept
     for (fs::directory_iterator it(dir, kWalk, ec), end; !ec && it != end;
          it.increment(ec)) {
         if (it->is_directory(ec)) {
-            if (!is_mask_folder(it->path().string())) sub.push_back(it->path());
+            if (!is_mask_folder(it->path().string()) &&
+                !is_mask_edits_folder(it->path().string()))
+                sub.push_back(it->path());
         } else if (!here && it->is_regular_file(ec) && is_image_file(it->path())) {
             here = true;
         }
@@ -981,6 +986,10 @@ std::vector<std::string> workspace_artifacts(const std::string& workspace,
 
 bool is_mask_folder(const std::string& path) {
     return named(fs::path(path), "masks");
+}
+
+bool is_mask_edits_folder(const std::string& path) {
+    return named(fs::path(path), gui::mask::kLayerDirName);
 }
 
 void resolve_photo_folder(const std::string& picked, std::string& images,
@@ -1161,14 +1170,9 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
                       const RefreshFn& refresh_masks) {
     PrepJob job = job_in;
 #ifdef SS_BUILD_SAM
-    // Hand the GPU back on the way out, by whichever of the dozen exits is
-    // taken. A SAM 3 checkpoint is about 2 GB of VRAM and the inference layer's
-    // pool is process-wide and grow-only, so without this it stays resident
-    // for the life of the GUI -- through the reconstruction and the training
-    // run that follow, which are exactly what wants the memory back.
-    //
-    // Safe because the mask preview owns the only other Session, and the
-    // dataset screen closes it before starting a job.
+    // Hand the GPU back on any exit: a ~2 GB SAM 3 pool would outlive the run.
+    // Safe: stop_inference_users() freed every other Session before launch --
+    // both previews' and the mask editor's -- and the editor refuses during a run.
     struct ReleaseDevice {
         ~ReleaseDevice() { nn::shutdown(); }
     } release_device;
@@ -1443,6 +1447,17 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
         !fs::is_empty(ws / "masks", mec)) {
         out.mask_dir = (ws / "masks").string();
         out.mask_dir_cfg = "masks";
+    }
+    // Hand corrections outlive a re-run: whatever wrote masks/ this time, the
+    // editor's layers are re-applied over every mask whose bytes changed.
+    const fs::path layer_root = ws / gui::mask::kLayerDirName;
+    if (fs::exists(layer_root / gui::mask::kIndexFileName, mec)) {
+        std::string rerr;
+        const int n = gui::mask::recomposite_all(layer_root.string(), rerr);
+        // Success and failure are independent: a partial batch, or every frame
+        // failing (n == 0 with rerr non-empty), must still say so.
+        if (n > 0) log(fmt(mmsg::log_recomposited, {(long long)n}), /*detail=*/false);
+        if (!rerr.empty()) log(fmt(mmsg::log_recomposite_failed, {rerr}), /*detail=*/false);
     }
     return true;
 }

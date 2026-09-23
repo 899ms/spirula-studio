@@ -22,7 +22,8 @@ void arm();
 bool armed();
 
 // What /ui/state reports about the application on top of what ImGui knows:
-// a JSON object body without the braces, or "" for nothing.
+// a JSON object body without the braces, or "" for nothing. Called on the GUI
+// thread at the end of every frame; /ui/state serves the last answer.
 void set_state_source(std::function<std::string()> f);
 
 // Between glfwPollEvents() and ImGui::NewFrame(): applies one step of the

@@ -21,11 +21,12 @@
 namespace app {
 
 struct MaskShape {
-    enum class Kind { Ellipse, Rect };
+    enum class Kind { Ellipse, Rect, Path };
     Kind  kind = Kind::Ellipse;
     bool  remove = false;           // false = keep what is inside
     float cx = 0.5f, cy = 0.5f;     // rect: the two corners go in cx,cy / rx,ry
     float rx = 0.5f, ry = 0.5f;
+    std::vector<float> pts;         // path: 3+ corners as x,y pairs, closed
 };
 
 // Shapes are applied IN ORDER, each one adding its inside to what is kept or
@@ -41,11 +42,9 @@ struct FrameMask {
     bool empty() const { return shapes.empty() && image.empty(); }
 };
 
-// "ellipse 0.5,0.5,0.49,0.49; -rect 0.2,0.9,0.8,1": ';'-separated shapes, a
-// leading '-' meaning "remove what is inside this one". A rect takes its two
-// corners, an ellipse its centre and its two radii. FrameMask::image has no
-// spelling here -- it is a path, and carrying one through a ';'-separated
-// string is a quoting problem for no gain.
+// "ellipse 0.5,0.5,0.49,0.49; -rect 0.2,0.9,0.8,1; path 0.1,0.1,0.9,0.1,0.5,0.9":
+// ';'-separated, a leading '-' removes what is inside. A rect takes two corners,
+// an ellipse centre and radii, a path 3+ corners. FrameMask::image has no spelling.
 bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
                        std::string& error);
 std::string format_mask_shapes(const std::vector<MaskShape>& shapes);
