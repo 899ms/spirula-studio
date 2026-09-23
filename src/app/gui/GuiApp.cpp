@@ -2266,9 +2266,18 @@ bool GuiApp::add_sources(const std::vector<std::string>& paths, bool replace) {
         _sfm_job.image_is_linear.reset();
         _color_space_touched = false;
     }
+    const size_t first_new = _sources.size();
     for (const std::string& path : inputs) {
         _sources.push_back(make_source(path, _use_found_masks));
         _source_path_edits.push_back(_sources.back().path);
+    }
+    // A 360 camera's own files always carry the lens border, so they tick the
+    // box themselves -- only on arrival, so unticking it sticks.
+    for (size_t i = first_new; i < _sources.size(); i++) {
+        PrepInput& in = _sources[i];
+        if (!has_fisheye_lens(in)) continue;
+        _border_enable = true;
+        if (in.stencil.empty()) in.stencil.detect_border = true;
     }
     for (const std::string& masks : mask_folders) {
         if (attach_mask_folder(_sources, masks))

@@ -73,17 +73,19 @@ struct BorderDetectOptions {
     int   dark = 16;            // luma at or below this counts as black
     float shrink = 0.01f;       // pull the boundary in, fraction of its radius
     int   rays = 360;
-    float max_residual = 0.02f; // RMS radial fit error, fraction of the radius
+    float tolerance = 0.006f;   // a ray's edge this far off r is not on the circle
+    float min_support = 0.1f;   // fraction of the rays that must be on it
+    float max_outside = 0.3f;   // fraction of the frame past 1.1 r allowed to be busy
 };
 
-// How the border was told from the scene. Activity -- where the frame never
-// resolves anything -- leads; a lit flare ring outside the circle is not black.
-// Dark answers the capture too still for it.
+// How the lens was told from the scene. Activity leads and puts the edge where
+// the scene stops, inside any lit barrel; Dark answers a capture too still for
+// it, and stops at the black.
 enum class BorderCue { None, Dark, Activity };
 
 struct BorderDetect {
     bool      found = false;
-    MaskShape shape;             // keep-inside ellipse, `shrink` applied
+    MaskShape shape;             // keep-inside circle, `shrink` applied
     BorderCue cue = BorderCue::None;
     float     residual = 0.0f;
     float     dark_fraction = 0.0f;

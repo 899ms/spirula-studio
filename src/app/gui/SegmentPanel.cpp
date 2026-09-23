@@ -198,7 +198,7 @@ app::FrameMask SegmentPanel::resolved(const app::FrameStencil& s) const {
     app::FrameMask fm = s.mask;
     if (s.detect_border && _border.found) {
         app::MaskShape e = _border.shape;
-        const float k = 1.0f - std::clamp(s.shrink, 0.0f, 0.9f);
+        const float k = 1.0f - std::clamp(s.shrink, -0.5f, 0.5f);
         e.rx *= k;
         e.ry *= k;
         // First: it is what the drawn shapes are applied to, in order.
@@ -782,14 +782,14 @@ void SegmentPanel::draw_stencil(app::FrameStencil& s, bool& edited) {
         // when the panel opens on an input that was set up before.
         if (!_listing.load() && !_detect_asked) start_detect();
         // The slider walks into other camera folders, whose circle is not this
-        // one's; refit rather than draw the wrong ellipse over the frame.
+        // one's; refit rather than draw the wrong circle over the frame.
         else if (!_detecting.load() && !_frames.empty() &&
                  shown_camera() != _border_camera)
             start_detect();
         ImGui::Indent();
         float pct = s.shrink * 100.0f;
         ImGui::SetNextItemWidth(-1);
-        if (ui::SliderFloatRaw("##shrink", &pct, 0.0f, 5.0f, "%.1f%%")) {
+        if (ui::SliderFloatRaw("##shrink", &pct, -10.0f, 12.0f, "%.1f%%")) {
             s.shrink = pct / 100.0f;
             _stencil_key.clear();
             edited = true;
