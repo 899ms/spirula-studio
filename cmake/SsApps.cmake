@@ -352,6 +352,11 @@ add_executable(frame_motion_test
     ${SS_SRC}/app/Pano360.cpp)
 ss_configure_app(frame_motion_test)
 
+add_executable(packed_lens_test
+    ${SS_SRC}/app/tests/packed_lens_test.cpp
+    ${SS_SRC}/app/Pano360.cpp)
+ss_configure_app(packed_lens_test)
+
 # The GUI files with no GUI in them: the stamp that decides whether a finished
 # reconstruction is kept or built again, and the preset serializers. Named
 # rather than globbed -- each such test names its own sources.

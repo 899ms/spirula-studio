@@ -409,6 +409,46 @@ inline void exifFlattenOrientation(uint8_t* tiff, size_t size, int w, int h) {
     if (next + 4 <= size) for (int i = 0; i < 4; i++) tiff[next + i] = 0;
 }
 
+// Zero FocalLength and FocalLengthIn35mmFilm -- both read as "unknown" -- for
+// pixels they no longer describe: a 360 camera states the pinhole equivalent
+// of its whole frame, and exifFocalPx would make that a KNOWN fisheye focal.
+inline void exifClearFocal(uint8_t* tiff, size_t size) {
+    if (size < 8) return;
+    detail::TiffReader r;
+    r.p = tiff;
+    r.n = size;
+    if (tiff[0] == 'I' && tiff[1] == 'I') r.le = true;
+    else if (tiff[0] == 'M' && tiff[1] == 'M') r.le = false;
+    else return;
+    if (r.u16(2) != 42) return;
+    auto entries = [&](size_t off) {
+        uint16_t n = r.u16(off);
+        if ((size_t)n * 12 + off + 2 > size) n = (uint16_t)((size - off - 2) / 12);
+        return n;
+    };
+    const uint32_t ifd0 = r.u32(4);
+    if (ifd0 == 0 || (size_t)ifd0 + 2 > size) return;
+    size_t exif_ifd = 0;
+    for (uint16_t i = 0, n = entries(ifd0); i < n; i++) {
+        const size_t e = ifd0 + 2 + (size_t)i * 12;
+        if (r.u16(e) == 0x8769) exif_ifd = r.u32(e + 8);
+    }
+    if (exif_ifd == 0 || exif_ifd + 2 > size) return;
+    for (uint16_t i = 0, n = entries(exif_ifd); i < n; i++) {
+        const size_t e = exif_ifd + 2 + (size_t)i * 12;
+        const uint16_t tag = r.u16(e), type = r.u16(e + 2);
+        size_t at = 0, len = 0;
+        if (tag == 0xA405 && (type == 3 || type == 4)) {
+            at = e + 8;
+            len = type == 3 ? 2 : 4;
+        } else if (tag == 0x920A && type == 5) {
+            at = r.u32(e + 8);   // the numerator; the denominator stays nonzero
+            len = 4;
+        }
+        if (len > 0 && at + len <= size) std::memset(tiff + at, 0, len);
+    }
+}
+
 // The focal length in pixels of the *stored* image, or 0 if EXIF cannot say.
 // COLMAP's rules (sensor/bitmap.cc ExifFocalLength), in the same order:
 //

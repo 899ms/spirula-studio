@@ -521,11 +521,16 @@ std::vector<sfm::SequenceDef> SfmRunner::build_sequences(const SfmJob& job) {
 namespace {
 
 // What input `in`'s file says about the lenses `d` lists (lens_dirs order), if
-// its frames were kept at one instant: a 360 packing's views sit at rotations
-// the extraction chose; a dual-fisheye file's two tracks are back to back.
+// its frames were kept at one instant (lenses sharing a frame always are): a
+// 360 packing's views sit where extraction chose; a dual fisheye's back to back.
 bool apply_known_lenses(const PrepJob& prep, const PrepResult* res, const PrepInput& in,
                         sfm::RigDef& d) {
-    if (!in.is_video || !in.subcameras.empty() || !res) return false;
+    if (!in.subcameras.empty()) return false;
+    if (in.packed_lenses == 2 && d.members.size() == 2) {
+        d.kind = "dual-fisheye";
+        return sfm::applyRigKind(d).empty();
+    }
+    if (!in.is_video || !res) return false;
     bool lockstep = false;
     for (const PrepCapture& c : res->captures)
         if (c.path == in.path && c.subdir == in.subdir) lockstep = c.lockstep;
@@ -655,7 +660,7 @@ std::vector<sfm::RigDef> SfmRunner::build_rigs(const PrepJob& prep, const PrepRe
             const PrepInput& b = prep.inputs[parts[k].first];
             known = a.pano360.valid() == b.pano360.valid() &&
                     a.pano360.packing == b.pano360.packing &&
-                    is_dual_fisheye_path(a.path) == is_dual_fisheye_path(b.path);
+                    is_dual_lens(a) == is_dual_lens(b);
             sfm::RigDef probe;
             probe.members = d.members;
             known = known && apply_known_lenses(prep, res, b, probe);

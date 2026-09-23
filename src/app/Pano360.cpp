@@ -435,6 +435,29 @@ void pano360_canvas(const Pano360Layout& l, const uint8_t* track0,
                             (size_t)s.width * 3);
 }
 
+int packed_lens_count(int width, int height, bool& exact) {
+    exact = false;
+    if (width <= 0 || height <= 0) return 1;
+    const double r = (double)width / height;
+    // Nearer in log ratio, so the two meet at sqrt(2).
+    const int lenses = r >= std::sqrt(2.0) ? 2 : 1;
+    exact = std::fabs(r / lenses - 1.0) <= 0.01;
+    return lenses;
+}
+
+void packed_lens_crop(const uint8_t* px, int width, int height, int channels,
+                      int lenses, int lens, std::vector<uint8_t>& out,
+                      int& out_width) {
+    lenses = std::max(lenses, 1);
+    out_width = width / lenses;
+    const size_t row = (size_t)out_width * channels;
+    out.resize(row * height);
+    const size_t x0 = (size_t)std::min(std::max(lens, 0), lenses - 1) * out_width;
+    for (int y = 0; y < height; y++)
+        std::memcpy(out.data() + (size_t)y * row,
+                    px + ((size_t)y * width + x0) * channels, row);
+}
+
 std::string pano360_graph(const Pano360Layout& l, const std::string& pre) {
     if (!l.valid()) return std::string();
     char buf[192];

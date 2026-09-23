@@ -122,6 +122,16 @@ void pano360_canvas(const Pano360Layout& l, const uint8_t* track0,
 // Whether the canvas needs the second track decoded at all.
 inline bool pano360_needs_track1(const Pano360Layout& l) { return !l.sphere(); }
 
+// A 360 camera's one-image formats (an Insta360 .insp photo, its .lrv proxy
+// video) hold both fisheye circles side by side at 2:1, or one lens at 1:1.
+// Any other shape takes the nearer of the two, with `exact` false.
+int packed_lens_count(int width, int height, bool& exact);
+
+// Lens `lens` of `lenses` side by side, as its own tightly packed image.
+void packed_lens_crop(const uint8_t* px, int width, int height, int channels,
+                      int lenses, int lens, std::vector<uint8_t>& out,
+                      int& out_width);
+
 // Decodes what the canvas needs and cuts it to size, leaving the result on
 // `pano360_canvas_pad`. `pre` ("fps=6") runs on the canvas, so ffmpeg never
 // scales a frame that selection will throw away.

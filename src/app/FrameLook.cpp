@@ -14,6 +14,7 @@ std::vector<std::string> frame_folders(const FrameLook& look, int tracks) {
         for (const Pano360View& v : look.views) out.push_back(v.dir);
         return out;
     }
+    if (look.packed_lenses >= 2) tracks = look.packed_lenses;
     if (tracks < 2) return {std::string()};
     for (int t = 0; t < tracks; t++) out.push_back("cam" + std::to_string(t));
     return out;

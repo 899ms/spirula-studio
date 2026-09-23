@@ -92,8 +92,18 @@ bool named_images(const fs::path& p) {
 }  // namespace
 
 
-std::string default_lens(const std::string& path) {
-    return is_dual_fisheye_path(path) ? "thin-prism-fisheye" : "opencv";
+std::string default_lens(const PrepInput& s) {
+    return has_fisheye_lens(s) ? "thin-prism-fisheye" : "opencv";
+}
+
+
+void set_packed_lenses(PrepInput& s, int width, int height) {
+    if (!is_packed_lens_path(s.path) || s.packed_lenses > 0 || width <= 0 ||
+        height <= 0)
+        return;
+    bool exact = false;
+    s.packed_lenses = app::packed_lens_count(width, height, exact);
+    if (s.packed_lenses >= 2) s.rig = kRigOwn;
 }
 
 
@@ -107,8 +117,10 @@ PrepInput make_source(const std::string& path, bool use_found_masks) {
     if (!s.is_video) {
         resolve_photo_folder(path, s.path, s.mask_dir);
         if (!use_found_masks) s.mask_dir.clear();
+        s.packed_lenses = probe_packed_lenses(s.path);
+        if (s.packed_lenses >= 2) s.rig = kRigOwn;
     }
-    s.camera_model = default_lens(path);
+    s.camera_model = default_lens(s);
     return s;
 }
 
@@ -130,6 +142,12 @@ void probe_sources(std::vector<PrepInput>& sources,
         if (!s.is_video || s.video_tracks > 0) continue;
         s.video_tracks = std::max(1, probe_video_tracks(ffmpeg_exe, s.path, never));
         if (s.pano360.valid() || s.video_tracks >= 2) s.rig = kRigOwn;
+    }
+    for (PrepInput& s : sources) {
+        int w = 0, h = 0;
+        if (s.is_video && s.packed_lenses == 0 && is_packed_lens_path(s.path) &&
+            source_pixel_size(s, ffmpeg_exe, w, h))
+            set_packed_lenses(s, w, h);
     }
 }
 
@@ -190,7 +208,9 @@ void guess_source_rigs(std::vector<PrepInput>& sources, bool force) {
     const std::vector<CameraGroup> groups = camera_groups(sources);
     std::vector<size_t> rows;
     for (size_t i = 0; i < groups.size(); i++) {
-        if (sources[groups[i].input].is_video) continue;
+        const PrepInput& in = sources[groups[i].input];
+        // Lenses the input's own frames hold are its rig already.
+        if (in.is_video || in.packed_lenses >= 2) continue;
         const int rig = group_rig(sources, groups[i]);
         if (!force && rig != kRigNone) return;
         rows.push_back(i);
@@ -323,7 +343,7 @@ void normalize_source_lenses(std::vector<PrepInput>& sources,
             // Nothing above to inherit from, so a row the removal of the one
             // above just promoted keeps what it was resolving to.
             if (m.empty()) m = camera_model;
-            if (m.empty()) m = default_lens(sources[groups[i].input].path);
+            if (m.empty()) m = default_lens(sources[groups[i].input]);
             above = m;
             continue;
         }
@@ -403,19 +423,19 @@ void apply_capture_defaults(std::vector<PrepInput>& sources, SfmJob& sfm,
     normalize_source_fps(sources, sfm.prep.video_fps);
     if (sources.empty()) return;
     const bool video = sources[0].is_video;
-    const bool fisheye = is_dual_fisheye_path(sources[0].path);
+    const bool dual = is_dual_lens(sources[0]);
     sfm.data_type = video ? 1 : 0;
     sfm.pairs = 0;               // automatic
     // NOT sequential for a dual-lens video: the tracks are concatenated, so
     // temporal neighbours miss every cross-lens pair -- 68/118 registered on an
     // X5 capture against 116/118 for automatic, which is content-based.
-    colmap.matcher = (video && !fisheye) ? 2 : 1;
+    colmap.matcher = (video && !dual) ? 2 : 1;
     colmap.seq_loop_closure = true;   // if switched to sequential
-    if (fisheye) {
+    if (has_fisheye_lens(sources[0])) {
         colmap.camera_model = "THIN_PRISM_FISHEYE";
     }
     // Several inputs are several cameras, and so is one dual-lens file.
-    if (sources.size() > 1 || fisheye) {
+    if (sources.size() > 1 || dual) {
         sfm.camera_mode = 1;
         colmap.camera_mode = 1;
     }
@@ -446,7 +466,10 @@ void dataset_adapt_preset(const std::string& preset,
     if (preset != "360-camera" || sources.empty()) return;
     // A packed dual-lens file (.insv/.360) is already handled: the pano plan
     // warps it into views and decides their lens, which is not this question.
+    // An .insp or .lrv measures 2:1 and is two fisheye circles, not a panorama.
     if (any_pano360(sources)) return;
+    for (const PrepInput& s : sources)
+        if (has_fisheye_lens(s)) return;
     if (!sources_look_equirect(sources, ffmpeg_exe)) return;
     apply_lens_to_sources(sources, sfm, "equirectangular");
     // COLMAP has no spherical model, so its own choice is left alone; the
@@ -471,7 +494,7 @@ void resolve_source_lenses(std::vector<PrepInput>& sources, SfmJob& sfm,
     // A capture whose lens the file itself names keeps it; anything else takes
     // the one the settings carry, which is how a preset reaches a whole batch.
     for (const PrepInput& s : sources)
-        if (is_dual_fisheye_path(s.path)) {
+        if (has_fisheye_lens(s)) {
             normalize_source_lenses(sources, sfm.camera_model);
             return;
         }

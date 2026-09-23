@@ -68,14 +68,15 @@ namespace gui {
 
 const char* const kVideoExtensions[kNumVideoExtensions] = {
     ".mp4", ".mov", ".mkv", ".webm", ".m4v", ".insv", ".osv", ".avi",
-    ".mts", ".m2ts", ".360", ".ts", ".wmv",
+    ".mts", ".m2ts", ".360", ".ts", ".wmv", ".lrv",
 };
 
 bool is_image_file(const fs::path& p) {
     std::string e = p.extension().string();
     for (auto& c : e) c = (char)std::tolower((unsigned char)c);
     return e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".webp" ||
-           e == ".tif" || e == ".tiff" || e == ".bmp" || e == ".exr";
+           e == ".tif" || e == ".tiff" || e == ".bmp" || e == ".exr" ||
+           e == ".insp";
 }
 
 namespace {
@@ -606,6 +607,24 @@ bool is_pano360_path(const std::string& path) {
     return lower_ext(path) == ".360";
 }
 
+bool is_packed_lens_path(const std::string& path) {
+    return lower_ext(path) == ".insp" || lower_ext(path) == ".lrv";
+}
+
+int probe_packed_lenses(const std::string& dir) {
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(dir, kWalk, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec) || lower_ext(it->path().string()) != ".insp")
+            continue;
+        int w = 0, h = 0, ch = 0;
+        if (!stbi_info(it->path().string().c_str(), &w, &h, &ch)) continue;
+        bool exact = false;
+        return app::packed_lens_count(w, h, exact);
+    }
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // The ffmpeg fallback, on its own
 // ---------------------------------------------------------------------------
@@ -719,7 +738,9 @@ int probe_video_tracks(const std::string& ffmpeg_exe, const std::string& path,
 
 std::vector<std::string> lens_dirs(const PrepJob& job, const PrepInput& in) {
     std::vector<std::string> out;
-    if (!in.is_video) return out;
+    for (int k = 0; in.packed_lenses >= 2 && k < in.packed_lenses; k++)
+        out.push_back("cam" + std::to_string(k));
+    if (!out.empty() || !in.is_video) return out;
     if (in.pano360.valid()) {
         for (const app::Pano360View& v : app::pano360_views(in.pano360, job.pano))
             if (!v.dir.empty()) out.push_back(v.dir);
@@ -1111,7 +1132,7 @@ int64_t DatasetPrep::estimate_frames(const PrepJob& job, const PrepInput& in,
     const int per_frame =
         in.pano360.valid()
             ? (int)app::pano360_views(in.pano360, job.pano).size()
-            : 0;
+            : std::max(in.packed_lenses, 0);
 #ifdef SS_HAVE_VIDEO
     if (!job.force_external_decode && native_decode_reason().empty()) {
         std::string err;
@@ -1435,6 +1456,7 @@ bool DatasetPrep::run(const PrepJob& job_in, PrepResult& out, std::string& error
 // which only the built-in decoder does.
 static bool lockstep_extraction(const PrepJob& job, const PrepInput& in, bool builtin) {
     if (in.pano360.valid()) return job.pano.mode != app::Pano360Mode::Off;
+    if (in.packed_lenses >= 2) return true;
     return builtin && job.sync_tracks;
 }
 
@@ -1460,6 +1482,7 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
                 {in.subdir, in.path, 0.0,
                  lockstep_extraction(job, in, !job.force_external_decode &&
                                                   native_decode_reason().empty())});
+            if (!split_packed_frames(in, images, out, error)) return false;
             // Masks a previous run left. Not when this one is re-doing them:
             // `masked` is what makes run() skip the masking pass entirely.
             if (job.mask_enable && !job.redo_masks) {
@@ -1478,7 +1501,7 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
     if (want_builtin) {
         if (extract_video_builtin(job, in, images, out, error)) {
             out.captures.push_back({in.subdir, in.path, 0.0, lockstep_extraction(job, in, true)});
-            return true;
+            return split_packed_frames(in, images, out, error);
         }
         if (_cancel.load()) return false;
         // A container or profile the driver cannot decode is exactly what the
@@ -1495,7 +1518,7 @@ bool DatasetPrep::extract_video(const PrepJob& job, const PrepInput& in,
         out.captures.push_back({in.subdir, in.path,
                                 (double)input_fps(job, in) * candidate_group(job, in),
                                 lockstep_extraction(job, in, false)});
-    return ok;
+    return ok && split_packed_frames(in, images, out, error);
 }
 
 #ifdef SS_HAVE_VIDEO
@@ -2012,7 +2035,8 @@ int photo_exif_turn(const fs::path& f) {
 // it. stb writes no metadata, so the segment is spliced in behind the SOI --
 // without it a re-encode would drop the focal-length prior and the GPS.
 bool write_jpeg_with_exif(const fs::path& to, int w, int h, int channels,
-                          const stbi_uc* px, std::vector<uint8_t> exif) {
+                          const stbi_uc* px, std::vector<uint8_t> exif,
+                          bool drop_focal = false) {
     std::vector<uint8_t> jpeg;
     auto sink = [](void* ctx, void* data, int size) {
         auto* out = (std::vector<uint8_t>*)ctx;
@@ -2025,6 +2049,7 @@ bool write_jpeg_with_exif(const fs::path& to, int w, int h, int channels,
     // long is dropped rather than written back malformed.
     if (exif.size() > 6 && exif.size() + 2 <= 65535) {
         sfm::exifFlattenOrientation(exif.data() + 6, exif.size() - 6, w, h);
+        if (drop_focal) sfm::exifClearFocal(exif.data() + 6, exif.size() - 6);
         const size_t len = exif.size() + 2;
         const uint8_t head[4] = {0xFF, 0xE1, (uint8_t)(len >> 8), (uint8_t)len};
         jpeg.insert(jpeg.begin() + 2, exif.begin(), exif.end());
@@ -2105,6 +2130,47 @@ bool convert_to_jpeg(const fs::path& from, const fs::path& to,
     return true;
 }
 
+// `from`'s lenses left to right, one file each in `to`, each turned by
+// `orientation` after the cut: the lenses sit side by side in the STORED
+// pixels. The last is written last, so its existence means the set is whole.
+bool split_packed_image(const fs::path& from, const std::vector<fs::path>& to,
+                        int orientation) {
+    const std::string src = from.string();
+    int w = 0, h = 0, ch = 0;
+    stbi_uc* px = stbi_load(src.c_str(), &w, &h, &ch, 3);
+    if (!px) return false;
+    const std::vector<uint8_t> exif = sfm::readExifSegment(src);
+    const sfm::ExifTransform xf = sfm::exifTransform(orientation);
+    std::error_code ec;
+    bool ok = true;
+    for (size_t k = 0; k < to.size() && ok; k++) {
+        std::vector<uint8_t> lens;
+        int lw = 0, lh = h;
+        app::packed_lens_crop(px, w, h, 3, (int)to.size(), (int)k, lens, lw);
+        app::turn_pixels(xf, 3, lens, lw, lh);
+        fs::create_directories(to[k].parent_path(), ec);
+        ok = is_jpeg_ext(to[k])
+                 ? write_jpeg_with_exif(to[k], lw, lh, 3, lens.data(), exif,
+                                        /*drop_focal=*/true)
+                 : stbi_write_png(to[k].string().c_str(), lw, lh, 3, lens.data(),
+                                  lw * 3) != 0;
+    }
+    stbi_image_free(px);
+    if (!ok)
+        for (const fs::path& f : to) fs::remove(f, ec);
+    return ok;
+}
+
+// The warning for a packed frame of neither shape, once per size.
+void note_packed_shape(const fs::path& f, int w, int h, int lenses,
+                       std::set<std::pair<int, int>>& warned,
+                       std::vector<std::string>& notes) {
+    if (!warned.insert({w, h}).second) return;
+    notes.push_back(fmt(lenses >= 2 ? lmsg::packed_shape_as_dual
+                                    : lmsg::packed_shape_as_single,
+                        {f.string(), w, h}));
+}
+
 // One photo's journey. `fallback` is where it goes when the re-encode cannot
 // happen after all -- its own name, which nothing else can have claimed.
 // `mask_to` is empty for a photo that gets no mask of its own.
@@ -2112,6 +2178,8 @@ struct PhotoMove {
     fs::path from, to, fallback, mask_to;
     bool convert = false;
     int orientation = 1;   // EXIF, baked into the pixels by the re-encode
+    // A packed .insp: one JPEG per lens, `to` being the last of them.
+    std::vector<fs::path> split;
 };
 
 // A re-encoded photo takes the .jpg its bytes now are; the parsers match a
@@ -2119,10 +2187,12 @@ struct PhotoMove {
 // a.jpg beside a.png, or two stems meeting in `mask_root` -- is not taken twice.
 std::vector<PhotoMove> plan_photo_moves(const std::vector<fs::path>& files,
                                         const fs::path& from, const fs::path& to,
-                                        const fs::path& mask_root, bool convert) {
+                                        const fs::path& mask_root, bool convert,
+                                        std::vector<std::string>& notes) {
     std::vector<PhotoMove> plan;
     plan.reserve(files.size());
     std::set<fs::path> taken, mask_taken;
+    std::set<std::pair<int, int>> warned;
     for (const fs::path& f : files)
         taken.insert(to / under_root(f, from));
     for (const fs::path& f : files) {
@@ -2130,6 +2200,31 @@ std::vector<PhotoMove> plan_photo_moves(const std::vector<fs::path>& files,
         m.from = f;
         const fs::path rel = under_root(f, from);
         m.to = m.fallback = to / rel;
+        if (is_packed_lens_path(f.string())) {
+            // Always cut and re-encoded, whatever the import mode: nothing
+            // downstream reads an .insp by that name.
+            int w = 0, h = 0, ch = 0;
+            bool exact = true;
+            const int lenses = stbi_info(f.string().c_str(), &w, &h, &ch)
+                                   ? app::packed_lens_count(w, h, exact)
+                                   : 1;
+            if (!exact) note_packed_shape(f, w, h, lenses, warned, notes);
+            std::string stem = rel.stem().string();
+            for (int k = 0; k < lenses; k++) {
+                const fs::path dir = lenses > 1 ? to / ("cam" + std::to_string(k)) : to;
+                fs::path cand = dir / rel.parent_path() / (stem + ".jpg");
+                if (k == 0 && taken.count(cand)) {
+                    stem += "_insp";
+                    cand = dir / rel.parent_path() / (stem + ".jpg");
+                }
+                taken.insert(cand);
+                m.split.push_back(cand);
+            }
+            m.to = m.split.back();
+            m.orientation = sfm::exifOrientation(f.string());
+            plan.push_back(std::move(m));
+            continue;
+        }
         if (convert && jpeg_candidate_ext(f)) {
             const fs::path cand =
                 m.to.parent_path() / (m.to.stem().string() + ".jpg");
@@ -2233,8 +2328,12 @@ bool DatasetPrep::gather_photos(const PrepJob& job, const PrepInput& in,
         // loop fills after the photos.
         const fs::path derived_masks =
             convert && !with_masks ? fs::path(masks) : fs::path();
-        const std::vector<PhotoMove> plan =
-            plan_photo_moves(files, t.from, t.to, derived_masks, convert);
+        std::vector<std::string> shape_notes;
+        const std::vector<PhotoMove> plan = plan_photo_moves(
+            files, t.from, t.to, derived_masks, convert, shape_notes);
+        for (const std::string& n : shape_notes) log(n, /*detail=*/false);
+        bool any_split = false;
+        for (const PhotoMove& m : plan) any_split = any_split || !m.split.empty();
 
         GatherTally tally;
         std::mutex notes_mu;
@@ -2254,6 +2353,16 @@ bool DatasetPrep::gather_photos(const PrepJob& job, const PrepInput& in,
                     failure = fmt(lmsg::err_copy_failed,
                                   {m.from.string(), t.to.string(),
                                    dir_ec.message()});
+                return false;
+            }
+            if (!m.split.empty()) {
+                if (split_packed_image(m.from, m.split, m.orientation)) {
+                    tally.converted++;
+                    return true;
+                }
+                std::lock_guard<std::mutex> lk(notes_mu);
+                if (failure.empty())
+                    failure = fmt(lmsg::err_packed_split_failed, {m.from.string()});
                 return false;
             }
             if (m.convert) {
@@ -2302,11 +2411,13 @@ bool DatasetPrep::gather_photos(const PrepJob& job, const PrepInput& in,
         };
 
         // Copying and moving are the disk's work, so one thread; the re-encode
-        // is the CPU's, ~60 ms a photo. Capped at 8 because each worker holds a
-        // decoded frame (24 MB at 4K) that glibc faults in on every call.
+        // is the CPU's, ~60 ms a photo. Each worker holds a decoded frame that
+        // glibc faults in on every call: 24 MB at 4K, ~320 MB for a 12K .insp.
         const unsigned cores = std::thread::hardware_concurrency();
         const int threads =
-            convert ? (int)std::clamp<unsigned>(cores ? cores : 1u, 1u, 8u) : 1;
+            convert || any_split
+                ? (int)std::clamp<unsigned>(cores ? cores : 1u, 1u, any_split ? 4u : 8u)
+                : 1;
         std::atomic<int> live{0};
         auto worker = [&] {
             for (;;) {
@@ -2371,6 +2482,68 @@ bool DatasetPrep::gather_photos(const PrepJob& job, const PrepInput& in,
         }
     }
     if (with_masks || derived_any_masks) have_masks = true;
+    return true;
+}
+
+bool DatasetPrep::split_packed_frames(const PrepInput& in,
+                                      const std::string& images,
+                                      PrepResult& out, std::string& error) {
+    if (in.packed_lenses < 2) return true;
+    out.per_folder_cameras = true;
+    std::error_code ec;
+    std::vector<fs::path> frames;
+    for (fs::directory_iterator it(images, ec), end; !ec && it != end;
+         it.increment(ec))
+        if (it->is_regular_file(ec) && is_image_file(it->path()))
+            frames.push_back(it->path());
+    if (frames.empty()) return true;
+    std::sort(frames.begin(), frames.end());
+
+    int w = 0, h = 0, ch = 0;
+    bool exact = true;
+    if (stbi_info(frames[0].string().c_str(), &w, &h, &ch))
+        app::packed_lens_count(w, h, exact);
+    if (!exact) {
+        std::set<std::pair<int, int>> warned;
+        std::vector<std::string> notes;
+        note_packed_shape(fs::path(in.path), w, h, in.packed_lenses, warned, notes);
+        for (const std::string& n : notes) log(n, /*detail=*/false);
+    }
+
+    std::atomic<size_t> next{0};
+    std::atomic<bool> failed{false};
+    std::mutex mu;
+    auto worker = [&] {
+        for (;;) {
+            const size_t i = next.fetch_add(1);
+            if (i >= frames.size() || failed.load() || _cancel.load()) return;
+            const fs::path& f = frames[i];
+            std::vector<fs::path> to;
+            for (int k = 0; k < in.packed_lenses; k++)
+                to.push_back(fs::path(images) / ("cam" + std::to_string(k)) /
+                             f.filename());
+            std::error_code fec;
+            if (fs::exists(to.back(), fec) || split_packed_image(f, to, 1)) {
+                fs::remove(f, fec);
+                continue;
+            }
+            std::lock_guard<std::mutex> lk(mu);
+            if (!failed.exchange(true))
+                error = fmt(lmsg::err_packed_split_failed, {f.string()});
+        }
+    };
+    const unsigned cores = std::thread::hardware_concurrency();
+    const int threads = (int)std::clamp<unsigned>(cores ? cores : 1u, 1u, 8u);
+    std::vector<std::thread> pool;
+    for (int t = 1; t < threads; t++) pool.emplace_back(worker);
+    worker();
+    for (std::thread& t : pool) t.join();
+    if (failed.load()) return false;
+    if (_cancel.load()) {
+        error = lmsg::err_cancelled.get();
+        return false;
+    }
+    log(fmt(lmsg::packed_frames_split, {images}), /*detail=*/false);
     return true;
 }
 
@@ -2461,10 +2634,11 @@ bool DatasetPrep::generate_masks_builtin(const PrepJob& job, const PrepInput& in
     const std::vector<MaskClick> clicks = clicks_for(job, in);
     mo.video = (in.is_video && job.mask_memory) || !clicks.empty();
     // A click's own frame number survives whenever the numbering it was
-    // recorded against did; ffmpeg resampled the video, so there only the
-    // fraction through the capture is meaningful.
-    mo.seeds = seeds_from_clicks(clicks, cameras, ids,
-                                 /*exact=*/!in.is_video || by_stem);
+    // recorded against did. ffmpeg resampled the video, and a packed photo's
+    // preview counted the files before the cut: there only the fraction holds.
+    mo.seeds = seeds_from_clicks(
+        clicks, cameras, ids,
+        /*exact=*/(!in.is_video && in.packed_lenses < 2) || by_stem);
 
     // The stencil goes in here rather than in a pass of its own: it is one AND
     // over a mask that is already in memory, against a decode and a re-encode

@@ -33,11 +33,15 @@ struct FrameLook {
     // source pixels and the plan turns the sphere itself.
     Pano360Layout eac;
     std::vector<Pano360View> views;
+    // Fisheye circles side by side in one frame (packed_lens_count); two or
+    // more are cut apart into cam0/, cam1/ ... as a multi-track file's are.
+    int packed_lenses = 0;
     bool pano() const { return eac.valid() && !views.empty(); }
 };
 
 // The folders a video's frames land in under its image directory: a 360 plan's
-// views, a multi-lens file's cam0/cam1..., or one empty name for one camera.
+// views, a multi-lens file's or a packed frame's cam0/cam1..., or one empty
+// name for one camera.
 std::vector<std::string> frame_folders(const FrameLook& look, int tracks);
 
 // The turn a photo's EXIF Orientation asks for; identity where there is none.

@@ -2158,6 +2158,9 @@ void GuiApp::pump_source_probes() {
             s.video_tracks = info.video_tracks;
             if (s.pano360.valid() || s.video_tracks >= 2) s.rig = kRigOwn;
         }
+        const int packed = s.packed_lenses;
+        set_packed_lenses(s, info.width, info.height);
+        pano_changed = pano_changed || packed != s.packed_lenses;
     }
     if (native_work_busy()) return;
     _source_probes_ready = !pending;
@@ -4125,7 +4128,10 @@ void GuiApp::draw_lens_warning(const std::string& path, bool is_video,
         if (s.pano360.valid() && s.path == path) return;
     // A dual-lens file is two fisheye circles per frame whatever its pixel
     // dimensions are, so this one needs no measurement.
-    if (is_dual_fisheye_path(path)) {
+    bool known_fisheye = is_dual_fisheye_path(path);
+    for (const PrepInput& s : _sources)
+        if (s.path == path) known_fisheye = known_fisheye || has_fisheye_lens(s);
+    if (known_fisheye) {
         if (pano) ui::TextColoredWrapped(kWarn, dmsg::lens_warn_dual_fisheye);
         else if (!fisheye)
             ui::TextColoredWrapped(kWarn, dmsg::lens_warn_needs_fisheye);
@@ -4154,6 +4160,7 @@ PreviewSource GuiApp::preview_source(size_t input) const {
     src.builtin_decode =
         !_sfm_job.prep.force_external_decode && backends().builtin_video;
     src.tracks = std::max(in.video_tracks, 1);
+    src.look.packed_lenses = in.packed_lenses;
     // The one frozen choice, so a preview decodes and segments on the GPU the
     // run will use; empty leaves the panel's own precedence in charge.
     src.device = _native_device_uuid;
@@ -5362,7 +5369,7 @@ void GuiApp::reset_recon_options() {
     _sfm_job.image_is_linear = linear;
     _sfm_job.keep_intermediate = keep;
     for (PrepInput& s : _sources) {
-        s.camera_model = default_lens(s.path);
+        s.camera_model = default_lens(s);
         s.focal_factor = 0.0f;
         for (SubCamera& sc : s.subcameras) {
             sc.camera_model = s.camera_model;

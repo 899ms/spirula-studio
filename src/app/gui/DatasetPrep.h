@@ -152,6 +152,10 @@ struct PrepInput {
     // Set instead when the file says it IS a 360 packing this build cannot
     // place, for the line that says its tracks are being left as they are.
     bool pano360_unsupported = false;
+    // Fisheye circles side by side in each frame of a .lrv, or each .insp of
+    // a folder (app::packed_lens_count); two are cut apart into cam0/, cam1/.
+    // 0 = not such an input, or not measured yet.
+    int packed_lenses = 0;
     // Areas of the frame that are never scene -- the fisheye border, a
     // watermark, the rig in shot. Per input because it describes a lens, and
     // resolved per camera folder when it asks for the border to be fitted
@@ -370,7 +374,7 @@ inline bool all_videos_every_frame(const std::vector<PrepInput>& inputs,
 inline bool reads_photos_in_place(const std::vector<PrepInput>& inputs,
                                   PhotoImport mode) {
     return mode == PhotoImport::InPlace && inputs.size() == 1 &&
-           !inputs[0].is_video;
+           !inputs[0].is_video && inputs[0].packed_lenses == 0;
 }
 
 // Where a job's images will be, before it has run: what PrepResult::image_dir
@@ -467,7 +471,7 @@ const Backends& backends();
 
 // Video container extensions the GUI offers, in the file dialog and for
 // drag-and-drop. Sized here so a range-for over it works from another TU.
-inline constexpr int kNumVideoExtensions = 13;
+inline constexpr int kNumVideoExtensions = 14;
 extern const char* const kVideoExtensions[kNumVideoExtensions];
 
 // Does this path name one of them? (Extension only; the file need not exist.)
@@ -478,6 +482,21 @@ bool is_dual_fisheye_path(const std::string& path);
 // A GoPro MAX .360 by its name. The packing itself is what probe_pano360
 // confirms; this only decides whether it is worth asking.
 bool is_pano360_path(const std::string& path);
+// An Insta360 .insp photo or .lrv proxy: one or two fisheye circles packed
+// into each frame, which PrepInput::packed_lenses counts.
+bool is_packed_lens_path(const std::string& path);
+
+// Two fisheye lenses back to back, as tracks or side by side.
+inline bool is_dual_lens(const PrepInput& in) {
+    return is_dual_fisheye_path(in.path) || in.packed_lenses >= 2;
+}
+// A lens the default camera model does not fit.
+inline bool has_fisheye_lens(const PrepInput& in) {
+    return is_dual_fisheye_path(in.path) || is_packed_lens_path(in.path) ||
+           in.packed_lenses > 0;
+}
+// The lenses of the first .insp under `dir`, or 0 when it holds none.
+int probe_packed_lenses(const std::string& dir);
 
 // ---- the ffmpeg fallback, for callers that are not a preparation run -------
 //
@@ -701,6 +720,11 @@ private:
     bool extract_360_ffmpeg(const PrepJob& job, const PrepInput& in,
                             const std::string& images, PrepResult& out,
                             std::string& error);
+    // A packed video's frames, written whole into `images`, cut into one
+    // folder per lens. Each frame goes once its lenses are written, so a
+    // resumed run finishes an interrupted pass.
+    bool split_packed_frames(const PrepInput& in, const std::string& images,
+                             PrepResult& out, std::string& error);
     // Photos into the dataset's own images/<subdir>, by whichever of
     // PhotoImport the job asked for -- and the masks they came with into the
     // matching masks/<subdir>, so the two trees still mirror each other.

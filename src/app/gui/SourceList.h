@@ -17,9 +17,12 @@
 namespace gui {
 
 // Every input carries a concrete lens, so a list holding a 360 camera and a
-// phone cannot end up applying one of them to the other. An Insta360 .insv
-// splits into one folder per fisheye track, which the thin-prism model fits.
-std::string default_lens(const std::string& path);
+// phone cannot end up applying one of them to the other. An Insta360 capture
+// splits into one folder per fisheye lens, which the thin-prism model fits.
+std::string default_lens(const PrepInput& s);
+
+// A packed video's lenses, from its frame size: two start as a rig of their own.
+void set_packed_lenses(PrepInput& s, int width, int height);
 
 // One picked path -> the input it describes, with the defaults its kind wants.
 // A folder resolves to the images/ under it and the masks beside them, which

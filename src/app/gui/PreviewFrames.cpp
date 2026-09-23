@@ -43,8 +43,18 @@ void convert_to_srgb(const PreviewSource& src, std::vector<uint8_t>& rgb) {
                                 src.image_is_linear.value_or(false));
 }
 
+// A packed frame's lens `folder`, cut out in place.
+void crop_packed(const PreviewSource& src, int folder, int& w, int h,
+                 std::vector<uint8_t>& rgb) {
+    if (src.look.packed_lenses < 2 || rgb.empty()) return;
+    std::vector<uint8_t> lens;
+    app::packed_lens_crop(rgb.data(), w, h, 3, src.look.packed_lenses, folder,
+                          lens, w);
+    rgb.swap(lens);
+}
+
 bool load_photo(const PreviewSource& src, const std::string& path,
-                int& w, int& h, std::vector<uint8_t>& rgb) {
+                int& w, int& h, std::vector<uint8_t>& rgb, int folder) {
     if (exr::is_exr(path)) {
         exr::Info info;
         if (!exr::decode_srgb8(path, exr::Options(), info, rgb,
@@ -56,6 +66,8 @@ bool load_photo(const PreviewSource& src, const std::string& path,
         if (!app::load_rgb(path, w, h, rgb)) return false;
         convert_to_srgb(src, rgb);
     }
+    // Cut before the turn: the lenses sit side by side in the stored pixels.
+    crop_packed(src, folder, w, h, rgb);
     if (!src.photos_as_stored)
         app::turn_pixels(app::photo_turn(path), 3, rgb, w, h);
     return true;
@@ -68,7 +80,7 @@ bool load_ffmpeg_frame(const PreviewSource& src, double at, int folder, int& w,
                        int& h, std::vector<uint8_t>& rgb,
                        const std::atomic<bool>& cancel) {
     FfmpegStillOpts opts;
-    opts.track = folder;
+    opts.track = src.look.packed_lenses >= 2 ? 0 : folder;
     opts.auto_rotate = src.look.auto_rotate;
     if (src.look.pano()) opts.eac = src.look.eac;
     const fs::path tmp = temp_still("preview");
@@ -80,7 +92,10 @@ bool load_ffmpeg_frame(const PreviewSource& src, double at, int folder, int& w,
     std::error_code rm;
     fs::remove(tmp, rm);
     if (rgb.empty()) return false;
-    if (!src.look.pano()) return true;
+    if (!src.look.pano()) {
+        crop_packed(src, folder, w, h, rgb);
+        return true;
+    }
 
     const size_t view =
         std::min((size_t)std::max(folder, 0), src.look.views.size() - 1);
@@ -97,8 +112,8 @@ bool load_ffmpeg_frame(const PreviewSource& src, double at, int folder, int& w,
 }  // namespace
 
 std::vector<std::string> preview_folders(const PreviewSource& src) {
-    if (!src.is_video) return {std::string()};
-    return app::frame_folders(src.look, src.tracks);
+    if (!src.is_video && src.look.packed_lenses < 2) return {std::string()};
+    return app::frame_folders(src.look, src.is_video ? src.tracks : 1);
 }
 
 void collect_preview_frames(PreviewSource& src, int offers,
@@ -191,7 +206,7 @@ bool load_preview_frame(const PreviewSource& src, const PreviewFrame& frame,
     }
     if (!src.is_video) {
         if (frame.path.empty() ||
-            !load_photo(src, frame.path, w, h, rgb)) {
+            !load_photo(src, frame.path, w, h, rgb, folder)) {
             error = dmsg::preview_frame_unreadable.get();
             return false;
         }

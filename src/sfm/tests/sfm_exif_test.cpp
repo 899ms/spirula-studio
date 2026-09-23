@@ -114,6 +114,14 @@ static int cmdExifTest(int, char**) {
     check(e.pixel_width == 3000 && e.pixel_height == 4000,
           "flattened: the pixel size is the turned one");
     check(e.focal_35mm == 24, "flattened: the focal prior survives");
+
+    // ---- ... until it is cleared ----
+    exifClearFocal(seg.data() + 6, seg.size() - 6);
+    e = parseExifTiff(seg.data() + 6, seg.size() - 6);
+    check(!e.hasFocal() && exifFocalPx(e, 3000, 4000) == 0,
+          "cleared: no focal prior is left");
+    check(e.pixel_width == 3000 && e.pixel_height == 4000,
+          "cleared: the other tags are untouched");
     std::remove(path.c_str());
 
     // ---- an orientation with no tag at all ----

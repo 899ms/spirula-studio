@@ -898,6 +898,87 @@ SS_MSG(photo_kept_unconverted,
     RU("{0} скопирован без изменений, а не перекодирован."),
     TR("{0} yeniden kodlanmak yerine olduğu gibi kopyalandı."));
 
+SS_MSG(packed_shape_as_dual,
+    EN("{0} is {1}x{2}, neither 2:1 nor 1:1; it is read as two fisheye images "
+       "side by side."),
+    JA("{0} は {1}x{2} で、2:1 でも 1:1 でもありません。左右に並んだ 2 枚の"
+       "魚眼画像として読みます。"),
+    ZH_HANS("{0} 为 {1}x{2}，既不是 2:1 也不是 1:1；按左右并排的两张鱼眼图像读取。"),
+    ZH_HANT("{0} 為 {1}x{2}，既不是 2:1 也不是 1:1；按左右並排的兩張魚眼影像讀取。"),
+    KO("{0} 은(는) {1}x{2} 로 2:1 도 1:1 도 아닙니다. 좌우로 나란한 어안 이미지 "
+       "두 장으로 읽습니다."),
+    DE("{0} ist {1}x{2}, weder 2:1 noch 1:1; es wird als zwei nebeneinander "
+       "liegende Fischaugenbilder gelesen."),
+    FR("{0} fait {1}x{2}, ni 2:1 ni 1:1 ; elle est lue comme deux images "
+       "fisheye côte à côte."),
+    ES("{0} mide {1}x{2}, ni 2:1 ni 1:1; se lee como dos imágenes de ojo de pez "
+       "una al lado de la otra."),
+    PT("{0} tem {1}x{2}, nem 2:1 nem 1:1; é lida como duas imagens olho de "
+       "peixe lado a lado."),
+    IT("{0} è {1}x{2}, né 2:1 né 1:1; viene letta come due immagini fisheye "
+       "affiancate."),
+    NL("{0} is {1}x{2}, noch 2:1 noch 1:1; het wordt gelezen als twee "
+       "fisheyebeelden naast elkaar."),
+    RU("{0}: {1}x{2}, не 2:1 и не 1:1; читается как два изображения «рыбий "
+       "глаз» рядом."),
+    TR("{0} {1}x{2} boyutunda, ne 2:1 ne 1:1; yan yana iki balıkgözü görüntü "
+       "olarak okunuyor."));
+
+SS_MSG(packed_shape_as_single,
+    EN("{0} is {1}x{2}, neither 2:1 nor 1:1; it is read as one fisheye image."),
+    JA("{0} は {1}x{2} で、2:1 でも 1:1 でもありません。1 枚の魚眼画像として"
+       "読みます。"),
+    ZH_HANS("{0} 为 {1}x{2}，既不是 2:1 也不是 1:1；按一张鱼眼图像读取。"),
+    ZH_HANT("{0} 為 {1}x{2}，既不是 2:1 也不是 1:1；按一張魚眼影像讀取。"),
+    KO("{0} 은(는) {1}x{2} 로 2:1 도 1:1 도 아닙니다. 어안 이미지 한 장으로 "
+       "읽습니다."),
+    DE("{0} ist {1}x{2}, weder 2:1 noch 1:1; es wird als ein Fischaugenbild "
+       "gelesen."),
+    FR("{0} fait {1}x{2}, ni 2:1 ni 1:1 ; elle est lue comme une seule image "
+       "fisheye."),
+    ES("{0} mide {1}x{2}, ni 2:1 ni 1:1; se lee como una sola imagen de ojo de "
+       "pez."),
+    PT("{0} tem {1}x{2}, nem 2:1 nem 1:1; é lida como uma única imagem olho de "
+       "peixe."),
+    IT("{0} è {1}x{2}, né 2:1 né 1:1; viene letta come un'unica immagine "
+       "fisheye."),
+    NL("{0} is {1}x{2}, noch 2:1 noch 1:1; het wordt gelezen als één "
+       "fisheyebeeld."),
+    RU("{0}: {1}x{2}, не 2:1 и не 1:1; читается как одно изображение «рыбий "
+       "глаз»."),
+    TR("{0} {1}x{2} boyutunda, ne 2:1 ne 1:1; tek bir balıkgözü görüntü olarak "
+       "okunuyor."));
+
+SS_MSG(packed_frames_split,
+    EN("Each frame cut into its two fisheye images under {0}"),
+    JA("各フレームを 2 枚の魚眼画像に分けました: {0}"),
+    ZH_HANS("每帧已拆分为两张鱼眼图像：{0}"),
+    ZH_HANT("每幀已拆分為兩張魚眼影像：{0}"),
+    KO("각 프레임을 어안 이미지 두 장으로 나눴습니다: {0}"),
+    DE("Jedes Bild in seine zwei Fischaugenbilder zerlegt: {0}"),
+    FR("Chaque image découpée en ses deux images fisheye : {0}"),
+    ES("Cada fotograma dividido en sus dos imágenes de ojo de pez: {0}"),
+    PT("Cada quadro dividido nas suas duas imagens olho de peixe: {0}"),
+    IT("Ogni fotogramma diviso nelle sue due immagini fisheye: {0}"),
+    NL("Elk beeld opgesplitst in zijn twee fisheyebeelden: {0}"),
+    RU("Каждый кадр разрезан на два изображения «рыбий глаз»: {0}"),
+    TR("Her kare iki balıkgözü görüntüsüne ayrıldı: {0}"));
+
+SS_MSG(err_packed_split_failed,
+    EN("{0} could not be cut into its fisheye images."),
+    JA("{0} を魚眼画像に分けられませんでした。"),
+    ZH_HANS("无法把 {0} 拆分为鱼眼图像。"),
+    ZH_HANT("無法把 {0} 拆分為魚眼影像。"),
+    KO("{0} 을(를) 어안 이미지로 나눌 수 없었습니다."),
+    DE("{0} konnte nicht in seine Fischaugenbilder zerlegt werden."),
+    FR("{0} n'a pas pu être découpée en ses images fisheye."),
+    ES("{0} no se pudo dividir en sus imágenes de ojo de pez."),
+    PT("{0} não pôde ser dividida nas suas imagens olho de peixe."),
+    IT("Impossibile dividere {0} nelle sue immagini fisheye."),
+    NL("{0} kon niet in zijn fisheyebeelden worden opgesplitst."),
+    RU("Не удалось разрезать {0} на изображения «рыбий глаз»."),
+    TR("{0} balıkgözü görüntülerine ayrılamadı."));
+
 SS_MSG(err_inputs_without_prompt,
     EN("Nothing to mask by for {0}. A clicked object prompts only the input it "
        "was drawn on, so either click the object on every input, or add a text "

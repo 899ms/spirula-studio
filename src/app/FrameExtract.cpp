@@ -846,7 +846,9 @@ bool extract_frames_at(const std::string& input, const FrameLook& look_in,
     std::vector<std::unique_ptr<video::VideoPipeline>> pipe(np);
     for (size_t k = 0; k < np; k++) {
         pipe[k] = std::make_unique<video::VideoPipeline>();
-        const int t = pano ? (int)k : std::min(std::max(folder, 0), n - 1);
+        const int t = pano                    ? (int)k
+                      : look.packed_lenses >= 2 ? 0
+                                                : std::min(std::max(folder, 0), n - 1);
         // Two: the frame being looked at, and the one after it, so the last
         // picture decoded is still held when the stream ends.
         if (!pipe[k]->open(input, t, 2, error)) return false;
@@ -882,6 +884,13 @@ bool extract_frames_at(const std::string& input, const FrameLook& look_in,
         for (size_t k = 0; k < np; k++)
             if (!pipe[k]->toImage(held[k], conv, img[k], error)) return false;
         if (!pano) {
+            if (look.packed_lenses >= 2) {
+                std::vector<uint8_t> lens;
+                packed_lens_crop(img[0].data.data(), img[0].width, img[0].height,
+                                 img[0].channels, look.packed_lenses, folder, lens,
+                                 img[0].width);
+                img[0].data.swap(lens);
+            }
             on_frame(img[0], index);
             return true;
         }
