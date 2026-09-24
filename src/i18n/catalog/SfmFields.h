@@ -626,43 +626,44 @@ SS_MSG(image_linear_help,
     TR("Girdi görüntülerini ekran kodlu değil, doğrusal ışık olarak ele al"));
 
 SS_MSG(point_color_help,
-    EN("Colour space the sparse point cloud is written in. srgb matches the "
-       "trainer's convert-initial-point-cloud-color; image writes the points "
-       "in the same space as the photographs"),
-    JA("疎な点群を書き出す色空間。srgb は学習側の "
-       "convert-initial-point-cloud-color に対応し、image は写真と同じ空間で"
-       "書き出します"),
-    ZH_HANS("稀疏点云写出的色彩空间。srgb 与训练端的 "
-            "convert-initial-point-cloud-color 对应，image 则与照片同一空间"),
-    ZH_HANT("稀疏點雲寫出的色彩空間。srgb 與訓練端的 "
-            "convert-initial-point-cloud-color 對應，image 則與照片同一空間"),
-    KO("희소 점 구름을 기록할 색 공간. srgb 는 학습 쪽의 "
-       "convert-initial-point-cloud-color 에 대응하고, image 는 사진과 같은 "
-       "공간으로 씁니다"),
-    DE("Farbraum, in dem die dünne Punktwolke geschrieben wird. srgb passt zu "
-       "convert-initial-point-cloud-color des Trainings; image schreibt die "
-       "Punkte im Raum der Fotos"),
-    FR("Espace colorimétrique du nuage de points épars. srgb correspond au "
-       "convert-initial-point-cloud-color de l'entraînement ; image écrit les "
-       "points dans l'espace des photographies"),
-    ES("Espacio de color del nube de puntos dispersa. srgb concuerda con el "
-       "convert-initial-point-cloud-color del entrenamiento; image escribe los "
-       "puntos en el espacio de las fotografías"),
-    PT("Espaço de cor da nuvem de pontos esparsa. srgb combina com o "
-       "convert-initial-point-cloud-color do treino; image escreve os pontos "
-       "no espaço das fotografias"),
-    IT("Spazio colore in cui è scritta la nuvola di punti sparsa. srgb combacia "
-       "con convert-initial-point-cloud-color dell'addestramento; image scrive "
-       "i punti nello spazio delle fotografie"),
-    NL("Kleurruimte waarin de dunne puntenwolk wordt geschreven. srgb sluit aan "
-       "op convert-initial-point-cloud-color van de training; image schrijft de "
-       "punten in de ruimte van de foto's"),
-    RU("Цветовое пространство разреженного облака точек. srgb соответствует "
-       "convert-initial-point-cloud-color обучения; image пишет точки в "
-       "пространстве фотографий"),
-    TR("Seyrek nokta bulutunun yazıldığı renk uzayı. srgb, eğitimdeki "
-       "convert-initial-point-cloud-color ile eşleşir; image noktaları "
-       "fotoğraflarla aynı uzayda yazar"));
+    EN("Colour space the sparse point cloud is written in. image writes the "
+       "points in the same space as the photographs, which the trainer assumes "
+       "by default; srgb needs the trainer's point-color-gamut set to Rec.709"),
+    JA("疎な点群を書き出す色空間。image は写真と同じ空間で書き出し、学習側は既定"
+       "でそう想定します。srgb では学習側の point-color-gamut を Rec.709 にする"
+       "必要があります"),
+    ZH_HANS("稀疏点云写出的色彩空间。image 与照片同一空间写出，训练端默认即如此"
+            "假定；srgb 则需把训练端的 point-color-gamut 设为 Rec.709"),
+    ZH_HANT("稀疏點雲寫出的色彩空間。image 與照片同一空間寫出，訓練端預設即如此"
+            "假定；srgb 則需把訓練端的 point-color-gamut 設為 Rec.709"),
+    KO("희소 점 구름을 기록할 색 공간. image 는 사진과 같은 공간으로 쓰며 학습 "
+       "쪽의 기본 가정도 그렇습니다. srgb 는 학습 쪽 point-color-gamut 을 "
+       "Rec.709 로 설정해야 합니다"),
+    DE("Farbraum, in dem die dünne Punktwolke geschrieben wird. image schreibt "
+       "die Punkte im Raum der Fotos, wovon das Training standardmäßig ausgeht; "
+       "srgb braucht im Training point-color-gamut auf Rec.709"),
+    FR("Espace colorimétrique du nuage de points épars. image écrit les points "
+       "dans l'espace des photographies, ce que l'entraînement suppose par "
+       "défaut ; srgb demande point-color-gamut sur Rec.709 à l'entraînement"),
+    ES("Espacio de color de la nube de puntos dispersa. image escribe los "
+       "puntos en el espacio de las fotografías, que el entrenamiento supone por "
+       "defecto; srgb necesita point-color-gamut en Rec.709 al entrenar"),
+    PT("Espaço de cor da nuvem de pontos esparsa. image escreve os pontos no "
+       "espaço das fotografias, que o treino supõe por omissão; srgb precisa de "
+       "point-color-gamut em Rec.709 no treino"),
+    IT("Spazio colore in cui è scritta la nuvola di punti sparsa. image scrive "
+       "i punti nello spazio delle fotografie, che l'addestramento presume per "
+       "impostazione predefinita; srgb richiede point-color-gamut su Rec.709 "
+       "nell'addestramento"),
+    NL("Kleurruimte waarin de dunne puntenwolk wordt geschreven. image schrijft "
+       "de punten in de ruimte van de foto's, waar de training standaard van "
+       "uitgaat; srgb vraagt point-color-gamut op Rec.709 in de training"),
+    RU("Цветовое пространство разреженного облака точек. image пишет точки в "
+       "пространстве фотографий, что обучение предполагает по умолчанию; для "
+       "srgb при обучении нужен point-color-gamut Rec.709"),
+    TR("Seyrek nokta bulutunun yazıldığı renk uzayı. image noktaları "
+       "fotoğraflarla aynı uzayda yazar, eğitim varsayılan olarak bunu kabul "
+       "eder; srgb için eğitimde point-color-gamut Rec.709 olmalıdır"));
 
 // ===========================================================================
 // camera

@@ -600,7 +600,7 @@ void reportFeatureCompaction(const FeatureCompactionStats& stats) {
 
 // Point colours are sampled from images the loader converted to sRGB, which is
 // where "srgb" leaves them. "image" puts them back in the photographs' space,
-// for a trainer run with convert_initial_point_cloud_color off.
+// which is where the trainer's point_color_* assume them by default.
 void recolorPoints(std::vector<Reconstruction>& models, const SfmConfig& cfg) {
     if (cfg.point_color_space != "image") return;
     if (colorspace::is_identity(cfg.image_gamut, cfg.image_is_linear)) return;

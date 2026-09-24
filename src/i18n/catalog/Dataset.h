@@ -211,42 +211,47 @@ SS_MSG(point_color_image_space,
     TR("Nokta bulutu renkleri girdi renk uzayında"));
 
 SS_MSG(point_color_image_space_help,
-    EN("Off leaves the sparse point cloud in sRGB, which the trainer converts "
-       "with \"Convert seed point colours\". On writes it in the photographs' "
-       "own space, for training with that conversion off."),
-    JA("オフなら疎な点群は sRGB のままで、学習側の「シード点の色を変換」が処理"
-       "します。オンなら写真と同じ空間で書き出し、その変換をオフにして学習します。"),
-    ZH_HANS("关闭时稀疏点云保持 sRGB，由训练端的\"转换种子点颜色\"处理；开启则以"
-            "照片自身的空间写出，训练时关掉该转换。"),
-    ZH_HANT("關閉時稀疏點雲保持 sRGB，由訓練端的「轉換種子點顏色」處理；開啟則以"
-            "照片自身的空間寫出，訓練時關掉該轉換。"),
-    KO("끄면 희소 점 구름은 sRGB 로 남고 학습 쪽의 \"시드 점 색 변환\"이 처리합니다. "
-       "켜면 사진과 같은 공간으로 써서, 그 변환을 끄고 학습합니다."),
-    DE("Aus lässt die dünne Punktwolke in sRGB, was das Training mit "
-       "\"Startpunktfarben umrechnen\" erledigt. An schreibt sie im Raum der "
-       "Fotos, für ein Training mit ausgeschalteter Umrechnung."),
-    FR("Désactivé laisse le nuage épars en sRGB, que l'entraînement traite avec "
-       "« Convertir les couleurs des points de départ ». Activé l'écrit dans "
-       "l'espace des photographies, pour un entraînement sans cette conversion."),
-    ES("Desactivado deja la nube dispersa en sRGB, de lo que se encarga "
-       "«Convertir los colores de los puntos iniciales» en el entrenamiento. "
-       "Activado la escribe en el espacio de las fotografías, para entrenar sin "
-       "esa conversión."),
-    PT("Desligado deixa a nuvem esparsa em sRGB, do que trata «Converter as "
-       "cores dos pontos iniciais» no treino. Ligado escreve-a no espaço das "
-       "fotografias, para treinar sem essa conversão."),
-    IT("Spento lascia la nuvola sparsa in sRGB, di cui si occupa «Converti i "
-       "colori dei punti iniziali» nell'addestramento. Attivo la scrive nello "
-       "spazio delle fotografie, per addestrare con quella conversione spenta."),
-    NL("Uit laat de dunne puntenwolk in sRGB, waar \"Kleuren van startpunten "
-       "omzetten\" in de training voor zorgt. Aan schrijft haar in de ruimte van "
-       "de foto's, om te trainen met die omzetting uit."),
-    RU("Выключено оставляет разреженное облако в sRGB, чем занимается "
-       "«Преобразовать цвета начальных точек» при обучении. Включено пишет его в "
-       "пространстве фотографий — для обучения с выключенным преобразованием."),
-    TR("Kapalı, seyrek nokta bulutunu sRGB'de bırakır; bunu eğitimdeki "
-       "\"Başlangıç noktası renklerini dönüştür\" halleder. Açık, onu "
-       "fotoğrafların uzayında yazar; o dönüşüm kapalıyken eğitmek için."));
+    EN("On writes the sparse point cloud in the photographs' own space, which "
+       "is where training assumes it by default. Off leaves it in sRGB; train "
+       "it with \"Seed point color space\" set to Rec.709."),
+    JA("オンなら疎な点群を写真と同じ空間で書き出します。学習側は既定でそう想定し"
+       "ます。オフなら sRGB のままで、学習では「初期点群の色空間」を Rec.709 に"
+       "してください。"),
+    ZH_HANS("开启时稀疏点云以照片自身的空间写出，这也是训练端的默认假定。关闭则"
+            "保持 sRGB，训练时请把\"初始点云色彩空间\"设为 Rec.709。"),
+    ZH_HANT("開啟時稀疏點雲以照片自身的空間寫出，這也是訓練端的預設假定。關閉則"
+            "保持 sRGB，訓練時請把「初始點雲色彩空間」設為 Rec.709。"),
+    KO("켜면 희소 점 구름을 사진과 같은 공간으로 씁니다. 학습 쪽의 기본 가정도 "
+       "그렇습니다. 끄면 sRGB로 남으며, 학습 시 \"초기 포인트 색 공간\"을 "
+       "Rec.709로 설정하십시오."),
+    DE("An schreibt die dünne Punktwolke im Raum der Fotos, wovon das Training "
+       "standardmäßig ausgeht. Aus lässt sie in sRGB; dann im Training "
+       "\"Farbraum der Startpunkte\" auf Rec.709 setzen."),
+    FR("Activé écrit le nuage épars dans l'espace des photographies, ce que "
+       "l'entraînement suppose par défaut. Désactivé le laisse en sRGB ; "
+       "entraînez alors avec « Espace colorimétrique des points initiaux » sur "
+       "Rec.709."),
+    ES("Activado escribe la nube dispersa en el espacio de las fotografías, que "
+       "es lo que el entrenamiento supone por defecto. Desactivado la deja en "
+       "sRGB; entrene entonces con «Espacio de color de los puntos iniciales» en "
+       "Rec.709."),
+    PT("Ligado escreve a nuvem esparsa no espaço das fotografias, que é o que o "
+       "treino supõe por omissão. Desligado deixa-a em sRGB; treine então com "
+       "«Espaço de cor dos pontos iniciais» em Rec.709."),
+    IT("Attivo scrive la nuvola sparsa nello spazio delle fotografie, che è ciò "
+       "che l'addestramento presume per impostazione predefinita. Spento la "
+       "lascia in sRGB; addestrare allora con «Spazio colore dei punti "
+       "iniziali» su Rec.709."),
+    NL("Aan schrijft de dunne puntenwolk in de ruimte van de foto's, waar de "
+       "training standaard van uitgaat. Uit laat haar in sRGB; train dan met "
+       "\"Kleurruimte van de startpunten\" op Rec.709."),
+    RU("Включено пишет разреженное облако в пространстве фотографий -- это и "
+       "предполагает обучение по умолчанию. Выключено оставляет его в sRGB; "
+       "тогда при обучении задайте «Цветовое пространство начальных точек» "
+       "Rec.709."),
+    TR("Açık, seyrek nokta bulutunu fotoğrafların uzayında yazar; eğitim "
+       "varsayılan olarak bunu kabul eder. Kapalı onu sRGB'de bırakır; eğitimde "
+       "\"Başlangıç noktası renk uzayı\"nı Rec.709 yapın."));
 
 SS_MSG(gamut_rec709,
     EN("sRGB / Rec.709"), JA("sRGB / Rec.709"), ZH_HANS("sRGB / Rec.709"),

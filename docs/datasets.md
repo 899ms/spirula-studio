@@ -84,7 +84,7 @@ any other.
 
 - **How many:** `random_init_fraction` of `cap_max` (0.1: 100k of 1M).
 - **Colour:** uniform random 8-bit RGB, which then goes through the same
-  seed-colour conversion (`convert_initial_point_cloud_color`) a
+  seed-colour conversion (`point_color_*` to `splat_color_*`) a
   reconstruction's colours do.
 - **Centre** (`random_init_center`): the median, focus or mean of the camera
   positions -- `dsparse::scene_center`, the modes `--scene-center` uses -- or

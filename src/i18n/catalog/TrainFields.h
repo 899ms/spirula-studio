@@ -9841,54 +9841,178 @@ SS_MSG(splat_color_gamut_help,
        "korur ama bunu anlayan bir görüntüleyici gerektirir. Hiçbir ton eşlemesi "
        "uygulanmaz."));
 
-SS_MSG(convert_initial_point_cloud_color,
-    EN("Convert seed point colors"), JA("初期点群の色を変換"),
-    ZH_HANS("转换初始点云颜色"), ZH_HANT("轉換初始點雲顏色"),
-    KO("초기 포인트 색 변환"), DE("Farben der Startpunktwolke umrechnen"),
-    FR("Convertir les couleurs du nuage initial"),
-    ES("Convertir los colores de la nube inicial"),
-    PT("Converter as cores da nuvem inicial"),
-    IT("Convertire i colori della nuvola iniziale"),
-    NL("Kleuren van de startpuntenwolk omzetten"),
-    RU("Преобразовать цвета исходного облака"),
-    TR("Başlangıç nokta bulutu renklerini dönüştür"));
-SS_MSG(convert_initial_point_cloud_color_help,
-    EN("Read the seed point cloud's colors as ordinary sRGB and convert them "
-       "into the training color space. Turn on when starting colors look wrong "
-       "in a linear or wide-gamut run."),
-    JA("初期点群の色を通常の sRGB として読み、学習に使う色空間へ変換します。リ"
-       "ニアや広色域の学習で最初の色がおかしいときにオンにしてください。"),
-    ZH_HANS("把初始点云的颜色当作普通 sRGB 读取，并转换到训练所用的色彩空间。"
-            "在线性或宽色域的训练中初始颜色不对时打开它。"),
-    ZH_HANT("把初始點雲的顏色當作普通 sRGB 讀取，並轉換到訓練所用的色彩空間。"
-            "在線性或廣色域的訓練中初始顏色不對時開啟它。"),
-    KO("초기 포인트 클라우드의 색을 일반 sRGB로 읽어 학습 색 공간으로 변환합니"
-       "다. 선형이나 광색역 학습에서 시작 색이 이상해 보이면 켜십시오."),
-    DE("Die Farben der Startpunktwolke als gewöhnliches sRGB lesen und in den "
-       "Trainingsfarbraum umrechnen. Einschalten, wenn die Anfangsfarben in einem "
-       "linearen oder weiten Farbraum falsch aussehen."),
-    FR("Lire les couleurs du nuage de points initial comme du sRGB ordinaire "
-       "et les convertir vers l'espace colorimétrique d'entraînement. À activer "
-       "quand les couleurs de départ semblent fausses dans un entraînement linéaire "
-       "ou à gamut large."),
-    ES("Leer los colores de la nube de puntos inicial como sRGB corriente y convertirlos "
-       "al espacio de color del entrenamiento. Actívelo cuando los colores de "
-       "partida se vean mal en una ejecución lineal o de gamut amplio."),
-    PT("Ler as cores da nuvem de pontos inicial como sRGB comum e convertê-las "
-       "para o espaço de cor do treinamento. Ative quando as cores iniciais parecerem "
-       "erradas numa execução linear ou de gamut amplo."),
-    IT("Leggere i colori della nuvola di punti iniziale come sRGB normale e convertirli "
-       "nello spazio colore dell'addestramento. Da attivare quando i colori di "
-       "partenza sembrano sbagliati in un'esecuzione lineare o a gamut ampio."),
-    NL("De kleuren van de startpuntenwolk als gewone sRGB lezen en omzetten naar "
-       "de trainingskleurruimte. Zet dit aan als de beginkleuren er in een lineaire "
-       "run of met breed gamut verkeerd uitzien."),
-    RU("Читать цвета исходного облака точек как обычный sRGB и переводить их "
-       "в цветовое пространство обучения. Включайте, когда стартовые цвета выглядят "
-       "неверно в линейном или широкоохватном запуске."),
-    TR("Başlangıç nokta bulutunun renklerini sıradan sRGB olarak okur ve eğitim "
-       "renk uzayına dönüştürür. Doğrusal ya da geniş gamutlu bir çalıştırmada "
-       "başlangıç renkleri yanlış görünüyorsa açın."));
+SS_MSG(point_color_is_linear,
+    EN("Seed point colors are linear"), JA("初期点群の色はリニア"),
+    ZH_HANS("初始点云颜色为线性"), ZH_HANT("初始點雲顏色為線性"),
+    KO("초기 포인트 색이 선형"), DE("Farben der Startpunkte sind linear"),
+    FR("Couleurs des points initiaux linéaires"),
+    ES("Los colores de los puntos iniciales son lineales"),
+    PT("As cores dos pontos iniciais são lineares"),
+    IT("I colori dei punti iniziali sono lineari"),
+    NL("Kleuren van de startpunten zijn lineair"),
+    RU("Цвета начальных точек линейные"),
+    TR("Başlangıç nokta renkleri doğrusal"));
+SS_MSG(point_color_is_linear_help,
+    EN("Whether the seed point cloud's colors are linear light rather than "
+       "display values. Leave unset to follow the input images, which is where "
+       "a reconstruction samples them. The seeds are converted into the splat "
+       "space wherever the two differ."),
+    JA("初期点群の色が表示値ではなくリニア光かどうか。未設定なら入力画像に合わ"
+       "せます。再構成はそこから色を取るためです。スプラットの空間と異なる部分"
+       "は、初期点をその空間へ変換します。"),
+    ZH_HANS("初始点云的颜色是否为线性光而不是显示值。不设置则跟随输入图像——重"
+            "建正是从那里取色的。凡与泼溅空间不同之处，初始点都会被转换过去。"),
+    ZH_HANT("初始點雲的顏色是否為線性光而不是顯示值。不設定則跟隨輸入影像——重"
+            "建正是從那裡取色的。凡與潑濺空間不同之處，初始點都會被轉換過去。"),
+    KO("초기 포인트 클라우드의 색이 디스플레이 값이 아니라 선형 광인지 여부입니"
+       "다. 설정하지 않으면 입력 이미지를 따릅니다. 재구성이 색을 가져오는 곳이 "
+       "거기이기 때문입니다. 스플랫 공간과 다른 부분은 그 공간으로 변환합니다."),
+    DE("Ob die Farben der Startpunktwolke lineares Licht statt Anzeigewerte "
+       "sind. Nicht gesetzt richtet es sich nach den Eingabebildern, aus denen "
+       "eine Rekonstruktion sie entnimmt. Wo beide Räume abweichen, werden die "
+       "Startpunkte in den Splat-Raum umgerechnet."),
+    FR("Indique si les couleurs du nuage de points initial sont de la lumière "
+       "linéaire plutôt que des valeurs d'affichage. Non défini, suit les images "
+       "d'entrée, d'où une reconstruction les tire. Partout où les deux espaces "
+       "diffèrent, les points initiaux sont convertis vers celui des splats."),
+    ES("Si los colores de la nube de puntos inicial son luz lineal en vez de "
+       "valores de pantalla. Sin definir, sigue a las imágenes de entrada, de "
+       "donde una reconstrucción los toma. Donde ambos espacios difieren, los "
+       "puntos iniciales se convierten al de los splats."),
+    PT("Se as cores da nuvem de pontos inicial são luz linear em vez de valores "
+       "de exibição. Sem definir, segue as imagens de entrada, de onde uma "
+       "reconstrução as tira. Onde os dois espaços diferem, os pontos iniciais "
+       "são convertidos para o dos splats."),
+    IT("Se i colori della nuvola di punti iniziale sono luce lineare anziché "
+       "valori di visualizzazione. Se non impostato, segue le immagini in "
+       "ingresso, da cui una ricostruzione li prende. Dove i due spazi "
+       "differiscono, i punti iniziali vengono convertiti in quello degli splat."),
+    NL("Of de kleuren van de startpuntenwolk lineair licht zijn in plaats van "
+       "weergavewaarden. Niet ingesteld volgt het de invoerbeelden, waaruit een "
+       "reconstructie ze haalt. Waar beide ruimtes verschillen, worden de "
+       "startpunten naar die van de splats omgezet."),
+    RU("Являются ли цвета исходного облака точек линейным светом, а не экранными "
+       "значениями. Без значения следует за входными изображениями, откуда их "
+       "берёт реконструкция. Где пространства различаются, начальные точки "
+       "переводятся в пространство сплатов."),
+    TR("Başlangıç nokta bulutunun renklerinin ekran değerleri yerine doğrusal "
+       "ışık olup olmadığı. Ayarlanmazsa, bir yeniden yapılandırmanın renkleri "
+       "aldığı girdi görüntülerini izler. İki uzayın farklı olduğu yerde "
+       "başlangıç noktaları splat uzayına dönüştürülür."));
+
+SS_MSG(point_color_transfer,
+    EN("Seed point tone curve"), JA("初期点群のトーンカーブ"),
+    ZH_HANS("初始点云色调曲线"), ZH_HANT("初始點雲色調曲線"),
+    KO("초기 포인트 톤 커브"), DE("Tonkurve der Startpunkte"),
+    FR("Courbe de tonalité des points initiaux"),
+    ES("Curva tonal de los puntos iniciales"),
+    PT("Curva tonal dos pontos iniciais"),
+    IT("Curva tonale dei punti iniziali"),
+    NL("Toonkromme van de startpunten"),
+    RU("Тоновая кривая начальных точек"),
+    TR("Başlangıç noktası ton eğrisi"));
+SS_MSG(point_color_transfer_help,
+    EN("The curve that turns the seed point cloud's colors into display values. "
+       "`none` uses the input's. Where it differs from the splats' curve, the "
+       "seeds are carried across through the display value, so they look the "
+       "same on screen."),
+    JA("初期点群の色を表示値に変えるカーブです。none は入力のものを使います。ス"
+       "プラットのカーブと異なる場合、初期点は表示値を経由して移され、画面上で"
+       "同じに見えます。"),
+    ZH_HANS("把初始点云颜色变为显示值的曲线。none 用输入的那条。与泼溅的曲线不"
+            "同时，初始点经由显示值换算过去，在屏幕上看起来一样。"),
+    ZH_HANT("把初始點雲顏色變為顯示值的曲線。none 用輸入的那條。與潑濺的曲線不"
+            "同時，初始點經由顯示值換算過去，在螢幕上看起來一樣。"),
+    KO("초기 포인트 클라우드의 색을 디스플레이 값으로 바꾸는 곡선입니다. none은 "
+       "입력의 것을 씁니다. 스플랫의 곡선과 다르면 초기 포인트를 디스플레이 값을 "
+       "거쳐 옮기므로 화면에서는 똑같이 보입니다."),
+    DE("Die Kurve, die die Farben der Startpunktwolke in Anzeigewerte "
+       "überführt. `none` nimmt die der Eingabe. Weicht sie von der Kurve der "
+       "Splats ab, werden die Startpunkte über den Anzeigewert übertragen und "
+       "sehen auf dem Bildschirm gleich aus."),
+    FR("La courbe qui transforme les couleurs du nuage de points initial en "
+       "valeurs d'affichage. « none » reprend celle de l'entrée. Si elle "
+       "diffère de celle des splats, les points initiaux passent par la valeur "
+       "d'affichage et restent identiques à l'écran."),
+    ES("La curva que convierte los colores de la nube de puntos inicial en "
+       "valores de pantalla. «none» usa la de la entrada. Si difiere de la de "
+       "los splats, los puntos iniciales pasan a través del valor de pantalla y "
+       "se ven igual."),
+    PT("A curva que transforma as cores da nuvem de pontos inicial em valores "
+       "de exibição. «none» usa a da entrada. Se diferir da dos splats, os "
+       "pontos iniciais passam pelo valor de exibição e ficam iguais no ecrã."),
+    IT("La curva che trasforma i colori della nuvola di punti iniziale in valori "
+       "di visualizzazione. «none» usa quella dell'ingresso. Se differisce da "
+       "quella degli splat, i punti iniziali passano per il valore di "
+       "visualizzazione e appaiono uguali a schermo."),
+    NL("De kromme die de kleuren van de startpuntenwolk in weergavewaarden "
+       "omzet. `none` neemt die van de invoer. Wijkt ze af van die van de "
+       "splats, dan gaan de startpunten via de weergavewaarde over en zien ze er "
+       "op het scherm hetzelfde uit."),
+    RU("Кривая, переводящая цвета исходного облака точек в экранные значения. "
+       "«none» берёт кривую входа. Если она отличается от кривой сплатов, "
+       "начальные точки переносятся через экранное значение и выглядят на "
+       "экране так же."),
+    TR("Başlangıç nokta bulutunun renklerini ekran değerlerine çeviren eğri. "
+       "`none` girdininkini kullanır. Splat'ların eğrisinden farklıysa "
+       "başlangıç noktaları ekran değeri üzerinden aktarılır ve ekranda aynı "
+       "görünür."));
+
+SS_MSG(point_color_gamut,
+    EN("Seed point color space"), JA("初期点群の色空間"),
+    ZH_HANS("初始点云色彩空间"), ZH_HANT("初始點雲色彩空間"),
+    KO("초기 포인트 색 공간"), DE("Farbraum der Startpunkte"),
+    FR("Espace colorimétrique des points initiaux"),
+    ES("Espacio de color de los puntos iniciales"),
+    PT("Espaço de cor dos pontos iniciais"),
+    IT("Spazio colore dei punti iniziali"),
+    NL("Kleurruimte van de startpunten"),
+    RU("Цветовое пространство начальных точек"),
+    TR("Başlangıç noktası renk uzayı"));
+SS_MSG(point_color_gamut_help,
+    EN("Color space of the seed point cloud's colors. Leave unset to follow the "
+       "input images. Set Rec.709 for a cloud left in plain sRGB, such as one "
+       "the built-in SfM wrote with its point colors in sRGB."),
+    JA("初期点群の色の色空間です。未設定なら入力画像に合わせます。内蔵 SfM が点"
+       "の色を sRGB で書いた場合など、素の sRGB のままの点群には Rec.709 を指定"
+       "してください。"),
+    ZH_HANS("初始点云颜色所在的色彩空间。不设置则跟随输入图像。点云保持普通 sRGB "
+            "时（例如内置 SfM 以 sRGB 写出点颜色）请设为 Rec.709。"),
+    ZH_HANT("初始點雲顏色所在的色彩空間。不設定則跟隨輸入影像。點雲保持普通 sRGB "
+            "時（例如內建 SfM 以 sRGB 寫出點顏色）請設為 Rec.709。"),
+    KO("초기 포인트 클라우드 색의 색 공간입니다. 설정하지 않으면 입력 이미지를 "
+       "따릅니다. 내장 SfM이 점 색을 sRGB로 쓴 경우처럼 일반 sRGB로 남은 점 "
+       "구름이라면 Rec.709로 설정하십시오."),
+    DE("Farbraum der Farben der Startpunktwolke. Nicht gesetzt richtet es sich "
+       "nach den Eingabebildern. Rec.709 für eine Wolke in schlichtem sRGB, etwa "
+       "eine, deren Punktfarben das eingebaute SfM in sRGB geschrieben hat."),
+    FR("Espace colorimétrique des couleurs du nuage de points initial. Non "
+       "défini, suit les images d'entrée. Choisir Rec.709 pour un nuage resté "
+       "en sRGB simple, comme celui dont la SfM intégrée a écrit les couleurs "
+       "en sRGB."),
+    ES("Espacio de color de los colores de la nube de puntos inicial. Sin "
+       "definir, sigue a las imágenes de entrada. Elija Rec.709 para una nube "
+       "que quedó en sRGB simple, como una cuyos colores escribió en sRGB la "
+       "SfM integrada."),
+    PT("Espaço de cor das cores da nuvem de pontos inicial. Sem definir, segue "
+       "as imagens de entrada. Escolha Rec.709 para uma nuvem que ficou em sRGB "
+       "simples, como uma cujas cores o SfM integrado escreveu em sRGB."),
+    IT("Spazio colore dei colori della nuvola di punti iniziale. Se non "
+       "impostato, segue le immagini in ingresso. Scegliere Rec.709 per una "
+       "nuvola rimasta in sRGB semplice, come una i cui colori la SfM integrata "
+       "ha scritto in sRGB."),
+    NL("Kleurruimte van de kleuren van de startpuntenwolk. Niet ingesteld volgt "
+       "het de invoerbeelden. Kies Rec.709 voor een wolk die in gewoon sRGB is "
+       "gebleven, zoals een waarvan de ingebouwde SfM de kleuren in sRGB "
+       "schreef."),
+    RU("Цветовое пространство цветов исходного облака точек. Если не задано, "
+       "следует за входными изображениями. Выберите Rec.709 для облака, "
+       "оставшегося в обычном sRGB, например такого, чьи цвета встроенный SfM "
+       "записал в sRGB."),
+    TR("Başlangıç nokta bulutu renklerinin renk uzayı. Ayarlanmazsa girdi "
+       "görüntülerini izler. Sade sRGB'de kalmış bir bulut için, örneğin nokta "
+       "renklerini yerleşik SfM'in sRGB olarak yazdığı bir bulut için Rec.709 "
+       "seçin."));
 
 
 // ===========================================================================
@@ -11354,13 +11478,15 @@ inline constexpr ChoiceText kChoiceText[] = {
     {"cache_images", "gpu",  &choice_gpu},
     {"cache_images", "disk", &choice_disk},
 
-    // `none` is the UNSET value for these four, not a colour space -- Rec.709
+    // `none` is the UNSET value for these six, not a colour space -- Rec.709
     // and `srgb` are the explicit ones. Labelled so the dropdown cannot read
     // as "no gamut" / "no transfer".
     {"image_color_gamut", "none", &choice_from_the_file},
     {"splat_color_gamut", "none", &choice_same_as_input},
     {"image_color_transfer", "none", &choice_srgb_default},
     {"splat_color_transfer", "none", &choice_same_as_input},
+    {"point_color_gamut", "none", &choice_same_as_input},
+    {"point_color_transfer", "none", &choice_same_as_input},
 
     {"random_init", "never",  &choice_never},
     {"random_init", "auto",   &choice_without_points},

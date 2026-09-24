@@ -301,7 +301,9 @@ inline int train_tier_rank(const char* tier) {
     X(std::optional<bool>, splat_color_is_linear, std::nullopt, "colorspace", "basic", "") \
     X(std::string, splat_color_transfer, "", "colorspace", "advanced", "srgb|srgb-clamped|aces|filmic|uncharted2|none") \
     X(std::string, splat_color_gamut, "", "colorspace", "basic", "Rec.709|ACES2065-1|ACEScg|Rec.2020|AdobeRGB|DCI-P3|none") \
-    X(std::optional<bool>, convert_initial_point_cloud_color, std::nullopt, "colorspace", "basic", "") \
+    X(std::optional<bool>, point_color_is_linear, std::nullopt, "colorspace", "basic", "") \
+    X(std::string, point_color_transfer, "", "colorspace", "advanced", "srgb|srgb-clamped|aces|filmic|uncharted2|none") \
+    X(std::string, point_color_gamut, "", "colorspace", "basic", "Rec.709|ACES2065-1|ACEScg|Rec.2020|AdobeRGB|DCI-P3|none") \
                                                                              \
     /* ==== perf -- speed and memory; none of these change the result ==== */\
     X(std::string, cache_images, "disk", "perf", "basic", "cpu|gpu|disk")    \

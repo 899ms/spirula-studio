@@ -124,8 +124,8 @@ struct SfmConfig {
     // is what the detectors and the AI models were trained on.
     std::string image_gamut = "Rec.709";
     bool image_is_linear = false;
-    // "srgb" leaves point colours there; "image" writes them back in the
-    // photographs' space (trainer: convert_initial_point_cloud_color off).
+    // "srgb" leaves point colours there (trainer: point_color_gamut Rec.709);
+    // "image" writes them back in the photographs' space, the trainer's default.
     std::string point_color_space = "srgb";
 
     // Camera setup. The string forms are what the table and the GUI see; the

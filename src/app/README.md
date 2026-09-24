@@ -350,9 +350,9 @@ means, scales, rotations, opacities, DC and SH — goes straight into
 `set_data_3dgs()`; only the layout is re-fitted to this run. Splats past
 `cap_max` are dropped by lowest opacity, the SH past the DC is truncated or
 zero-padded to `sh_degree`, `relative_scale` scales the means and shifts the
-log-scales, and the DC converts to the splat gamut when
-`convert_initial_point_cloud_color` is on (the view-dependent terms ride an
-encoded curve and cannot follow, so they come across as they are).
+log-scales, and the DC converts from the `point_color_*` space to the splat
+space where the two differ (the view-dependent terms ride an encoded curve and
+cannot follow, so they come across as they are).
 
 `--init-ply-add-points` adds the dataset's point cloud **on top** rather than
 replacing it: the PLY goes in first and `append_point_seeds()` fills what is

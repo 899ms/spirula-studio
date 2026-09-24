@@ -96,33 +96,19 @@ ColorResolution resolve_color(const TrainConfig& c) {
     r.image_linear   = c.image_color_is_linear.value_or(false);
     r.image_transfer = colorspace::transfer_or(c.image_color_transfer,
                                                colorspace::Transfer::Srgb);
-    std::optional<bool> convert = c.convert_initial_point_cloud_color;
-    auto declared = [&] { if (!convert.has_value()) convert = true; };
 
-    // Each splat-side half falls back to the images, so declaring only the
-    // input still renders back into the space the input came from.
-    if (unset(c.splat_color_gamut)) {
-        r.splat_gamut = r.image_gamut;
-    } else {
-        r.splat_gamut = resolved_gamut(c.splat_color_gamut);
-        declared();
-    }
+    // Every half not declared falls back to the images: the splats so the
+    // render lands back in the input's space, the points because SfM samples
+    // them from those images.
+    r.splat_gamut = unset(c.splat_color_gamut) ? r.image_gamut
+                                               : resolved_gamut(c.splat_color_gamut);
+    r.splat_linear = c.splat_color_is_linear.value_or(r.image_linear);
+    r.splat_transfer = colorspace::transfer_or(c.splat_color_transfer, r.image_transfer);
 
-    if (c.splat_color_is_linear.has_value()) {
-        r.splat_linear = *c.splat_color_is_linear;
-        declared();
-    } else {
-        r.splat_linear = r.image_linear;
-    }
-
-    if (unset(c.splat_color_transfer)) {
-        r.splat_transfer = r.image_transfer;
-    } else {
-        r.splat_transfer = colorspace::transfer_or(c.splat_color_transfer,
-                                                   r.image_transfer);
-        declared();
-    }
-    r.convert_seed = convert.value_or(false);
+    r.point_gamut = unset(c.point_color_gamut) ? r.image_gamut
+                                               : resolved_gamut(c.point_color_gamut);
+    r.point_linear = c.point_color_is_linear.value_or(r.image_linear);
+    r.point_transfer = colorspace::transfer_or(c.point_color_transfer, r.image_transfer);
     return r;
 }
 
@@ -177,6 +163,37 @@ float scheduled_lr(int step, int max_steps, float lr,
 // ===========================================================================
 // Splat seeding (3dgs branch)
 // ===========================================================================
+
+// Seed colour, point space -> splat space, meeting at the display value both
+// map to. The tone round trip only runs when the curves differ: the clipped
+// ones do not invert.
+class PointToSplat {
+public:
+    explicit PointToSplat(const ColorResolution& c)
+        : c_(c), identity_(c.point_is_splat()),
+          to_709_(gamut_to_rec709(c.point_gamut)),
+          from_709_(invert3x3(gamut_to_rec709(c.splat_gamut))) {}
+
+    void operator()(float col[3]) const {
+        if (identity_) return;
+        for (int d = 0; d < 3; d++)
+            if (!c_.point_linear) col[d] = colorspace::srgb_to_linear(col[d]);
+        colorspace::apply3x3(to_709_, col);
+        if (c_.point_transfer != c_.splat_transfer)
+            for (int d = 0; d < 3; d++)
+                col[d] = colorspace::tone_decode(
+                    colorspace::tone_encode(col[d], c_.point_transfer),
+                    c_.splat_transfer);
+        colorspace::apply3x3(from_709_, col);
+        for (int d = 0; d < 3; d++)
+            if (!c_.splat_linear) col[d] = colorspace::linear_to_srgb(col[d]);
+    }
+
+private:
+    const ColorResolution& c_;
+    bool identity_;
+    Mat3f to_709_, from_709_;
+};
 
 SeedSplats seed_splats(const ColmapPoints3D& pts, const TrainConfig& cfg,
                        const ColorResolution& color) {
@@ -254,22 +271,12 @@ SeedSplats seed_splats(const ColmapPoints3D& pts, const TrainConfig& cfg,
     for (int64_t i = 0; i < num && all_same; i++)
         for (int d = 0; d < 3; d++)
             if (pts.rgb[pick[i]*3 + d] != pts.rgb[pick[0]*3]) { all_same = false; break; }
-    // Rec.709 -> the SPLAT gamut: the seeds feed the renderer, which works in
-    // the splat space. The image gamut only matches it by default.
-    Mat3f to_splat = invert3x3(gamut_to_rec709(color.splat_gamut));
+    const PointToSplat to_splat(color);
     for (int64_t i = 0; i < num; i++) {
         float col[3];
         for (int d = 0; d < 3; d++)
             col[d] = all_same ? uni(rng) : pts.rgb[pick[i]*3 + d] / 255.f;
-        if (color.convert_seed) {
-            // The gamut matrix belongs in linear light, so decode through the
-            // transfer, rotate, and re-encode only if the splats are stored so.
-            for (int d = 0; d < 3; d++)
-                col[d] = colorspace::tone_decode(col[d], color.splat_transfer);
-            colorspace::apply3x3(to_splat, col);
-            if (!color.splat_linear)
-                for (int d = 0; d < 3; d++) col[d] = colorspace::linear_to_srgb(col[d]);
-        }
+        to_splat(col);
         for (int d = 0; d < 3; d++)
             s.features_dc[i*3 + d] = (col[d] - 0.5f) / 0.28209479177387814f;
     }
@@ -317,7 +324,7 @@ SeedSplats seed_splats_from_ply(const std::string& path, const TrainConfig& cfg,
 
     const float rescale = cfg.relative_scale.value_or(1.0f);
     const float log_rescale = std::log(std::max(rescale, 1e-12f));
-    Mat3f to_splat = invert3x3(gamut_to_rec709(color.splat_gamut));
+    const PointToSplat to_splat(color);
 
     for (int64_t i = 0; i < num; i++) {
         const int64_t j = pick[(size_t)i];
@@ -332,20 +339,12 @@ SeedSplats seed_splats_from_ply(const std::string& path, const TrainConfig& cfg,
             s.quats[i*4 + d] = src.quats[j*4 + d] / std::max(qn, 1e-12f);
         s.opacities[i] = src.opacities[j];
 
-        if (color.convert_seed) {
-            float col[3];
-            for (int d = 0; d < 3; d++)
-                col[d] = src.features_dc[j*3 + d] * kSHC0 + 0.5f;
-            for (int d = 0; d < 3; d++) col[d] = colorspace::srgb_to_linear(col[d]);
-            colorspace::apply3x3(to_splat, col);
-            if (!color.splat_linear)
-                for (int d = 0; d < 3; d++) col[d] = colorspace::linear_to_srgb(col[d]);
-            for (int d = 0; d < 3; d++)
-                s.features_dc[i*3 + d] = (col[d] - 0.5f) / kSHC0;
-        } else {
-            for (int d = 0; d < 3; d++)
-                s.features_dc[i*3 + d] = src.features_dc[j*3 + d];
-        }
+        float col[3];
+        for (int d = 0; d < 3; d++)
+            col[d] = src.features_dc[j*3 + d] * kSHC0 + 0.5f;
+        to_splat(col);
+        for (int d = 0; d < 3; d++)
+            s.features_dc[i*3 + d] = (col[d] - 0.5f) / kSHC0;
 
         // A gamut change is linear and the DC carries it; the view-dependent
         // terms ride an encoded curve, so they come across as they are and the

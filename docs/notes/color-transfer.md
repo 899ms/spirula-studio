@@ -102,10 +102,14 @@ the only place the curves are not exact inverses of each other.
 
 ## What else the pair decides
 
-- **Seed colours.** An 8-bit point cloud is display values; they are decoded
-  through the transfer before the gamut matrix and re-encoded only if the
-  splats are stored display-side (`seed_splats`, gated on
-  `--convert-initial-point-cloud-color`).
+- **Seed colours.** The point cloud has its own triple,
+  `--point-color-is-linear` / `-transfer` / `-gamut`, each following the
+  image side when unset, since a reconstruction samples its colours from the
+  photographs. Where it differs from the splat side, `PointToSplat`
+  (`TrainerCore.cpp`) takes each seed to its display value and back out
+  through the splat side; the tone round trip is skipped when the two
+  transfers match, because the clipped curves do not invert. An `--init-ply`
+  DC goes through the same conversion.
 - **The noise background.** `--background-mode noise` draws in display space
   and inverts both halves per pixel, so mid-grey stays mid-grey on screen.
   `--background-match-luminance` first raises the draw to a per-image power,

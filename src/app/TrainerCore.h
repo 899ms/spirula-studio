@@ -51,14 +51,16 @@ Mat3f invert3x3(const Mat3f& m);
 struct ColorResolution {
     std::string splat_gamut;   // "" = Rec.709 / none
     std::string image_gamut;
+    std::string point_gamut;   // the seed cloud's colours
     // Storage encoding and output curve are independent: `*_linear` says
     // whether the buffer holds linear light, `*_transfer` is the curve out of
     // it. See docs/notes/color-transfer.md.
     bool splat_linear  = false;
     bool image_linear  = false;
+    bool point_linear  = false;
     colorspace::Transfer splat_transfer = colorspace::Transfer::Srgb;
     colorspace::Transfer image_transfer = colorspace::Transfer::Srgb;
-    bool convert_seed  = false;  // convert_initial_point_cloud_color resolved
+    colorspace::Transfer point_transfer = colorspace::Transfer::Srgb;
 
     // Whether the render needs the conversion pass at all.
     bool splat_on() const {
@@ -68,6 +70,10 @@ struct ColorResolution {
     bool image_on() const {
         return image_linear || image_transfer != colorspace::Transfer::Srgb ||
                !image_gamut.empty();
+    }
+    bool point_is_splat() const {
+        return point_linear == splat_linear && point_transfer == splat_transfer &&
+               point_gamut == splat_gamut;
     }
 };
 
