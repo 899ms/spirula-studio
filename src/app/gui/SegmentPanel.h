@@ -1,35 +1,23 @@
 #pragma once
 
 // SegmentPanel -- try a mask prompt on one real frame before committing to a
-// run over the whole capture.
-//
-// Masking is the one dataset setting a beginner cannot reason about in the
-// abstract: "people; cars" either catches the thing walking through the shot
-// or it does not, and finding out after a twenty-minute reconstruction is the
-// wrong time. This shows the actual mask, from the actual model, on a frame of
-// the actual input, in about a second per attempt once the checkpoint is
-// loaded -- and it is the same sam::Masker the dataset run uses, so what is on
-// screen is what will be written.
-//
-// Clicks are supported too, which is the only way to prompt a SAM 2 checkpoint
-// (it has no text tower): left-click marks the subject, right-click marks
-// something to exclude. They belong to an object and to the frame they were
-// drawn on -- see MaskClick -- and they are kept in the settings rather than
-// in the panel, because they are prompts for the run and not a preview toy.
-//
-// The model lives on the GPU for as long as the panel is open and is dropped
-// when it closes -- a reconstruction that follows should not be sharing VRAM
-// with a 2 GB backbone that nobody is looking at.
+// run over the whole capture, with the same sam::Masker the run uses, so what
+// is on screen is what will be written. Clicks prompt a SAM 2 checkpoint (no
+// text tower); they belong to an object and a frame (MaskClick) and live in
+// the settings, because they are prompts for the run. The model is dropped
+// when the panel closes, so a reconstruction after it has the VRAM.
 //
 // The same panel edits the input's static stencil (app::FrameStencil): the
-// fisheye border it finds by itself, plus circles and boxes dragged over the
-// picture. That half needs no model at all, and the panel stays usable -- and
-// says so -- when there is none.
+// fitted fisheye border plus shapes drawn with the mask editor's tools
+// (StencilEdit.h). That half needs no model and works when there is none.
 
 #include "app/FrameMask.h"
 #include "app/gui/GlLoader.h"
 #include "app/gui/MaskSettings.h"
 #include "app/gui/PreviewFrames.h"
+#include "app/gui/StencilEdit.h"
+#include "app/gui/StencilPreset.h"
+#include "app/gui/edit/EditTool.h"
 #include "app/gui/mask/Livewire.h"
 #include "app/gui/mask/PathTool.h"
 
@@ -38,6 +26,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace gui {
@@ -62,6 +51,14 @@ public:
     // Frees the GL textures; call while the GL context is current.
     void destroy_gl();
 
+    // Whether the drawn shapes changed since the last call.
+    bool take_shapes_edited() { return std::exchange(_shapes_edited, false); }
+    // The output folder, whose kDatasetStencilDir the Load menu offers.
+    void set_workspace(const std::string& w) { _workspace = w; }
+    // Load menu's "Other file...": the caller owns the file picker.
+    bool take_browse_request() { return std::exchange(_browse_requested, false); }
+    void load_file(app::FrameStencil& stencil, const std::string& path);
+
 private:
     struct Rgb;
     struct Job;
@@ -78,6 +75,13 @@ private:
                     bool& edited);
     void draw_objects(MaskSettings& settings, bool& edited);
     void draw_stencil(app::FrameStencil& stencil, bool& edited);
+    void draw_tools(app::FrameStencil& stencil, bool& edited);
+    void draw_saved_areas(app::FrameStencil& stencil);
+    // Every change to the shapes goes through here, for undo.
+    void change_shapes(app::FrameStencil& stencil, bool& edited);
+    void undo_shapes(app::FrameStencil& stencil, bool redo, bool& edited);
+    // A plain stroke removes; Subtract, the eraser and Ctrl each flip it.
+    bool stroke_removes(bool ctrl) const;
 
     // The stencil as it will be written: the shapes plus, when asked for, the
     // border this panel found, shrunk by the current amount.
@@ -135,9 +139,23 @@ private:
     GLuint _stencil_tex = 0;
     std::string _stencil_key;           // what _stencil_tex was built from
 
-    // ---- the pen tool ----
+    // ---- the drawing tools ----
+    enum class DrawTool { Select, Shape, Eraser, Path };
+    DrawTool _draw = DrawTool::Select;
+    EditTool _tool;                     // Box to Brush, for Shape and Eraser
+    bool _subtract = false;
+    float _brush_pct = 2.0f;            // radius, % of the picture's shorter side
+    StencilHistory _history;
+    std::vector<app::MaskShape> _drag_before;   // the shapes as a drag found them
+    bool _shapes_edited = false;
+    std::vector<StencilPreset> _saved;  // refreshed when the load popup opens
+    std::vector<StencilPreset> _in_dataset;
+    std::string _workspace;
+    bool _browse_requested = false;
+    std::string _save_name;
+    std::string _saved_msg;
+    bool _saved_msg_err = false;
     mask::PathTool _path;
-    bool _path_armed = false;
     std::unique_ptr<mask::Livewire> _livewire;          // UI thread
     std::string _livewire_key;                          // frame it was built for
     std::unique_ptr<mask::Livewire> _livewire_pending;  // guarded by _mu

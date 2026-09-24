@@ -539,6 +539,34 @@ float kept_fraction(const MaskShape& s, int w, int h) {
     return (float)keep / (float)std::max<size_t>(px.size(), 1);
 }
 
+// A round-capped polyline as the union of capsules, measured in units of the
+// stroke's half-width on each axis: the brush becomes a unit circle.
+void fill_stroke(const MaskShape& s, int W, int H, uint8_t* out) {
+    const size_t n = s.pts.size() / 2;
+    if (n == 0 || !(s.rx > 0.0f) || !(s.ry > 0.0f)) return;
+    const float rx = s.rx * (float)W, ry = s.ry * (float)H;
+    const float kx = 1.0f / rx, ky = 1.0f / ry;
+    for (size_t i = 0; i < n; i++) {
+        const size_t j = i + 1 < n ? i + 1 : i;
+        const float ax = s.pts[2 * i] * (float)W, ay = s.pts[2 * i + 1] * (float)H;
+        const float bx = s.pts[2 * j] * (float)W, by = s.pts[2 * j + 1] * (float)H;
+        const int x0 = std::max(0, (int)std::floor(std::min(ax, bx) - rx));
+        const int x1 = std::min(W - 1, (int)std::ceil(std::max(ax, bx) + rx));
+        const int y0 = std::max(0, (int)std::floor(std::min(ay, by) - ry));
+        const int y1 = std::min(H - 1, (int)std::ceil(std::max(ay, by) + ry));
+        const float dx = (bx - ax) * kx, dy = (by - ay) * ky;
+        const float len2 = dx * dx + dy * dy;
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) {
+                const float qx = ((float)x + 0.5f - ax) * kx, qy = ((float)y + 0.5f - ay) * ky;
+                const float t = len2 > 0.0f ? std::clamp((qx * dx + qy * dy) / len2, 0.0f, 1.0f)
+                                            : 0.0f;
+                const float ex = qx - t * dx, ey = qy - t * dy;
+                if (ex * ex + ey * ey <= 1.0f) out[(size_t)y * W + x] = 1;
+            }
+    }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -579,6 +607,19 @@ bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
             out.push_back(s);
             continue;
         }
+        if (kind == "stroke") {
+            s.kind = MaskShape::Kind::Stroke;
+            if (!parse_floats(nums, s.pts) || s.pts.size() < 4 || s.pts.size() % 2 ||
+                !(s.pts[0] > 0.0f) || !(s.pts[1] > 0.0f)) {
+                error = piece;
+                return false;
+            }
+            s.rx = s.pts[0];
+            s.ry = s.pts[1];
+            s.pts.erase(s.pts.begin(), s.pts.begin() + 2);
+            out.push_back(s);
+            continue;
+        }
         float v[4];
         if (!parse_four(nums, v)) {
             error = piece;
@@ -606,10 +647,12 @@ std::string format_mask_shapes(const std::vector<MaskShape>& shapes) {
     char buf[96];
     for (const MaskShape& s : shapes) {
         std::string piece = s.remove ? "-" : "";
-        if (s.kind == MaskShape::Kind::Path) {
-            piece += "path ";
+        if (s.kind == MaskShape::Kind::Path || s.kind == MaskShape::Kind::Stroke) {
+            const bool stroke = s.kind == MaskShape::Kind::Stroke;
+            piece += stroke ? "stroke " : "path ";
+            if (stroke) append_printf(piece, "%.5f,%.5f", s.rx, s.ry);
             for (size_t i = 0; i < s.pts.size(); i++) {
-                std::snprintf(buf, sizeof buf, "%s%.4f", i ? "," : "", s.pts[i]);
+                std::snprintf(buf, sizeof buf, "%s%.4f", i || stroke ? "," : "", s.pts[i]);
                 piece += buf;
             }
         } else {
@@ -671,12 +714,17 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
     }
     const bool base = m.shapes.empty() || m.shapes.front().remove;
 
-    // A path is filled once into its own plane; the pixel loop then reads it
-    // like any other inside test, so the ordering rule is untouched.
+    // A path or stroke is filled once into its own plane; the pixel loop then
+    // reads it like any other inside test, so the ordering rule is untouched.
     std::vector<std::vector<uint8_t>> paths(m.shapes.size());
     std::vector<float> px;
     for (size_t k = 0; k < m.shapes.size(); k++) {
         const MaskShape& s = m.shapes[k];
+        if (s.kind == MaskShape::Kind::Stroke) {
+            paths[k].assign((size_t)width * height, 0);
+            fill_stroke(s, width, height, paths[k].data());
+            continue;
+        }
         if (s.kind != MaskShape::Kind::Path) continue;
         paths[k].assign((size_t)width * height, 0);
         px.resize(s.pts.size());
@@ -697,7 +745,7 @@ bool rasterize_frame_mask(const FrameMask& m, int width, int height,
             for (size_t k = 0; k < m.shapes.size(); k++) {
                 const MaskShape& s = m.shapes[k];
                 bool inside;
-                if (s.kind == MaskShape::Kind::Path) {
+                if (s.kind == MaskShape::Kind::Path || s.kind == MaskShape::Kind::Stroke) {
                     inside = paths[k][(size_t)y * width + x] != 0;
                 } else if (s.kind == MaskShape::Kind::Ellipse) {
                     if (s.rx <= 0.0f || s.ry <= 0.0f) continue;

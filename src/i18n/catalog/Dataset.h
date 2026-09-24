@@ -5931,81 +5931,55 @@ SS_MSG(stencil_shapes,
     TR("Bir alanı kapat"));
 
 SS_MSG(stencil_shapes_help,
-    EN("Add a box or a circle and drag it over what should go -- a watermark, "
-       "a timestamp, the operator at the bottom of the frame. Each one can "
-       "instead keep what is inside it, which is how you draw a lens circle by "
-       "hand."),
-    JA("四角か円を足して、消したいものの上にドラッグしてください。透かし、日時"
-       "表示、画面の下に写り込んだ撮影者などです。逆に内側を残す設定にもでき、"
-       "レンズの円を手で描くときはこちらを使います。"),
-    ZH_HANS("加一个方框或圆，拖到要去掉的东西上——水印、时间戳、画面下方的拍摄者。"
-            "每个也可以反过来只保留内部，手工画镜头圆时就这么用。"),
-    ZH_HANT("加一個方框或圓，拖到要去掉的東西上——浮水印、時間戳、畫面下方的拍攝者。"
-            "每個也可以反過來只保留內部，手工畫鏡頭圓時就這麼用。"),
-    KO("상자나 원을 더해 없앨 것 위로 끌어다 놓으세요. 워터마크, 날짜 표시, 화면 "
-       "아래에 든 촬영자 같은 것들입니다. 반대로 안쪽만 남기게도 할 수 있는데, "
-       "렌즈 원을 손으로 그릴 때 그렇게 씁니다."),
-    DE("Fügen Sie ein Rechteck oder einen Kreis hinzu und ziehen Sie es über "
-       "das, was weg soll -- ein Wasserzeichen, eine Zeitangabe, den Filmenden "
-       "am unteren Bildrand. Jede Form kann stattdessen behalten, was in ihr "
-       "liegt; so zeichnet man einen Objektivkreis von Hand."),
-    FR("Ajoutez un rectangle ou un cercle et faites-le glisser sur ce qui doit "
-       "disparaître : un filigrane, un horodatage, l'opérateur en bas de "
-       "l'image. Chaque forme peut au contraire garder son intérieur, ce qui "
-       "permet de tracer un cercle-image à la main."),
-    ES("Añada un rectángulo o un círculo y arrástrelo sobre lo que debe "
-       "irse: una marca de agua, una fecha, el operador al pie del "
-       "fotograma. Cada forma puede en cambio conservar su interior, que es "
-       "como se dibuja a mano un círculo de objetivo."),
-    PT("Acrescente um retângulo ou um círculo e arraste-o sobre o que deve "
-       "sair: uma marca d'água, uma data, o operador no pé do quadro. Cada "
-       "forma pode, ao contrário, manter o seu interior, e é assim que se "
-       "desenha um círculo de lente à mão."),
-    IT("Aggiunga un rettangolo o un cerchio e lo trascini su ciò che deve "
-       "sparire: una filigrana, una data, l'operatore in fondo al fotogramma. "
-       "Ogni forma può invece tenere il proprio interno, ed è così che si "
-       "disegna a mano un cerchio dell'obiettivo."),
-    NL("Voeg een rechthoek of cirkel toe en sleep die over wat weg moet: een "
-       "watermerk, een datumstempel, de filmer onderaan het beeld. Elke vorm "
-       "kan juist ook houden wat erbinnen ligt; zo teken je een lenscirkel met "
-       "de hand."),
-    RU("Добавьте прямоугольник или круг и перетащите его на то, что должно "
-       "уйти: водяной знак, дату, оператора внизу кадра. Любую фигуру можно "
-       "наоборот заставить сохранять своё нутро -- так круг объектива рисуют "
-       "вручную."),
-    TR("Bir dikdörtgen ya da daire ekleyip gitmesi gerekenin üstüne sürükleyin: "
-       "bir filigran, bir tarih damgası, karenin altındaki çekimci. Her biri "
-       "tersine içini tutabilir de; mercek dairesi elle böyle çizilir."));
-
-SS_MSG(stencil_add_box,
-    EN("Add a box"),
-    JA("四角を足す"),
-    ZH_HANS("加方框"),
-    ZH_HANT("加方框"),
-    KO("상자 더하기"),
-    DE("Rechteck"),
-    FR("Rectangle"),
-    ES("Rectángulo"),
-    PT("Retângulo"),
-    IT("Rettangolo"),
-    NL("Rechthoek"),
-    RU("Прямоугольник"),
-    TR("Dikdörtgen ekle"));
-
-SS_MSG(stencil_add_circle,
-    EN("Add a circle"),
-    JA("円を足す"),
-    ZH_HANS("加圆"),
-    ZH_HANT("加圓"),
-    KO("원 더하기"),
-    DE("Kreis"),
-    FR("Cercle"),
-    ES("Círculo"),
-    PT("Círculo"),
-    IT("Cerchio"),
-    NL("Cirkel"),
-    RU("Круг"),
-    TR("Daire ekle"));
+    EN("Draw over what should go -- a watermark, a timestamp, the operator at "
+       "the bottom of the frame -- with the tools above the picture. Subtract, "
+       "or Ctrl, draws what to keep instead, which is how you draw a lens "
+       "circle by hand. Ctrl+Z undoes."),
+    JA("消したいもの（透かし、日時表示、画面の下に写り込んだ撮影者など）を、"
+       "画像の上のツールで塗ってください。削除または Ctrl で描くと、逆に残す"
+       "範囲になります。レンズの円を手で描くときはこちらを使います。Ctrl+Z で"
+       "元に戻します。"),
+    ZH_HANS("用图片上方的工具画出要去掉的东西——水印、时间戳、画面下方的拍摄者。"
+            "选择减去或按住 Ctrl 画的则是要保留的部分，手工画镜头圆时就这么用。"
+            "Ctrl+Z 撤销。"),
+    ZH_HANT("用圖片上方的工具畫出要去掉的東西——浮水印、時間戳、畫面下方的拍攝者。"
+            "選擇減去或按住 Ctrl 畫的則是要保留的部分，手工畫鏡頭圓時就這麼用。"
+            "Ctrl+Z 復原。"),
+    KO("사진 위의 도구로 없앨 것을 그리세요. 워터마크, 날짜 표시, 화면 아래에 "
+       "든 촬영자 같은 것들입니다. 빼기나 Ctrl로 그리면 반대로 남길 부분이 "
+       "되는데, 렌즈 원을 손으로 그릴 때 그렇게 씁니다. Ctrl+Z로 되돌립니다."),
+    DE("Mit den Werkzeugen über dem Bild übermalen, was weg soll -- ein "
+       "Wasserzeichen, eine Zeitangabe, den Filmenden am unteren Bildrand. "
+       "Abziehen oder Strg zeichnet stattdessen, was bleibt; so zeichnet man "
+       "einen Objektivkreis von Hand. Strg+Z macht rückgängig."),
+    FR("Dessinez sur ce qui doit disparaître -- un filigrane, un horodatage, "
+       "l'opérateur en bas de l'image -- avec les outils au-dessus de l'image. "
+       "Soustraire, ou Ctrl, dessine au contraire ce qui reste ; c'est ainsi "
+       "qu'on trace un cercle-image à la main. Ctrl+Z annule."),
+    ES("Dibuje sobre lo que debe irse -- una marca de agua, una fecha, el "
+       "operador al pie del fotograma -- con las herramientas sobre la imagen. "
+       "Restar, o Ctrl, dibuja en cambio lo que se conserva; así se dibuja a "
+       "mano un círculo de objetivo. Ctrl+Z deshace."),
+    PT("Desenhe sobre o que deve sair -- uma marca d'água, uma data, o "
+       "operador no pé do quadro -- com as ferramentas acima da imagem. "
+       "Subtrair, ou Ctrl, desenha ao contrário o que fica; é assim que se "
+       "desenha um círculo de lente à mão. Ctrl+Z desfaz."),
+    IT("Disegna sopra ciò che deve sparire -- una filigrana, una data, "
+       "l'operatore in fondo al fotogramma -- con gli strumenti sopra "
+       "l'immagine. Sottrai, o Ctrl, disegna invece ciò che resta; è così che "
+       "si disegna a mano un cerchio dell'obiettivo. Ctrl+Z annulla."),
+    NL("Teken met het gereedschap boven de afbeelding over wat weg moet -- een "
+       "watermerk, een datumstempel, de filmer onderaan het beeld. Aftrekken, "
+       "of Ctrl, tekent juist wat blijft; zo teken je een lenscirkel met de "
+       "hand. Ctrl+Z maakt ongedaan."),
+    RU("Закрасьте инструментами над картинкой то, что должно уйти: водяной "
+       "знак, дату, оператора внизу кадра. «Вычесть» или Ctrl рисует, наоборот, "
+       "то, что остаётся, -- так круг объектива рисуют вручную. Ctrl+Z "
+       "отменяет."),
+    TR("Gitmesi gerekeni -- bir filigran, bir tarih damgası, karenin altındaki "
+       "çekimci -- resmin üstündeki araçlarla boyayın. Çıkar veya Ctrl ise "
+       "tersine kalacak yeri çizer; mercek dairesi elle böyle çizilir. Ctrl+Z "
+       "geri alır."));
 
 SS_MSG(stencil_shape_box,
     EN("Box {0}"),       JA("四角 {0}"),      ZH_HANS("方框 {0}"),  ZH_HANT("方框 {0}"),
@@ -6025,22 +5999,265 @@ SS_MSG(stencil_shape_path,
     ES("Trazado {0}"),    PT("Traçado {0}"),    IT("Tracciato {0}"),
     NL("Pad {0}"),        RU("Контур {0}"),     TR("Yol {0}"));
 
-// Keeps a verb in every language, unlike stencil_add_box/circle -- a bare
-// noun ("Pfad", "chemin") reads as a file path in a UI, not a draw action.
-SS_MSG(stencil_add_path,
-    EN("Draw a path"),
-    JA("パスを描く"),
-    ZH_HANS("画一条路径"),
-    ZH_HANT("畫一條路徑"),
-    KO("패스 그리기"),
-    DE("Pfad zeichnen"),
-    FR("Tracer un chemin"),
-    ES("Dibujar un trazado"),
-    PT("Desenhar um traçado"),
-    IT("Disegna un tracciato"),
-    NL("Pad tekenen"),
-    RU("Нарисовать контур"),
-    TR("Yol çiz"));
+SS_MSG(stencil_shape_stroke,
+    EN("Brush stroke {0}"), JA("ブラシ {0}"),   ZH_HANS("笔刷 {0}"),  ZH_HANT("筆刷 {0}"),
+    KO("브러시 {0}"),       DE("Pinselstrich {0}"), FR("Trait de pinceau {0}"),
+    ES("Trazo de pincel {0}"), PT("Pincelada {0}"), IT("Pennellata {0}"),
+    NL("Penseelstreek {0}"), RU("Мазок кисти {0}"), TR("Fırça darbesi {0}"));
+
+SS_MSG(stencil_tool_select,
+    EN("Select"),        JA("選択"),          ZH_HANS("选择"),     ZH_HANT("選取"),
+    KO("선택"),           DE("Auswahl"),       FR("Sélection"),
+    ES("Seleccionar"),   PT("Selecionar"),    IT("Seleziona"),
+    NL("Selecteren"),    RU("Выбор"),         TR("Seç"));
+
+SS_MSG(stencil_tool_select_help,
+    EN("Clicks on the picture prompt the model, as without a tool. Pick a shape "
+       "in the list to move or resize it."),
+    JA("画像のクリックはツールなしのときと同じくモデルへの指示になります。一覧で図形を"
+       "選ぶと、移動や大きさの変更ができます。"),
+    ZH_HANS("在图片上单击会像不用工具时一样提示模型。在列表中选中一个图形即可移动或"
+            "改变大小。"),
+    ZH_HANT("在圖片上點一下會像不用工具時一樣提示模型。在清單中選取一個圖形即可移動或"
+            "改變大小。"),
+    KO("사진을 클릭하면 도구가 없을 때처럼 모델에 지시합니다. 목록에서 도형을 고르면 "
+       "옮기거나 크기를 바꿀 수 있습니다."),
+    DE("Klicks ins Bild geben dem Modell Hinweise, wie ohne Werkzeug. Eine Form in "
+       "der Liste wählen, um sie zu verschieben oder ihre Größe zu ändern."),
+    FR("Les clics sur l'image guident le modèle, comme sans outil. Choisissez une "
+       "forme dans la liste pour la déplacer ou la redimensionner."),
+    ES("Los clics en la imagen guían al modelo, como sin herramienta. Elija una "
+       "forma en la lista para moverla o cambiar su tamaño."),
+    PT("Os cliques na imagem orientam o modelo, como sem ferramenta. Escolha uma "
+       "forma na lista para movê-la ou redimensioná-la."),
+    IT("I clic sull'immagine guidano il modello, come senza strumento. Scegli una "
+       "forma nell'elenco per spostarla o ridimensionarla."),
+    NL("Klikken op de afbeelding sturen het model, zoals zonder gereedschap. Kies "
+       "een vorm in de lijst om hem te verplaatsen of te vergroten."),
+    RU("Щелчки по картинке подсказывают модели, как и без инструмента. Выберите "
+       "фигуру в списке, чтобы сдвинуть её или изменить размер."),
+    TR("Resme tıklamak, araç yokken olduğu gibi modele ipucu verir. Taşımak veya "
+       "boyutlandırmak için listeden bir biçim seçin."));
+
+SS_MSG(stencil_brush_size,
+    EN("Brush: {0}%"),   JA("ブラシ: {0}%"),  ZH_HANS("笔刷：{0}%"), ZH_HANT("筆刷：{0}%"),
+    KO("브러시: {0}%"),   DE("Pinsel: {0} %"), FR("Pinceau : {0} %"),
+    ES("Pincel: {0} %"), PT("Pincel: {0}%"),  IT("Pennello: {0}%"),
+    NL("Penseel: {0}%"), RU("Кисть: {0}%"),   TR("Fırça: %{0}"));
+
+SS_MSG(stencil_brush_size_help,
+    EN("The brush and eraser radius, as a share of the picture's shorter side, so "
+       "it means the same at any resolution. [ and ] step it."),
+    JA("ブラシと消しゴムの半径で、画像の短い辺に対する割合です。解像度が違っても"
+       "同じ意味になります。[ と ] で変わります。"),
+    ZH_HANS("画笔和橡皮擦的半径，按图片短边的比例计，所以在任何分辨率下含义相同。"
+            "[ 和 ] 可调整。"),
+    ZH_HANT("筆刷和橡皮擦的半徑，按圖片短邊的比例計，所以在任何解析度下含義相同。"
+            "[ 和 ] 可調整。"),
+    KO("브러시와 지우개의 반지름으로, 사진 짧은 변에 대한 비율이라 어떤 해상도에서도 "
+       "같은 뜻입니다. [ 와 ] 로 바꿉니다."),
+    DE("Radius von Pinsel und Radierer als Anteil der kürzeren Bildseite, also bei "
+       "jeder Auflösung gleich. [ und ] ändern ihn."),
+    FR("Le rayon du pinceau et de la gomme, en part du petit côté de l'image, donc "
+       "identique à toute résolution. [ et ] le modifient."),
+    ES("El radio del pincel y del borrador, como parte del lado corto de la imagen, "
+       "así que significa lo mismo a cualquier resolución. [ y ] lo cambian."),
+    PT("O raio do pincel e da borracha, como fração do lado menor da imagem, por "
+       "isso vale o mesmo em qualquer resolução. [ e ] o alteram."),
+    IT("Il raggio di pennello e gomma, come quota del lato corto dell'immagine, "
+       "quindi uguale a ogni risoluzione. [ e ] lo cambiano."),
+    NL("De straal van penseel en gum, als deel van de korte zijde van de afbeelding, "
+       "dus gelijk bij elke resolutie. [ en ] veranderen hem."),
+    RU("Радиус кисти и ластика как доля короткой стороны картинки, поэтому он "
+       "одинаков при любом разрешении. [ и ] меняют его."),
+    TR("Fırça ve silginin yarıçapı, resmin kısa kenarının bir payı olarak; bu yüzden "
+       "her çözünürlükte aynıdır. [ ve ] değiştirir."));
+
+SS_MSG(stencil_saved_areas,
+    EN("Saved drawn areas"),
+    JA("保存した描画範囲"),
+    ZH_HANS("已保存的绘制区域"),
+    ZH_HANT("已儲存的繪製區域"),
+    KO("저장한 그린 영역"),
+    DE("Gespeicherte Zeichnungen"),
+    FR("Zones dessinées enregistrées"),
+    ES("Áreas dibujadas guardadas"),
+    PT("Áreas desenhadas salvas"),
+    IT("Aree disegnate salvate"),
+    NL("Opgeslagen getekende gebieden"),
+    RU("Сохранённые области"),
+    TR("Kayıtlı çizili alanlar"));
+
+SS_MSG(stencil_load,
+    EN("Load..."),       JA("読み込む..."),   ZH_HANS("载入..."),   ZH_HANT("載入..."),
+    KO("불러오기..."),    DE("Laden..."),      FR("Charger..."),
+    ES("Cargar..."),     PT("Carregar..."),   IT("Carica..."),
+    NL("Laden..."),      RU("Загрузить..."),  TR("Yükle..."));
+
+SS_MSG(stencil_save,
+    EN("Save..."),       JA("保存..."),       ZH_HANS("保存..."),   ZH_HANT("儲存..."),
+    KO("저장..."),        DE("Speichern..."),  FR("Enregistrer..."),
+    ES("Guardar..."),    PT("Salvar..."),     IT("Salva..."),
+    NL("Opslaan..."),    RU("Сохранить..."),  TR("Kaydet..."));
+
+SS_MSG(stencil_save_help,
+    EN("Keep what is drawn here, without the fitted lens circle, as an SVG file in "
+       "normalized coordinates. A saved set can be loaded onto another input, and "
+       "picked on the dataset screen for every input and for dataset presets."),
+    JA("ここで描いたもの（検出したレンズの円は含みません）を、正規化座標の SVG "
+       "ファイルとして保存します。保存したものは別の入力に読み込めるほか、データ"
+       "セット画面で全入力とデータセットのプリセットに使えます。"),
+    ZH_HANS("把这里画的内容（不含检测到的镜头圆）保存为归一化坐标的 SVG 文件。"
+            "保存后可以载入到其他输入，也可以在数据集界面中用于所有输入和数据集预设。"),
+    ZH_HANT("把這裡畫的內容（不含偵測到的鏡頭圓）儲存為正規化座標的 SVG 檔案。"
+            "儲存後可以載入到其他輸入，也可以在資料集畫面中用於所有輸入和資料集預設。"),
+    KO("여기서 그린 것을(찾아낸 렌즈 원은 빼고) 정규화 좌표의 SVG 파일로 저장합니다. "
+       "저장한 것은 다른 입력에 불러올 수 있고, 데이터셋 화면에서 모든 입력과 데이터셋 "
+       "프리셋에 쓸 수 있습니다."),
+    DE("Das hier Gezeichnete ohne den erkannten Objektivkreis als SVG-Datei in "
+       "normierten Koordinaten speichern. Gespeichertes lässt sich auf eine andere "
+       "Eingabe laden und im Datensatz-Bildschirm für alle Eingaben und für "
+       "Datensatz-Voreinstellungen wählen."),
+    FR("Garder ce qui est dessiné ici, sans le cercle d'objectif détecté, dans un "
+       "fichier SVG en coordonnées normalisées. Un ensemble enregistré se charge sur "
+       "une autre entrée et se choisit dans l'écran du jeu de données pour toutes "
+       "les entrées et pour les préréglages."),
+    ES("Guardar lo dibujado aquí, sin el círculo de objetivo detectado, como archivo "
+       "SVG en coordenadas normalizadas. Lo guardado se puede cargar en otra entrada "
+       "y elegir en la pantalla del conjunto de datos para todas las entradas y los "
+       "ajustes predefinidos."),
+    PT("Guardar o que foi desenhado aqui, sem o círculo de lente detectado, como "
+       "arquivo SVG em coordenadas normalizadas. O que foi salvo pode ser carregado "
+       "em outra entrada e escolhido na tela do conjunto de dados para todas as "
+       "entradas e para as predefinições."),
+    IT("Salva ciò che è disegnato qui, senza il cerchio dell'obiettivo rilevato, "
+       "come file SVG in coordinate normalizzate. Un insieme salvato si carica su "
+       "un altro input e si sceglie nella schermata del dataset per tutti gli input "
+       "e per i preset."),
+    NL("Bewaar wat hier getekend is, zonder de gevonden lenscirkel, als SVG-bestand "
+       "in genormaliseerde coördinaten. Een opgeslagen set kun je op een andere "
+       "invoer laden en op het datasetscherm kiezen voor alle invoer en voor "
+       "datasetvoorinstellingen."),
+    RU("Сохранить нарисованное здесь, без найденного круга объектива, в файл SVG в "
+       "нормированных координатах. Сохранённое можно загрузить на другой вход и "
+       "выбрать на экране набора данных для всех входов и для пресетов."),
+    TR("Burada çizileni, bulunan mercek dairesi olmadan, normalize koordinatlarda "
+       "bir SVG dosyası olarak sakla. Kaydedilen, başka bir girdiye yüklenebilir ve "
+       "veri kümesi ekranında tüm girdiler ve ön ayarlar için seçilebilir."));
+
+SS_MSG(stencil_saved_as,
+    EN("Saved: {0}"),    JA("保存しました: {0}"), ZH_HANS("已保存：{0}"), ZH_HANT("已儲存：{0}"),
+    KO("저장함: {0}"),    DE("Gespeichert: {0}"), FR("Enregistré : {0}"),
+    ES("Guardado: {0}"), PT("Salvo: {0}"),     IT("Salvato: {0}"),
+    NL("Opgeslagen: {0}"), RU("Сохранено: {0}"), TR("Kaydedildi: {0}"));
+
+SS_MSG(stencil_save_failed,
+    EN("Could not save: {0}"),     JA("保存できませんでした: {0}"),
+    ZH_HANS("无法保存：{0}"),       ZH_HANT("無法儲存：{0}"),
+    KO("저장할 수 없습니다: {0}"), DE("Speichern fehlgeschlagen: {0}"),
+    FR("Enregistrement impossible : {0}"), ES("No se pudo guardar: {0}"),
+    PT("Não foi possível salvar: {0}"), IT("Impossibile salvare: {0}"),
+    NL("Opslaan mislukt: {0}"),    RU("Не удалось сохранить: {0}"),
+    TR("Kaydedilemedi: {0}"));
+
+SS_MSG(stencil_load_failed,
+    EN("Could not read drawn areas: {0}"),   JA("描画範囲を読み込めません: {0}"),
+    ZH_HANS("无法读取绘制区域：{0}"),         ZH_HANT("無法讀取繪製區域：{0}"),
+    KO("그린 영역을 읽을 수 없습니다: {0}"),  DE("Zeichnung nicht lesbar: {0}"),
+    FR("Zones dessinées illisibles : {0}"),  ES("No se pudieron leer las áreas: {0}"),
+    PT("Não foi possível ler as áreas: {0}"), IT("Impossibile leggere le aree: {0}"),
+    NL("Getekende gebieden onleesbaar: {0}"), RU("Не удалось прочитать области: {0}"),
+    TR("Çizili alanlar okunamadı: {0}"));
+
+SS_MSG(stencil_in_dataset,
+    EN("In this dataset"),     JA("このデータセット内"),   ZH_HANS("此数据集中"),
+    ZH_HANT("此資料集中"),      KO("이 데이터셋 안"),       DE("In diesem Datensatz"),
+    FR("Dans ce jeu de données"), ES("En este conjunto de datos"),
+    PT("Neste conjunto de dados"), IT("In questo dataset"), NL("In deze dataset"),
+    RU("В этом наборе данных"), TR("Bu veri kümesinde"));
+
+SS_MSG(stencil_other_file,
+    EN("Other file..."),       JA("ほかのファイル..."),    ZH_HANS("其他文件..."),
+    ZH_HANT("其他檔案..."),     KO("다른 파일..."),         DE("Andere Datei..."),
+    FR("Autre fichier..."),    ES("Otro archivo..."),      PT("Outro arquivo..."),
+    IT("Altro file..."),       NL("Ander bestand..."),     RU("Другой файл..."),
+    TR("Başka dosya..."));
+
+SS_MSG(stencil_pick_file,
+    EN("Load drawn areas"),    JA("描画範囲を読み込む"),   ZH_HANS("载入绘制区域"),
+    ZH_HANT("載入繪製區域"),    KO("그린 영역 불러오기"),   DE("Zeichnung laden"),
+    FR("Charger des zones dessinées"), ES("Cargar áreas dibujadas"),
+    PT("Carregar áreas desenhadas"), IT("Carica aree disegnate"),
+    NL("Getekende gebieden laden"), RU("Загрузить области"), TR("Çizili alanları yükle"));
+
+SS_MSG(stencil_autosaved,
+    EN("Drawn areas kept with the dataset: {0}"),
+    JA("描画範囲をデータセットと一緒に保存しました: {0}"),
+    ZH_HANS("绘制区域已随数据集保存：{0}"),
+    ZH_HANT("繪製區域已隨資料集儲存：{0}"),
+    KO("그린 영역을 데이터셋과 함께 저장했습니다: {0}"),
+    DE("Zeichnung beim Datensatz gespeichert: {0}"),
+    FR("Zones dessinées conservées avec le jeu de données : {0}"),
+    ES("Áreas dibujadas guardadas con el conjunto de datos: {0}"),
+    PT("Áreas desenhadas guardadas com o conjunto de dados: {0}"),
+    IT("Aree disegnate salvate con il dataset: {0}"),
+    NL("Getekende gebieden bij de dataset bewaard: {0}"),
+    RU("Области сохранены вместе с набором данных: {0}"),
+    TR("Çizili alanlar veri kümesiyle birlikte saklandı: {0}"));
+
+SS_MSG(stencil_areas_preset,
+    EN("Drawn areas"),   JA("描画範囲"),      ZH_HANS("绘制区域"),  ZH_HANT("繪製區域"),
+    KO("그린 영역"),      DE("Zeichnung"),     FR("Zones dessinées"),
+    ES("Áreas dibujadas"), PT("Áreas desenhadas"), IT("Aree disegnate"),
+    NL("Getekende gebieden"), RU("Области"),   TR("Çizili alanlar"));
+
+SS_MSG(stencil_areas_per_input,
+    EN("As drawn on each input"),  JA("入力ごとに描いたとおり"),
+    ZH_HANS("按每个输入各自绘制"),  ZH_HANT("按每個輸入各自繪製"),
+    KO("입력마다 그린 대로"),       DE("Wie je Eingabe gezeichnet"),
+    FR("Tel que dessiné sur chaque entrée"), ES("Como se dibujó en cada entrada"),
+    PT("Como desenhado em cada entrada"), IT("Come disegnato su ogni input"),
+    NL("Zoals per invoer getekend"), RU("Как нарисовано на каждом входе"),
+    TR("Her girdide çizildiği gibi"));
+
+SS_MSG(stencil_areas_preset_help,
+    EN("A saved set of drawn areas, drawn on every input in place of what each "
+       "has, and kept in a dataset preset so a batch run gets it too. Save one "
+       "from Try the mask..."),
+    JA("保存した描画範囲を、各入力のものに代えてすべての入力に描きます。データ"
+       "セットのプリセットにも保存されるので、バッチ処理でも使われます。保存は"
+       "「マスクを試す…」から行います。"),
+    ZH_HANS("一组已保存的绘制区域，会替换每个输入原有的内容画到所有输入上，并随数据集"
+            "预设一起保存，批处理也会用到。在“试一下蒙版…”中保存。"),
+    ZH_HANT("一組已儲存的繪製區域，會取代每個輸入原有的內容畫到所有輸入上，並隨資料集"
+            "預設一起儲存，批次處理也會用到。在「試一下遮罩…」中儲存。"),
+    KO("저장한 그린 영역을 각 입력에 있던 것 대신 모든 입력에 그립니다. 데이터셋 "
+       "프리셋에도 저장되어 일괄 처리에도 쓰입니다. '마스크 시험해 보기…'에서 "
+       "저장합니다."),
+    DE("Eine gespeicherte Zeichnung, auf jede Eingabe statt deren eigener gezeichnet "
+       "und in einer Datensatz-Voreinstellung mitgespeichert, damit auch ein "
+       "Stapellauf sie bekommt. Gespeichert wird unter „Maske ausprobieren …“."),
+    FR("Un ensemble enregistré de zones dessinées, tracé sur chaque entrée à la "
+       "place du sien, et conservé dans le préréglage du jeu de données pour qu'un "
+       "traitement par lots l'ait aussi. On l'enregistre depuis « Essayer le masque… »."),
+    ES("Un conjunto guardado de áreas dibujadas, trazado en cada entrada en lugar "
+       "del suyo y guardado en el ajuste predefinido para que un lote también lo "
+       "use. Se guarda desde «Probar la máscara…»."),
+    PT("Um conjunto salvo de áreas desenhadas, traçado em cada entrada no lugar do "
+       "seu e guardado na predefinição do conjunto de dados, para que um lote "
+       "também o use. Salve-o em «Testar a máscara…»."),
+    IT("Un insieme salvato di aree disegnate, tracciato su ogni input al posto del "
+       "suo e conservato nel preset del dataset, così anche un'elaborazione in "
+       "batch lo usa. Si salva da «Prova la maschera…»."),
+    NL("Een opgeslagen set getekende gebieden, op elke invoer getekend in plaats "
+       "van de eigen, en bewaard in een datasetvoorinstelling zodat een batch hem "
+       "ook krijgt. Opslaan doe je via ‘Masker uitproberen…’."),
+    RU("Сохранённые области, нарисованные на каждом входе вместо его собственных и "
+       "хранящиеся в пресете набора данных, чтобы их получил и пакетный запуск. "
+       "Сохраняются в окне «Проверить маску…»."),
+    TR("Kayıtlı bir çizili alan seti; her girdiye kendi çiziminin yerine çizilir ve "
+       "veri kümesi ön ayarında saklanır, böylece toplu işlem de onu alır. “Maskeyi "
+       "dene…” penceresinden kaydedilir."));
 
 SS_MSG(stencil_add_path_help,
     EN("Click along an edge on the picture to drop anchors; the path snaps to the edge "

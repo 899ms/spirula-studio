@@ -1357,31 +1357,42 @@ SS_MSG(mh_out,
 
 SS_MSG(mh_shape,
     EN("use these shapes instead of looking for a border; ';' separates them "
-       "and a leading '-' cuts one out again"),
+       "and a leading '-' cuts one out again. A path ending in .svg reads the "
+       "shapes the GUI saves"),
     JA("枠を探す代わりにこの図形を使います。';' で区切り、先頭の '-' はその"
-       "図形の内側を逆に取り除きます"),
+       "図形の内側を逆に取り除きます。.svg で終わるパスは GUI が保存した"
+       "図形を読み込みます"),
     ZH_HANS("用这些图形，而不是去找边框；用 ';' 分隔，开头的 '-' 表示反过来去掉"
-            "该图形内部"),
+            "该图形内部。以 .svg 结尾的路径会读取 GUI 保存的图形"),
     ZH_HANT("用這些圖形，而不是去找邊框；用 ';' 分隔，開頭的 '-' 表示反過來去掉"
-            "該圖形內部"),
+            "該圖形內部。以 .svg 結尾的路徑會讀取 GUI 儲存的圖形"),
     KO("테두리를 찾는 대신 이 도형을 씁니다. ';' 로 나누고, 앞의 '-' 는 그 "
-       "도형 안쪽을 도로 없앱니다"),
+       "도형 안쪽을 도로 없앱니다. .svg 로 끝나는 경로는 GUI 가 저장한 "
+       "도형을 읽습니다"),
     DE("diese Formen benutzen statt einen Rand zu suchen; ';' trennt sie, ein "
-       "vorangestelltes '-' schneidet eine wieder heraus"),
+       "vorangestelltes '-' schneidet eine wieder heraus. Ein Pfad auf .svg "
+       "liest die Formen, die die GUI speichert"),
     FR("utiliser ces formes au lieu de chercher un bord ; ';' les sépare, un "
-       "'-' en tête en retire une au contraire"),
+       "'-' en tête en retire une au contraire. Un chemin en .svg lit les "
+       "formes que l'interface enregistre"),
     ES("usar estas formas en vez de buscar un borde; ';' las separa y un '-' "
-       "delante recorta una en lugar de conservarla"),
+       "delante recorta una en lugar de conservarla. Una ruta terminada en .svg "
+       "lee las formas que guarda la interfaz"),
     PT("usar estas formas em vez de procurar uma borda; ';' as separa e um '-' "
-       "à frente recorta uma em vez de mantê-la"),
+       "à frente recorta uma em vez de mantê-la. Um caminho terminado em .svg "
+       "lê as formas que a interface salva"),
     IT("usare queste forme invece di cercare un bordo; ';' le separa e un '-' "
-       "davanti ne ritaglia una invece di tenerla"),
+       "davanti ne ritaglia una invece di tenerla. Un percorso che termina in "
+       ".svg legge le forme salvate dall'interfaccia"),
     NL("deze vormen gebruiken in plaats van een rand te zoeken; ';' scheidt "
-       "ze, een '-' ervoor snijdt er juist een weg"),
+       "ze, een '-' ervoor snijdt er juist een weg. Een pad op .svg leest de "
+       "vormen die de GUI opslaat"),
     RU("взять эти фигуры вместо поиска края; ';' разделяет их, а '-' в начале "
-       "наоборот вырезает фигуру"),
+       "наоборот вырезает фигуру. Путь, оканчивающийся на .svg, читает фигуры, "
+       "сохранённые в интерфейсе"),
     TR("kenar aramak yerine bu biçimleri kullan; ';' ayırır, baştaki '-' ise "
-       "biçimin içini tersine keser"));
+       "biçimin içini tersine keser. .svg ile biten bir yol, arayüzün kaydettiği "
+       "biçimleri okur"));
 
 SS_MSG(mh_shrink,
     EN("pull the found boundary inwards, as a fraction of its radius "

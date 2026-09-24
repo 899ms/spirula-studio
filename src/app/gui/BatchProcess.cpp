@@ -2,6 +2,8 @@
 
 #include "app/gui/BatchProcess.h"
 
+#include "app/gui/StencilPreset.h"
+
 #include "app/AppPaths.h"
 #include "app/TrainerCore.h"
 #include "app/gui/SourceList.h"
@@ -676,6 +678,19 @@ bool batch_build_dataset_job(const BatchRow& row, const std::string& ffmpeg_exe,
             if (pano.size <= 0) reset_pano_size(sources, pano);
             settings.sfm.camera_mode = capture.sfm.camera_mode;
             settings.colmap.camera_mode = capture.colmap.camera_mode;
+        }
+    }
+    // The screen draws these on each input; a batch row has only the preset.
+    if (settings.border_enable) {
+        std::vector<app::MaskShape> shapes;
+        if (!settings.frame_shapes.empty() &&
+            !load_stencil_preset(settings.frame_shapes, shapes, error)) {
+            error = "drawn areas not found: " + error;
+            return false;
+        }
+        for (PrepInput& in : sources) {
+            in.stencil.detect_border = true;
+            in.stencil.mask.shapes = shapes;
         }
     }
     resolve_source_lenses(sources, settings.sfm, settings.colmap);

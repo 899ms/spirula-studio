@@ -111,7 +111,7 @@ private:
         BatchMeshPresetFile, BatchSourceImages, BatchSourceVideo, BatchModel,
         MeshSource, MeshPhotos, MeshOutput, AddSplatFile, SplatFolder,
         EditSaveFile, EditSaveFolder, RenderProjectSave, RenderProjectOpen,
-        RenderOutput, RenderAddModel
+        RenderOutput, RenderAddModel, StencilFile
     };
     // Which reconstruction back end the New Dataset screen runs.
     enum class Engine { BuiltIn, Colmap };
@@ -303,7 +303,7 @@ private:
     // Path of the selected checkpoint, or "" when it is not downloaded yet.
     std::string selected_model_path() const;
     // Fetch it (with consent), and whether a run would need it and not find it.
-    void request_model_download();
+    void request_model_download(const std::string& id);
     bool mask_model_missing() const;
     bool license_accepted(const std::string& family) const;
 
@@ -362,7 +362,6 @@ private:
     // "Re-run masking only" and friends: what probe_workspace already knows,
     // as the actions it implies.
     void draw_dataset_rerun(const WorkspaceState& prior);
-    void draw_mask_editor_entry(const WorkspaceState& prior);
     void open_mask_editor(const std::string& workspace, const std::string& image_dir,
                           const std::string& mask_dir, bool mask_flipped);
     // Throwing the whole project away rather than one step of it: the run's
@@ -539,6 +538,10 @@ private:
         bool mask_flipped = false;
     };
     DatasetFolders _sparse_edit_src;
+    // A dataset already in the output folder, read the way a run would read it.
+    DatasetFolders workspace_folders(const WorkspaceState& prior) const;
+    // Open in trainer / edit reconstruction / correct masks, for one dataset.
+    void draw_dataset_open_buttons(const DatasetFolders& f, bool model);
     // A saved sparse edit on its way to the trainer: the dataset to open and
     // the one it was edited from. Taken up at the top of the next frame,
     // outside the edit session that asked for it.
@@ -752,6 +755,12 @@ private:
     // stencil); this only says whether the run is given them, so that turning
     // the option off and on again does not throw away what was drawn.
     bool _border_enable = false;
+    // A saved stencil drawn on every input, by name (StencilPreset.h); cleared
+    // once the panel edits what it drew, since the name no longer says what is.
+    std::string _frame_shapes;
+    std::vector<StencilPreset> _frame_shapes_list;   // read when the picker opens
+    void apply_frame_shapes(size_t first_input = 0);
+    void save_run_stencils();
     MaskSettings _mask;
     SegmentPanel _segment;
     // The mask correction editor (app/gui/mask/). Opened from the dataset
@@ -775,10 +784,11 @@ private:
     // remembered "could not tell", so nothing is probed twice.
     std::map<std::string, std::pair<int, int>> _input_size;
 
-    // The segmentation checkpoint in use. Not persisted -- neither is any
-    // other masking or geometry setting, so a fresh session never runs a
-    // model the last one happened to pick.
+    // The dataset run's checkpoint and the mask editor's (clicks, so the fast
+    // one). Not persisted, like every masking setting: a fresh session never
+    // runs a model the last one happened to pick.
     std::string _model_id = "sam3-q4_0";
+    std::string _mask_editor_model_id = "sam2.1-base-plus";
     ModelDownload _download;
 
     // Interface language and the glyphs to draw it with. The font download is
@@ -790,6 +800,7 @@ private:
     // Families whose licence the user has accepted, persisted in the settings.
     std::vector<std::string> _accepted_licenses;
     std::string _license_prompt;      // family whose modal is open
+    std::string _license_model_id;    // the checkpoint it downloads
     bool _license_tick = false;
 
     // Batch processing. The queue is data; the driver is advance_batch(), so a

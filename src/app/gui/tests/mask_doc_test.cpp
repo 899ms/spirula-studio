@@ -749,7 +749,7 @@ void test_revert_all_guards_empty_mask_root() {
 gui::Stencil box_stencil(int W, int H, int x0, int y0, int x1, int y1) {
     gui::ShapeStroke s;
     s.kind = gui::ShapeKind::Box;
-    s.pts = {(float)x0, (float)y0, (float)x1, (float)y1};
+    s.pts = std::vector<float>{(float)x0, (float)y0, (float)x1, (float)y1};
     gui::Stencil st;
     gui::rasterize_shape(s, W, H, st);
     return st;
@@ -1060,7 +1060,7 @@ void test_orientation_mapping() {
             gui::ShapeStroke s;
             s.kind = gui::ShapeKind::Brush;
             s.brush_radius = 0.4f;
-            s.pts = {dx + 0.5f, dy + 0.5f};
+            s.pts = std::vector<float>{dx + 0.5f, dy + 0.5f};
             const gui::ShapeStroke st = mk::stroke_to_stored(s, t, W, H);
             gui::Stencil sten;
             gui::rasterize_shape(st, W, H, sten);
@@ -1426,6 +1426,16 @@ void test_session() {
               mk::MaskSession::paint_for(false, true, false) !=
                   mk::MaskSession::paint_for(false, true, true),
           "the eraser flag changes the mode on a plain drag and on Ctrl+drag");
+    s.set_subtract(true);
+    check(s.paint_now(false, false) == mk::Paint::ForceKeep &&
+              s.paint_now(false, true) == mk::Paint::ForceDrop &&
+              s.paint_now(true, true) == mk::Paint::Clear,
+          "subtract: a plain drag keeps, Ctrl drops, both still clear");
+    s.set_erasing(true);
+    check(s.paint_now(false, false) == mk::Paint::ForceDrop,
+          "subtract with the eraser: the two swaps cancel");
+    s.set_erasing(false);
+    s.set_subtract(false);
     check(mk::MaskSession::paint_for(true, true, false) ==
               mk::MaskSession::paint_for(true, true, true),
           "Shift+Ctrl clears under both tools: clearing is not the eraser");
@@ -1505,7 +1515,7 @@ void test_session() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     const mk::Rect changed = s.commit_stroke(box, mk::Paint::ForceDrop, m);
     check(!changed.empty() && changed.x0 <= 4 && changed.x1 >= 14, "commit returns the changed rect");
     check(s.doc()->dirty() && s.doc()->drop()[(size_t)8 * 64 + 8] == 255, "painted and dirty");
@@ -1514,7 +1524,7 @@ void test_session() {
     m2.scale = 2.0f;
     gui::ShapeStroke box2;
     box2.kind = gui::ShapeKind::Box;
-    box2.pts = {80.0f, 8.0f, 100.0f, 28.0f};
+    box2.pts = std::vector<float>{80.0f, 8.0f, 100.0f, 28.0f};
     s.commit_stroke(box2, mk::Paint::ForceKeep, m2);
     check(s.doc()->keep()[(size_t)8 * 64 + 45] == 255 && s.doc()->keep()[(size_t)8 * 64 + 39] == 0,
           "pane pixels mapped through the scale");
@@ -2130,7 +2140,7 @@ void test_session_propagate() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     const std::vector<uint8_t> drop_a = s.doc()->drop(), keep_a = s.doc()->keep();
 
@@ -2158,8 +2168,11 @@ void test_session_propagate() {
 
     // Next, then entering the target drops the record.
     s.propagate(mk::PropagateScope::Next, 0, 0);
+    check(s.propagate_total() == 1, "next: the bar counts one target while it runs");
     settle(s);
     check(s.last_propagate().done == 1 && s.can_undo_propagate(), "next: one target");
+    check(s.propagate_total() == 0 && s.propagate_done() == 1,
+          "next: the bar is gone once it finishes, having counted the target");
     s.go_to(1);
     settle(s);
     check(s.doc() && s.doc()->key() == "cam0/b" && s.doc()->drop() == drop_a, "b opens with a's layers");
@@ -2221,7 +2234,7 @@ void test_session_propagate_failures() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     const std::vector<uint8_t> drop_a = s.doc()->drop(), keep_a = s.doc()->keep();
 
@@ -2298,7 +2311,7 @@ void test_session_propagate_failures() {
     fs::create_directories(src_obstacle, ec);
     gui::ShapeStroke box2;
     box2.kind = gui::ShapeKind::Box;
-    box2.pts = {20.0f, 20.0f, 30.0f, 30.0f};
+    box2.pts = std::vector<float>{20.0f, 20.0f, 30.0f, 30.0f};
     s.commit_stroke(box2, mk::Paint::ForceKeep, m);
     check(s.doc()->dirty(), "fixture: the source is dirty again");
     s.propagate(mk::PropagateScope::Camera, 0, 0);
@@ -2328,7 +2341,7 @@ void test_session_propagate_flipped() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -2336,7 +2349,7 @@ void test_session_propagate_flipped() {
     check(s.last_propagate().done == 1 && b_own != original_b,
           "flipped propagate: fixture: b carries corrections before the propagate under test");
     gui::ShapeStroke box2 = box;
-    box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    box2.pts = std::vector<float>{30.0f, 20.0f, 50.0f, 40.0f};
     s.commit_stroke(box2, mk::Paint::ForceKeep, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -2367,12 +2380,12 @@ void test_propagate_forgotten_on_reopen() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
     gui::ShapeStroke box2 = box;
-    box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    box2.pts = std::vector<float>{30.0f, 20.0f, 50.0f, 40.0f};
     s.commit_stroke(box2, mk::Paint::ForceKeep, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -2412,13 +2425,13 @@ void undo_failure_arm(bool flipped) {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
     const std::vector<uint8_t> b_own = file_bytes(b_png);
     gui::ShapeStroke box2 = box;
-    box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    box2.pts = std::vector<float>{30.0f, 20.0f, 50.0f, 40.0f};
     s.commit_stroke(box2, mk::Paint::ForceKeep, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -2481,7 +2494,7 @@ void open_and_drop(mk::MaskSession& s, const Fixture& f, bool flipped, const std
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
 }
 
@@ -2489,7 +2502,7 @@ void keep_box(mk::MaskSession& s) {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+    box.pts = std::vector<float>{30.0f, 20.0f, 50.0f, 40.0f};
     s.commit_stroke(box, mk::Paint::ForceKeep, m);
 }
 
@@ -2655,7 +2668,7 @@ void test_revert_all_drops_queued_record() {
             mk::Mapping m;
             gui::ShapeStroke box;
             box.kind = gui::ShapeKind::Box;
-            box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+            box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
             s.commit_stroke(box, mk::Paint::ForceDrop, m);
         }
         s.propagate(mk::PropagateScope::Next, 0, 0);
@@ -2783,7 +2796,7 @@ void test_propagate_unrestored_after_a_write() {
     const std::vector<uint8_t> drop_before = file_bytes(c_drop), c_before = file_bytes(ro / "c.png");
     gui::ShapeStroke big;
     big.kind = gui::ShapeKind::Box;
-    big.pts = {20.0f, 20.0f, 40.0f, 40.0f};
+    big.pts = std::vector<float>{20.0f, 20.0f, 40.0f, 40.0f};
     mk::Mapping m;
     s.commit_stroke(big, mk::Paint::ForceDrop, m);
     s.save();
@@ -2844,7 +2857,7 @@ void test_propagate_refuses_stray_base() {
         mk::Mapping m;
         gui::ShapeStroke box;
         box.kind = gui::ShapeKind::Box;
-        box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+        box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
         s.commit_stroke(box, mk::Paint::ForceDrop, m);
         s.propagate(mk::PropagateScope::Next, 0, 0);
         settle(s);
@@ -2873,7 +2886,7 @@ void test_undo_propagate_regenerated_target() {
         mk::Mapping m;
         gui::ShapeStroke box;
         box.kind = gui::ShapeKind::Box;
-        box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+        box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
         s.commit_stroke(box, mk::Paint::ForceDrop, m);
         const std::vector<uint8_t> d1 = s.doc()->drop(), k1 = s.doc()->keep();
         s.propagate(mk::PropagateScope::Next, 0, 0);
@@ -2882,7 +2895,7 @@ void test_undo_propagate_regenerated_target() {
         write_png_gray(f.masks / "cam0" / "b.png", 64, 48, regen);
         const std::vector<uint8_t> on_disk = file_bytes(f.masks / "cam0" / "b.png");
         gui::ShapeStroke box2 = box;
-        box2.pts = {30.0f, 20.0f, 50.0f, 40.0f};
+        box2.pts = std::vector<float>{30.0f, 20.0f, 50.0f, 40.0f};
         s.commit_stroke(box2, mk::Paint::ForceKeep, m);
         s.propagate(mk::PropagateScope::Next, 0, 0);
         settle(s);
@@ -2926,7 +2939,7 @@ void test_session_eraser() {
     m.scale = 1.0f;
     gui::ShapeStroke over_block;                   // covers the block with margin
     over_block.kind = gui::ShapeKind::Box;
-    over_block.pts = {0.0f, 0.0f, 20.0f, 16.0f};
+    over_block.pts = std::vector<float>{0.0f, 0.0f, 20.0f, 16.0f};
 
     s.commit_stroke(over_block, mk::MaskSession::paint_for(false, false, /*erasing=*/true), m);
     check(s.doc()->kept() == kAll,
@@ -2945,7 +2958,7 @@ void test_session_eraser() {
     // The round trip the operator asked for: brush, then erase the same area.
     gui::ShapeStroke inside;
     inside.kind = gui::ShapeKind::Box;
-    inside.pts = {30.0f, 20.0f, 40.0f, 30.0f};
+    inside.pts = std::vector<float>{30.0f, 20.0f, 40.0f, 30.0f};
     s.commit_stroke(inside, mk::MaskSession::paint_for(false, false, /*erasing=*/false), m);
     const int64_t after_brush = s.doc()->kept();
     check(after_brush < kBase, "the brush drops something");
@@ -3059,7 +3072,7 @@ void test_session_flipped_polarity() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {2.0f, 2.0f, 10.0f, 10.0f};
+    box.pts = std::vector<float>{2.0f, 2.0f, 10.0f, 10.0f};
     s.commit_stroke(box, mk::Paint::ForceKeep, m);
     s.save();
     settle(s);
@@ -3108,7 +3121,7 @@ void test_session_other_mask_root_refused() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
@@ -3138,7 +3151,7 @@ void test_session_reencoded_mask_is_not_regenerated() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
@@ -3190,7 +3203,7 @@ void test_session_corrupt_index_refuses() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
@@ -3232,7 +3245,7 @@ void test_session_close_reports_a_failed_save() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     check(s.doc()->dirty(), "dirty going into close");
     s.close();
@@ -3279,7 +3292,7 @@ void test_session_exif_turn() {
     m.scale = 1.0f;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {2.0f, 26.0f, 6.0f, 30.0f};
+    box.pts = std::vector<float>{2.0f, 26.0f, 6.0f, 30.0f};
     const mk::Rect shown = s.commit_stroke(box, mk::Paint::ForceDrop, m);
     const std::vector<uint8_t>& drop = s.doc()->drop();
     int painted = 0, stray = 0;
@@ -4022,7 +4035,7 @@ void bench_8k(const char* dir) {
         s.kind = gui::ShapeKind::Brush;
         s.brush_radius = 100.0f;
         const float x = 1200.0f + 150.0f * k, y = 400.0f + 120.0f * k;
-        s.pts = {x, y, x + 250.0f, y + 50.0f, x + 500.0f, y};
+        s.pts = std::vector<float>{x, y, x + 250.0f, y + 50.0f, x + 500.0f, y};
         const auto a = std::chrono::steady_clock::now();
         const mk::Rect r = mk::stroke_bounds(s, W, H);
         gui::Stencil st;
@@ -4147,6 +4160,48 @@ void bench_8k(const char* dir) {
         const std::string key = "f000" + std::to_string(i);
         write_png_gray(masks / (key + ".png"), W, H, synth_mask(W, H, (uint32_t)i));
     }
+}
+
+// Propagate from the first of kPropFrames 8K frames onto the rest, end to end
+// through the session. Copies bench_8k's f0000 fixture, so runs after it.
+constexpr int kPropFrames = 24;
+
+void bench_propagate(const char* dir) {
+    const fs::path src(dir), root = src / "propagate", images = root / "images", masks = root / "masks";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(images, ec);
+    fs::create_directories(masks, ec);
+    for (int i = 0; i < kPropFrames; i++) {
+        char key[16];
+        std::snprintf(key, sizeof key, "p%04d", i);
+        fs::copy_file(src / "images" / "f0000.jpg", images / (std::string(key) + ".jpg"), ec);
+        fs::copy_file(src / "masks" / "f0000.png", masks / (std::string(key) + ".png"), ec);
+    }
+    mk::MaskSession s;
+    std::string err;
+    if (!s.open(root.string(), images.string(), masks.string(), false, err)) {
+        std::printf("bench propagate: open failed: %s\n", err.c_str());
+        return;
+    }
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = std::vector<float>{1000.0f, 1000.0f, 3000.0f, 2000.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    for (const char* what : {"propagate", "undo"}) {
+        const auto a = std::chrono::steady_clock::now();
+        if (what[0] == 'p') s.propagate(mk::PropagateScope::Camera, 0, 0);
+        else s.undo_propagate();
+        while (!s.idle()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        s.pump();
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+        std::printf("bench %-9s 8K x%d            %8.1f ms  (%.1f ms a frame, %d done)\n", what,
+                    kPropFrames - 1, ms, ms / (kPropFrames - 1), s.last_propagate().done);
+    }
+    s.close();
+    fs::remove_all(root, ec);
 }
 
 // ---------------------------------------------------------------------------
@@ -5199,7 +5254,7 @@ void test_session_sam_clear_is_local() {
     m.scale = 1.0f;
     gui::ShapeStroke hand;
     hand.kind = gui::ShapeKind::Box;
-    hand.pts = {0.0f, 0.0f, 10.0f, 10.0f};
+    hand.pts = std::vector<float>{0.0f, 0.0f, 10.0f, 10.0f};
     s.commit_stroke(hand, mk::Paint::ForceDrop, m);
     const int64_t after_hand = s.doc()->kept();
     mk::AddRegion g;
@@ -5257,14 +5312,10 @@ void test_add_stencil_drop_margin() {
           "drop margin: the square grows 2 px on every side, as Masker's box sizes it");
 }
 
-// Only a drop takes the margin; never signed, so no trim can reach the editor.
+// Every mode takes the margin; never signed, so no trim can reach the editor.
 void test_drop_margin_modes() {
-    check(mk::drop_margin(mk::Paint::ForceDrop, 0.2f) == 0.2f, "drop margin: a drop takes the ratio");
-    check(mk::drop_margin(mk::Paint::ForceKeep, 0.2f) == 0.0f &&
-              mk::drop_margin(mk::Paint::Clear, 0.2f) == 0.0f,
-          "drop margin: keep and clear use SAM's exact outline");
-    check(mk::drop_margin(mk::Paint::ForceDrop, -0.1f) == 0.0f,
-          "drop margin: a negative ratio never trims");
+    check(mk::add_margin(0.2f) == 0.2f, "add margin: the ratio, whatever the mode");
+    check(mk::add_margin(-0.1f) == 0.0f, "add margin: a negative ratio never trims");
     Fixture f = make_dataset("sam_margin_modes", 64, 48, {"a"});
     mk::MaskSession s;
     std::string err;
@@ -5285,8 +5336,8 @@ void test_drop_margin_modes() {
         s.sam_pump();
         area[i] = s.sam_last_area();
     }
-    check(area[0] > 400 && area[1] == 400 && area[2] == 400,
-          "drop margin: a drop result grows, a keep and a clear do not");
+    check(area[0] > 400 && area[1] == area[0] && area[2] == area[0],
+          "add margin: a drop, a keep and a clear all grow alike");
 }
 
 // The editor's margin is its own MaskSettings, never the dataset screen's.
@@ -5532,14 +5583,51 @@ void test_session_sam_margin_reapply() {
     check(s.doc()->history_size() == h1 && s.doc()->keep()[0] == 255,
           "margin reapply: ... and the edit survives");
     check(s.sam_held_bytes() == 0, "margin reapply: the next frame lets go of a detection that cannot re-apply");
-    check(sam_result(s, g, mk::Paint::ForceKeep, 0.4f).held.empty() &&
-              sam_result(s, g, mk::Paint::Clear, 0.4f).held.empty() &&
+    check(sam_result(s, g, mk::Paint::ForceKeep, 0.4f).held.size() == 1 &&
+              sam_result(s, g, mk::Paint::Clear, 0.4f).held.size() == 1 &&
               sam_result(s, g, mk::Paint::ForceDrop, 0.4f).held.size() == 1,
-          "margin reapply: a job holds its detection only for a drop");
-    mk::SamResult keep = sam_result(s, g, mk::Paint::ForceKeep, 0.0f);
-    keep.held.push_back(mk::hold_region(g));
-    s.apply_sam_add(std::move(keep), 0);
-    check(!s.sam_margin_reapplies(), "margin reapply: a keep takes no margin, so nothing to re-apply");
+          "margin reapply: a job holds its detection in every mode");
+    // Subtract: a keep over a drop made with a margin must take the margin too,
+    // or the rim the drop grew stays dropped around the object.
+    s.sam_prompt().dilate_ratio = 0.4f;
+    mk::SamResult drop = sam_result(s, g, mk::Paint::ForceDrop, 0.4f);
+    s.apply_sam_add(std::move(drop), 1);
+    mk::SamResult keep = sam_result(s, g, mk::Paint::ForceKeep, 0.4f);
+    s.apply_sam_add(std::move(keep), 2);
+    int64_t rim = 0;
+    for (size_t i = 0; i < st.in.size(); i++) rim += (st.in[i] && s.doc()->drop()[i]) ? 1 : 0;
+    check(rim == 0, "margin: a keep with the same margin clears the whole grown drop, " +
+                        std::to_string(rim) + " px left");
+    check(s.sam_margin_reapplies(), "margin reapply: a keep on top can be re-applied");
+    s.sam_prompt().dilate_ratio = 0.0f;
+    reapply(s);
+    int64_t left = 0;
+    for (size_t i = 0; i < st.in.size(); i++) left += (st.in[i] && s.doc()->drop()[i]) ? 1 : 0;
+    check(left > 0, "margin reapply: shrinking the keep brings the drop's rim back");
+}
+
+// Ctrl+Z in SAM mode takes back a click: an object's only click goes with its
+// add, and an add that is not on top leaves the clicks to the plain undo.
+void test_session_sam_undo_click() {
+    Fixture f = make_dataset("sam_undo_click", 64, 48, {"a"});
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err),
+          "undo click: open: " + err);
+    settle(s);
+    const mk::AddRegion g = disc_region(64, 48, 30.0f, 24.0f, 6.0f);
+    s.sam().add_click(0, s.frames()[0].camera, 30.0f, 24.0f, true);
+    sam_add(s, g, 0);
+    mk::Rect r;
+    check(s.sam_undo_click(r) && s.sam_click_count() == 0 && !s.doc()->can_undo() &&
+              s.doc()->can_redo(),
+          "undo click: the only click goes, and its add with it");
+    check(!s.sam_undo_click(r), "undo click: nothing of SAM's on top, so the plain undo decides");
+    s.sam().add_click(0, s.frames()[0].camera, 30.0f, 24.0f, true);
+    sam_add(s, g, 0);
+    s.doc()->paint(mk::Paint::ForceKeep, box_stencil(64, 48, 0, 0, 4, 4), mk::Rect{0, 0, 4, 4});
+    check(!s.sam_undo_click(r) && s.sam_click_count() == 1,
+          "undo click: after another edit the click stays for the plain undo");
 }
 
 // A re-prompt whose mask lands on pixels already dropped records no step: the
@@ -5982,6 +6070,9 @@ void test_session_sam_text_gate() {
     s.sam_prompt().prompt = "door";
     check(!s.sam_submit_text() && !s.sam_error().empty(),
           "text gate: submitting a phrase reaches the job (the stub refuses it)");
+    s.set_sam_model("/m/sam2.ggml", false);
+    check(!s.sam_submit_text() && s.sam_error() == em::sam_text_unsupported.get(),
+          "text gate: a phrase to a SAM 2 checkpoint says to switch to SAM 3");
 }
 
 // ---------------------------------------------------------------------------
@@ -6191,7 +6282,7 @@ void test_session_find_missing() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 64.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
@@ -6281,7 +6372,7 @@ void test_session_find_missing_flipped() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {32.0f, 24.0f, 64.0f, 48.0f};
+    box.pts = std::vector<float>{32.0f, 24.0f, 64.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -6318,7 +6409,7 @@ void test_scan_yields_to_a_write() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 64.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -6377,7 +6468,7 @@ void test_scan_follows_rebase() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 32.0f, 48.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 32.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
@@ -6446,7 +6537,7 @@ void test_find_missing_layer_without_mask() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 16.0f, 16.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 16.0f, 16.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.save();
     settle(s);
@@ -6498,7 +6589,7 @@ void fix_then_leave_arm(bool flipped, int route) {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 32.0f, 48.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 32.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceKeep, m);
     check(s.frame_index() == 1 && s.doc() && s.doc()->dirty(), tag + "fixture: b fixed, unsaved");
     if (route == 0) s.go_to_missing(+1);
@@ -6566,7 +6657,7 @@ void test_scan_waits_out_a_running_job() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 64.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     armed = true;
     s.propagate(mk::PropagateScope::Next, 0, 0);
@@ -6623,6 +6714,52 @@ void test_close_mid_scan() {
     }
 }
 
+// A cancel before the first target: nothing written, all counted as not
+// reached. Cancelling the undo keeps every frame in the record.
+void test_propagate_cancel() {
+    check(mk::propagate_threads(7680, 3840, 16) == 6 && mk::propagate_threads(7680, 3840, 4) == 3 &&
+              mk::propagate_threads(1920, 1080, 64) == 8 && mk::propagate_threads(0, 0, 16) == 1 &&
+              mk::propagate_threads(64, 48, 1) == 1,
+          "cancel: threads by the 1 GB budget, the cores and the cap of 8");
+    Fixture f = make_dataset("prop_cancel", 64, 48, {"a", "b", "c", "d", "e"});
+    const std::vector<uint8_t> original_c = file_bytes(f.masks / "c.png");
+    mk::MaskSession s;
+    std::string err;
+    check(s.open(f.root.string(), f.images.string(), f.masks.string(), false, err), "cancel: open: " + err);
+    settle(s);
+    mk::Mapping m;
+    gui::ShapeStroke box;
+    box.kind = gui::ShapeKind::Box;
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
+    s.commit_stroke(box, mk::Paint::ForceDrop, m);
+    s.set_worker_hook_for_test([&s](bool finished) { if (!finished) s.cancel_propagate(); });
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    const mk::PropagateReport r = s.last_propagate();
+    check(r.done == 0 && r.skipped == 4 && !s.can_undo_propagate() &&
+              file_bytes(f.masks / "c.png") == original_c && !fs::exists(f.layer / "c.drop.png"),
+          "cancel: no target written, four not reached");
+    check(s.status() == spirula::i18n::format(spirula::i18n::msg::maskedit::prop_stopped, {0, 4, 0, 0}),
+          "cancel: the status says it stopped: " + s.status());
+    s.set_worker_hook_for_test(nullptr);
+    s.propagate(mk::PropagateScope::Camera, 0, 0);
+    settle(s);
+    check(s.last_propagate().done == 4 && s.last_propagate().skipped == 0 && s.can_undo_propagate(),
+          "cancel: the next run is not cancelled");
+    s.set_worker_hook_for_test([&s](bool finished) { if (!finished) s.cancel_propagate(); });
+    s.undo_propagate();
+    settle(s);
+    s.set_worker_hook_for_test(nullptr);
+    check(s.can_undo_propagate() && fs::exists(f.layer / "c.drop.png"),
+          "cancel: a stopped undo keeps every frame undoable");
+    s.undo_propagate();
+    settle(s);
+    check(!s.can_undo_propagate() && file_bytes(f.masks / "c.png") == original_c &&
+              !fs::exists(f.layer / "c.drop.png") && s.corrected_count() == 1,
+          "cancel: undo again puts them all back");
+    s.close();
+}
+
 // An undo whose target's mask went back but whose index write failed: the
 // target stays in the record, and its key must still reach the refresh.
 void test_undo_refresh_after_index_failure() {
@@ -6636,7 +6773,7 @@ void test_undo_refresh_after_index_failure() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {0.0f, 0.0f, 64.0f, 48.0f};
+    box.pts = std::vector<float>{0.0f, 0.0f, 64.0f, 48.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -7199,7 +7336,7 @@ void test_session_slideshow() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     check(s.doc()->dirty(), "fixture: dirty before play");
     s.set_slide_fps(10.0f);
@@ -7566,8 +7703,8 @@ void test_session_slideshow_plays_the_edit(bool flipped) {
     mk::Mapping m;
     gui::ShapeStroke centre, corner;
     centre.kind = corner.kind = gui::ShapeKind::Box;
-    centre.pts = {1800.0f, 1300.0f, 2200.0f, 1700.0f};
-    corner.pts = {0.0f, 0.0f, 300.0f, 300.0f};
+    centre.pts = std::vector<float>{1800.0f, 1300.0f, 2200.0f, 1700.0f};
+    corner.pts = std::vector<float>{0.0f, 0.0f, 300.0f, 300.0f};
     s.commit_stroke(centre, flipped ? mk::Paint::ForceKeep : mk::Paint::ForceDrop, m);
     s.commit_stroke(corner, flipped ? mk::Paint::ForceDrop : mk::Paint::ForceKeep, m);
     hold = true;
@@ -7861,7 +7998,7 @@ void test_propagate_waits_for_sam() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     fake.busy = true;
     check(s.sam_work_pending(), "prop sam: a running job is pending work");
@@ -8178,7 +8315,7 @@ void propagate_forgets_clicks_arm(bool flipped) {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     check(s.frame_index() == 0 && clicks_on(p, 0, 0) == 1 && clicks_on(p, 1, 0) == 1 &&
               clicks_on(p, 2, 0) == 1,
@@ -8262,7 +8399,7 @@ void test_propagate_source_save_failure_sticks() {
     mk::Mapping m;
     gui::ShapeStroke box;
     box.kind = gui::ShapeKind::Box;
-    box.pts = {4.0f, 4.0f, 14.0f, 14.0f};
+    box.pts = std::vector<float>{4.0f, 4.0f, 14.0f, 14.0f};
     s.commit_stroke(box, mk::Paint::ForceDrop, m);
     s.propagate(mk::PropagateScope::Next, 0, 0);
     settle(s);
@@ -8378,6 +8515,7 @@ int main() {
     test_restore_writes_no_mask();
     test_snapshot_restore_edges();
     test_session_propagate();
+    test_propagate_cancel();
     test_session_propagate_failures();
     test_session_propagate_flipped();
     test_propagate_forgotten_on_reopen();
@@ -8460,6 +8598,7 @@ int main() {
     test_session_refused_click_leaves_no_dot();
     test_held_region_roundtrip();
     test_session_sam_margin_reapply();
+    test_session_sam_undo_click();
     test_session_sam_noop_replace();
     test_session_sam_clear_forgets_add();
     test_session_sam_prompt_bookkeeping();
@@ -8535,6 +8674,7 @@ int main() {
     test_slideshow_refuses_open_path();
     test_workflow_messages_say_why();
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_8k(b);
+    if (const char* b = std::getenv("SS_MASK_BENCH")) bench_propagate(b);
     if (const char* b = std::getenv("SS_MASK_BENCH")) bench_livewire(b);
     if (std::getenv("SS_MASK_BENCH")) bench_add_history();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);

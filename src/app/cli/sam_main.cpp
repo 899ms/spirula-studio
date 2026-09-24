@@ -23,6 +23,7 @@
 #include "i18n/catalog/SamHelp.h"
 #include "app/FrameLook.h"
 #include "app/FrameMask.h"
+#include "app/FrameMaskSvg.h"
 #include "app/WriterPool.h"
 #include "nn/core/Log.h"
 #include "nn/Device.h"
@@ -634,8 +635,11 @@ int cmd_mask(const Options& o) {
     run.stencil.mask.image = o.mask_image;
     // Named shapes are the whole answer; only an unnamed one asks for a fit.
     if (!o.shape_spec.empty()) {
-        std::string bad;
-        if (!app::parse_mask_shapes(o.shape_spec, run.stencil.mask.shapes, bad)) {
+        std::string bad, title;
+        const bool svg = o.shape_spec.size() > 4 &&
+                         o.shape_spec.compare(o.shape_spec.size() - 4, 4, ".svg") == 0;
+        if (svg ? !app::load_mask_svg(o.shape_spec, run.stencil.mask.shapes, title, bad)
+                : !app::parse_mask_shapes(o.shape_spec, run.stencil.mask.shapes, bad)) {
             std::fprintf(stderr, "%s\n",
                          format(cmsg::sam_mask_bad_shape, {bad}).c_str());
             return 2;

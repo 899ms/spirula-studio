@@ -14,7 +14,7 @@ namespace {
 
 // X(key in the file, member of DatasetSettings). A setting is here or it is
 // context, and context is: the input list, the output folder, the mask
-// clicks, the border stencils, the tool paths and the redo-a-step flags.
+// clicks, the fitted borders, the tool paths and the redo-a-step flags.
 #define SS_DATASET_PRESET_FIELDS(X)                                           \
     X("engine_colmap",              colmap_engine)                            \
     /* ---- input handling and frame extraction ---- */                       \
@@ -43,6 +43,7 @@ namespace {
     X("mask_enable",                sfm.prep.mask_enable)                     \
     X("mask_features",              sfm.mask_features)                        \
     X("mask_border",                border_enable)                            \
+    X("mask_frame_shapes",          frame_shapes)                             \
     X("mask_model",                 mask_model_id)                            \
     X("mask_prompt",                mask.prompt)                              \
     X("mask_negative_prompt",       mask.negative_prompt)                     \
@@ -164,10 +165,10 @@ bool dataset_apply_preset(DatasetSettings& s, const std::string& name) {
         // capture whose own frames measure 2:1.
         s.sfm.camera_model = "thin-prism-fisheye";
         s.colmap.camera_model = "THIN_PRISM_FISHEYE";
-        // Whoever holds a 360 camera is in every frame of it, and so is
-        // whatever they carry.
+        // Whoever holds a 360 camera is in every frame of it, and so are
+        // whatever they carry and their shadow.
         s.sfm.prep.mask_enable = true;
-        s.mask.prompt = "person; hand; backpack";
+        s.mask.prompt = "person; hand; backpack; shadow of person";
         s.sfm.mask_features = true;
         s.border_enable = true;
         return true;

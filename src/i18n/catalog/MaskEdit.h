@@ -65,7 +65,7 @@ SS_MSG(op_clear,
 // ===========================================================================
 
 SS_MSG(correct_masks,
-    EN("Correct masks"),
+    EN("Correct Masks"),
     JA("マスクを修正"),
     ZH_HANS("修正蒙版"),
     ZH_HANT("修正遮罩"),
@@ -319,11 +319,53 @@ SS_MSG(done,
     RU("Готово"),
     TR("Bitti"));
 
+SS_MSG(done_help,
+    EN("Save the open frame and close the editor."),
+    JA("開いているフレームを保存して、エディターを閉じます。"),
+    ZH_HANS("保存当前帧并关闭编辑器。"),
+    ZH_HANT("儲存目前的影格並關閉編輯器。"),
+    KO("열려 있는 프레임을 저장하고 편집기를 닫습니다."),
+    DE("Das offene Bild speichern und den Editor schließen."),
+    FR("Enregistrer l'image ouverte et fermer l'éditeur."),
+    ES("Guardar el fotograma abierto y cerrar el editor."),
+    PT("Salvar o quadro aberto e fechar o editor."),
+    IT("Salva il fotogramma aperto e chiudi l'editor."),
+    NL("Het open beeld opslaan en de editor sluiten."),
+    RU("Сохранить открытый кадр и закрыть редактор."),
+    TR("Açık kareyi kaydet ve düzenleyiciyi kapat."));
+
 SS_MSG(tool_eraser,
     EN("Eraser"),     JA("消しゴム"),   ZH_HANS("橡皮擦"), ZH_HANT("橡皮擦"),
     KO("지우개"),      DE("Radierer"),   FR("Gomme"),
     ES("Borrador"),   PT("Borracha"),   IT("Gomma"),
     NL("Gum"),        RU("Ластик"),     TR("Silgi"));
+
+SS_MSG(mode_add,
+    EN("Add"),         JA("追加"),       ZH_HANS("添加"),   ZH_HANT("新增"),
+    KO("추가"),        DE("Hinzufügen"), FR("Ajouter"),
+    ES("Añadir"),      PT("Adicionar"),  IT("Aggiungi"),
+    NL("Toevoegen"),   RU("Добавить"),   TR("Ekle"));
+
+SS_MSG(mode_subtract,
+    EN("Subtract"),    JA("削除"),       ZH_HANS("减去"),   ZH_HANT("減去"),
+    KO("빼기"),        DE("Abziehen"),   FR("Soustraire"),
+    ES("Restar"),      PT("Subtrair"),   IT("Sottrai"),
+    NL("Aftrekken"),   RU("Вычесть"),    TR("Çıkar"));
+
+SS_MSG(mode_help,
+    EN("What a plain drag or click does. Add grows the masked (removed) area; Subtract takes it back and keeps those pixels. Ctrl does the other one."),
+    JA("通常のドラッグやクリックの動作です。追加はマスクされる（除外される）範囲を広げ、削除はそれを戻してピクセルを保持します。Ctrl でもう一方になります。"),
+    ZH_HANS("普通拖动或单击的作用。添加会扩大被遮罩（移除）的区域；减去会把它收回并保留这些像素。按住 Ctrl 则为另一种。"),
+    ZH_HANT("一般拖曳或點一下的作用。新增會擴大被遮罩（移除）的區域；減去會把它收回並保留這些像素。按住 Ctrl 則為另一種。"),
+    KO("일반 드래그나 클릭의 동작입니다. 추가는 마스크된(제거되는) 영역을 넓히고, 빼기는 그 영역을 되돌려 해당 픽셀을 유지합니다. Ctrl을 누르면 반대로 동작합니다."),
+    DE("Was ein normales Ziehen oder Klicken tut. Hinzufügen vergrößert den maskierten (entfernten) Bereich; Abziehen nimmt ihn zurück und behält diese Pixel. Mit Ctrl das jeweils andere."),
+    FR("Ce que fait un simple glisser ou clic. Ajouter agrandit la zone masquée (retirée) ; Soustraire la reprend et conserve ces pixels. Ctrl fait l'inverse."),
+    ES("Lo que hace un arrastre o clic normal. Añadir amplía el área enmascarada (eliminada); Restar la recupera y conserva esos píxeles. Ctrl hace lo contrario."),
+    PT("O que um arrastar ou clique normal faz. Adicionar aumenta a área mascarada (removida); Subtrair a recupera e mantém esses pixels. Ctrl faz o contrário."),
+    IT("Cosa fa un normale trascinamento o clic. Aggiungi allarga l'area mascherata (rimossa); Sottrai la riprende e mantiene quei pixel. Ctrl fa l'opposto."),
+    NL("Wat gewoon slepen of klikken doet. Toevoegen vergroot het gemaskeerde (verwijderde) gebied; Aftrekken neemt het terug en behoudt die pixels. Ctrl doet het andere."),
+    RU("Что делает обычное перетаскивание или щелчок. «Добавить» расширяет замаскированную (удаляемую) область; «Вычесть» возвращает её и сохраняет эти пиксели. С Ctrl — наоборот."),
+    TR("Normal sürükleme veya tıklamanın yaptığı şey. Ekle, maskelenen (kaldırılan) alanı büyütür; Çıkar onu geri alır ve o pikselleri tutar. Ctrl diğerini yapar."));
 
 // ===========================================================================
 // The status strip
@@ -914,32 +956,32 @@ SS_MSG(tool_sam,
 
 SS_MSG(sam_hint,
     EN("Click an object to drop it; Ctrl+click keeps it; Shift+Ctrl+click clears its corrections; "
-       "right-click a part to leave it out. Undo removes the whole object. Esc cancels."),
+       "right-click a part to leave it out. Ctrl+Z takes back the last click. Esc cancels."),
     JA("オブジェクトをクリックすると除外します。Ctrl+クリックで保持、Shift+Ctrl+クリックで修正を消去します。"
-       "右クリックでその部分を対象から外します。元に戻すとオブジェクト全体が取り消されます。Esc で中止します。"),
+       "右クリックでその部分を対象から外します。Ctrl+Z で最後のクリックを取り消します。Esc で中止します。"),
     ZH_HANS("点击物体将其丢弃；Ctrl+点击保留；Shift+Ctrl+点击清除其修正；右键点击某一部分可将其排除。"
-            "撤销会移除整个物体。Esc 取消。"),
+            "Ctrl+Z 撤回最后一次点击。Esc 取消。"),
     ZH_HANT("點擊物件將其捨棄；Ctrl+點擊保留；Shift+Ctrl+點擊清除其修正；在某一部分按右鍵可將其排除。"
-            "復原會移除整個物件。Esc 取消。"),
+            "Ctrl+Z 收回最後一次點擊。Esc 取消。"),
     KO("개체를 클릭하면 제외합니다. Ctrl+클릭은 유지, Shift+Ctrl+클릭은 수정을 지웁니다. 일부를 오른쪽 "
-       "클릭하면 대상에서 뺍니다. 실행 취소하면 개체 전체가 사라집니다. Esc로 취소합니다."),
+       "클릭하면 대상에서 뺍니다. Ctrl+Z는 마지막 클릭을 되돌립니다. Esc로 취소합니다."),
     DE("Klicken Sie auf ein Objekt, um es zu verwerfen; Ctrl+Klick behält es; Shift+Ctrl+Klick löscht "
-       "seine Korrekturen; ein Rechtsklick auf einen Teil nimmt ihn aus. Rückgängig entfernt das ganze "
-       "Objekt. Esc bricht ab."),
+       "seine Korrekturen; ein Rechtsklick auf einen Teil nimmt ihn aus. Strg+Z nimmt den letzten "
+       "Klick zurück. Esc bricht ab."),
     FR("Cliquez sur un objet pour l'exclure ; Ctrl+clic le conserve ; Shift+Ctrl+clic efface ses "
-       "corrections ; un clic droit sur une partie l'en retire. Annuler retire l'objet entier. Esc annule."),
+       "corrections ; un clic droit sur une partie l'en retire. Ctrl+Z retire le dernier clic. Esc annule."),
     ES("Haga clic en un objeto para descartarlo; Ctrl+clic lo conserva; Shift+Ctrl+clic borra sus "
-       "correcciones; un clic derecho en una parte la excluye. Deshacer quita el objeto entero. Esc cancela."),
+       "correcciones; un clic derecho en una parte la excluye. Ctrl+Z quita el último clic. Esc cancela."),
     PT("Clique em um objeto para descartá-lo; Ctrl+clique o mantém; Shift+Ctrl+clique apaga suas "
-       "correções; um clique direito em uma parte a exclui. Desfazer remove o objeto inteiro. Esc cancela."),
+       "correções; um clique direito em uma parte a exclui. Ctrl+Z desfaz o último clique. Esc cancela."),
     IT("Fai clic su un oggetto per scartarlo; Ctrl+clic lo mantiene; Shift+Ctrl+clic ne cancella le "
-       "correzioni; il clic destro su una parte la esclude. Annulla rimuove l'intero oggetto. Esc annulla."),
+       "correzioni; il clic destro su una parte la esclude. Ctrl+Z toglie l'ultimo clic. Esc annulla."),
     NL("Klik op een object om het weg te laten; Ctrl+klik behoudt het; Shift+Ctrl+klik wist de correcties "
-       "ervan; rechtsklik op een deel sluit het uit. Ongedaan maken verwijdert het hele object. Esc annuleert."),
+       "ervan; rechtsklik op een deel sluit het uit. Ctrl+Z neemt de laatste klik terug. Esc annuleert."),
     RU("Щёлкните объект, чтобы убрать его; Ctrl+щелчок оставляет его; Shift+Ctrl+щелчок стирает его "
-       "исправления; правый щелчок по части исключает её. Отмена убирает объект целиком. Esc отменяет."),
+       "исправления; правый щелчок по части исключает её. Ctrl+Z отменяет последний щелчок. Esc отменяет."),
     TR("Atmak için bir nesneye tıklayın; Ctrl+tık onu tutar; Shift+Ctrl+tık düzeltmelerini siler; bir "
-       "parçaya sağ tık onu hariç tutar. Geri alma nesnenin tamamını kaldırır. Esc iptal eder."));
+       "parçaya sağ tık onu hariç tutar. Ctrl+Z son tıklamayı geri alır. Esc iptal eder."));
 
 SS_MSG(sam_cancel_slow,
     EN("Esc cancels once the step already running finishes: loading the model, reading the frame, or finding the object."),
@@ -1008,19 +1050,19 @@ SS_MSG(sam_text_empty,
     TR("Önce neyin kaldırılacağını yazın."));
 
 SS_MSG(sam_text_unsupported,
-    EN("This checkpoint has no text encoder. Use clicks instead."),
-    JA("このチェックポイントにはテキストエンコーダーがありません。クリックを使ってください。"),
-    ZH_HANS("此检查点没有文本编码器。请改用点击。"),
-    ZH_HANT("此檢查點沒有文字編碼器。請改用點擊。"),
-    KO("이 체크포인트에는 텍스트 인코더가 없습니다. 대신 클릭을 사용하세요."),
-    DE("Dieser Checkpoint hat keinen Text-Encoder. Verwenden Sie stattdessen Klicks."),
-    FR("Ce checkpoint n'a pas d'encodeur de texte. Utilisez plutôt des clics."),
-    ES("Este checkpoint no tiene codificador de texto. Use clics en su lugar."),
-    PT("Este checkpoint não tem codificador de texto. Use cliques em vez disso."),
-    IT("Questo checkpoint non ha un encoder di testo. Usa invece i clic."),
-    NL("Dit checkpoint heeft geen tekstencoder. Gebruik in plaats daarvan klikken."),
-    RU("У этой контрольной точки нет текстового кодировщика. Используйте щелчки."),
-    TR("Bu kontrol noktasında metin kodlayıcı yok. Bunun yerine tıklamaları kullanın."));
+    EN("Text prompts need SAM 3. Switch the model to SAM 3, or use clicks."),
+    JA("テキストプロンプトには SAM 3 が必要です。モデルを SAM 3 に切り替えるか、クリックを使ってください。"),
+    ZH_HANS("文本提示需要 SAM 3。请将模型切换为 SAM 3，或改用点击。"),
+    ZH_HANT("文字提示需要 SAM 3。請將模型切換為 SAM 3，或改用點擊。"),
+    KO("텍스트 프롬프트에는 SAM 3이 필요합니다. 모델을 SAM 3으로 전환하거나 클릭을 사용하세요."),
+    DE("Textprompts benötigen SAM 3. Wechseln Sie das Modell zu SAM 3 oder verwenden Sie Klicks."),
+    FR("Les prompts textuels nécessitent SAM 3. Passez le modèle à SAM 3, ou utilisez des clics."),
+    ES("Los prompts de texto requieren SAM 3. Cambie el modelo a SAM 3 o use clics."),
+    PT("Prompts de texto exigem o SAM 3. Mude o modelo para SAM 3 ou use cliques."),
+    IT("I prompt testuali richiedono SAM 3. Passa il modello a SAM 3 oppure usa i clic."),
+    NL("Tekstprompts vereisen SAM 3. Schakel het model over naar SAM 3 of gebruik klikken."),
+    RU("Для текстовых подсказок нужна SAM 3. Переключите модель на SAM 3 или используйте щелчки."),
+    TR("Metin istemleri SAM 3 gerektirir. Modeli SAM 3'e geçirin veya tıklamaları kullanın."));
 
 SS_MSG(sam_empty,
     EN("The prompt matched nothing on this frame."),
@@ -1464,6 +1506,81 @@ SS_MSG(prop_working,
     NL("Bezig met doorvoeren…"),
     RU("Распространение…"),
     TR("Yayılıyor…"));
+
+SS_MSG(prop_progress,
+    EN("Propagating: {0} / {1} frames"),
+    JA("伝播中: {0} / {1} フレーム"),
+    ZH_HANS("正在传播：{0} / {1} 帧"),
+    ZH_HANT("正在傳播：{0} / {1} 影格"),
+    KO("전파 중: {0} / {1} 프레임"),
+    DE("Wird übertragen: {0} / {1} Bilder"),
+    FR("Propagation : {0} / {1} images"),
+    ES("Propagando: {0} / {1} fotogramas"),
+    PT("Propagando: {0} / {1} quadros"),
+    IT("Propagazione: {0} / {1} fotogrammi"),
+    NL("Bezig met doorvoeren: {0} / {1} beelden"),
+    RU("Распространение: {0} / {1} кадров"),
+    TR("Yayılıyor: {0} / {1} kare"));
+
+SS_MSG(prop_stopped,
+    EN("Propagate stopped: {0} done, {1} not reached, refused: {2}, failed: {3}"),
+    JA("伝播を中止しました: 完了 {0}、未処理 {1}、拒否: {2}、失敗: {3}"),
+    ZH_HANS("已停止传播：完成 {0}，未处理 {1}，已拒绝：{2}，失败：{3}"),
+    ZH_HANT("已停止傳播：完成 {0}，未處理 {1}，已拒絕：{2}，失敗：{3}"),
+    KO("전파 중지됨: 완료 {0}, 처리 안 됨 {1}, 거부됨: {2}, 실패: {3}"),
+    DE("Übertragen abgebrochen: {0} fertig, {1} nicht erreicht, abgelehnt: {2}, fehlgeschlagen: {3}"),
+    FR("Propagation arrêtée : {0} faites, {1} non atteintes, refusées : {2}, échouées : {3}"),
+    ES("Propagación detenida: {0} hechos, {1} sin alcanzar, rechazados: {2}, fallidos: {3}"),
+    PT("Propagação interrompida: {0} feitos, {1} não alcançados, recusados: {2}, com falha: {3}"),
+    IT("Propagazione interrotta: {0} fatti, {1} non raggiunti, rifiutati: {2}, falliti: {3}"),
+    NL("Doorvoeren gestopt: {0} klaar, {1} niet bereikt, geweigerd: {2}, mislukt: {3}"),
+    RU("Распространение остановлено: готово {0}, не обработано {1}, отклонено: {2}, не удалось: {3}"),
+    TR("Yayma durduruldu: {0} tamam, {1} işlenmedi, reddedildi: {2}, başarısız: {3}"));
+
+SS_MSG(prop_undo_stopped,
+    EN("Undo propagate stopped: {0} put back, {1} still propagated. Undo propagate again to finish."),
+    JA("伝播の取り消しを中止しました: {0} を戻し、{1} は伝播したままです。もう一度「伝播を元に戻す」で完了します。"),
+    ZH_HANS("撤销传播已停止：已恢复 {0}，仍有 {1} 保持传播。再次撤销传播即可完成。"),
+    ZH_HANT("復原傳播已停止：已還原 {0}，仍有 {1} 保持傳播。再次復原傳播即可完成。"),
+    KO("전파 취소 중지됨: {0}개 복원, {1}개는 아직 전파된 상태입니다. 전파 취소를 다시 눌러 마치세요."),
+    DE("Rückgängig abgebrochen: {0} wiederhergestellt, {1} noch übertragen. Erneut rückgängig machen, um abzuschließen."),
+    FR("Annulation arrêtée : {0} rétablies, {1} encore propagées. Annulez la propagation à nouveau pour terminer."),
+    ES("Deshacer detenido: {0} restaurados, {1} siguen propagados. Deshaga la propagación otra vez para terminar."),
+    PT("Desfazer interrompido: {0} restaurados, {1} ainda propagados. Desfaça a propagação de novo para concluir."),
+    IT("Annullamento interrotto: {0} ripristinati, {1} ancora propagati. Annulla di nuovo la propagazione per finire."),
+    NL("Ongedaan maken gestopt: {0} teruggezet, {1} nog doorgevoerd. Maak het doorvoeren opnieuw ongedaan om af te ronden."),
+    RU("Отмена остановлена: восстановлено {0}, ещё распространено {1}. Отмените распространение снова, чтобы завершить."),
+    TR("Geri alma durduruldu: {0} geri kondu, {1} hâlâ yayılmış. Bitirmek için yaymayı yeniden geri alın."));
+
+SS_MSG(prop_cancel,
+    EN("Stop"),
+    JA("中止"),
+    ZH_HANS("停止"),
+    ZH_HANT("停止"),
+    KO("중지"),
+    DE("Abbrechen"),
+    FR("Arrêter"),
+    ES("Detener"),
+    PT("Parar"),
+    IT("Interrompi"),
+    NL("Stoppen"),
+    RU("Остановить"),
+    TR("Durdur"));
+
+SS_MSG(prop_cancel_help,
+    EN("Stop after the frames being written now. Frames already done stay done, and Undo propagate still takes them back."),
+    JA("書き込み中のフレームの後で中止します。完了したフレームはそのまま残り、「伝播を元に戻す」で戻せます。"),
+    ZH_HANS("在当前正在写入的帧完成后停止。已完成的帧保持不变，仍可用撤销传播恢复。"),
+    ZH_HANT("在目前正在寫入的影格完成後停止。已完成的影格保持不變，仍可用復原傳播還原。"),
+    KO("지금 쓰는 프레임까지만 마치고 중지합니다. 이미 끝난 프레임은 그대로 두며, 전파 취소로 되돌릴 수 있습니다."),
+    DE("Nach den gerade geschriebenen Bildern anhalten. Fertige Bilder bleiben erhalten; Übertragen rückgängig nimmt sie weiterhin zurück."),
+    FR("S'arrêter après les images en cours d'écriture. Les images terminées le restent, et Annuler la propagation les rétablit toujours."),
+    ES("Detenerse tras los fotogramas que se escriben ahora. Los terminados se quedan así, y Deshacer propagación aún los revierte."),
+    PT("Parar depois dos quadros sendo gravados agora. Os já feitos permanecem, e Desfazer propagação ainda os reverte."),
+    IT("Fermarsi dopo i fotogrammi in scrittura. Quelli già fatti restano, e Annulla propagazione li ripristina comunque."),
+    NL("Stoppen na de beelden die nu worden geschreven. Klare beelden blijven zo, en Doorvoeren ongedaan maken zet ze nog steeds terug."),
+    RU("Остановиться после кадров, которые записываются сейчас. Готовые кадры остаются, и отмена распространения по-прежнему их вернёт."),
+    TR("Şu an yazılan karelerden sonra dur. Biten kareler öyle kalır; Yaymayı geri al onları yine geri alır."));
 
 SS_MSG(prop_undone,
     EN("Propagate undone: {0}"),

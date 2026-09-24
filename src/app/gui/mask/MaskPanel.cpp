@@ -194,7 +194,7 @@ void MaskSession::draw_toolbar() {
                               ImGuiHoveredFlags_AllowWhenDisabled);
     ImGui::SameLine();
     ImGui::BeginDisabled(!_doc || !_doc->can_undo());
-    if (ui::Button(msg::undo)) upload_rect(undo());
+    if (ui::Button(msg::undo)) upload_rect(undo_step());
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(!_doc || !_doc->can_redo());
@@ -219,8 +219,14 @@ void MaskSession::draw_toolbar() {
     ImGui::EndDisabled();
     ui::help_on_hover(msg::revert_all_help);
     draw_revert_all_modal();
-    ImGui::SameLine();
-    if (ui::Button(msg::done)) _close_requested = true;
+    ImGui::SameLine(0.0f, px(24.0f));
+    // The way out of the window, so it looks like one rather than one more tool.
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.52f, 0.28f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.20f, 0.62f, 0.34f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.44f, 0.24f, 1.0f));
+    if (ui::Button(msg::done, ImVec2(px(120.0f), 0.0f))) _close_requested = true;
+    ImGui::PopStyleColor(3);
+    ui::help_on_hover(msg::done_help);
     _toolbar_w = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
                  ImGui::GetStyle().WindowPadding.x;
 
@@ -237,6 +243,12 @@ void MaskSession::draw_toolbar() {
     if (ui::ButtonRaw(">")) go_to(_idx + 1);
     if (shape) ui::help_on_hover_disabled(msg::nav_locked);
     ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ui::RadioButton(msg::mode_add, !_subtract)) _subtract = false;
+    ui::help_on_hover(msg::mode_help);
+    ImGui::SameLine();
+    if (ui::RadioButton(msg::mode_subtract, _subtract)) _subtract = true;
+    ui::help_on_hover(msg::mode_help);
 
     // On this row rather than a third one: a third row comes out of what
     // draw_canvas has to share between canvas and strip, raising the window
@@ -338,7 +350,20 @@ void MaskSession::draw_workflow_row() {
     ui::help_on_hover_disabled(msg::prop_undo_help);
     ImGui::EndDisabled();
     note_row_width();
-    ui::TextDisabled(msg::prop_warn_moves);
+    // In the warning's row and at its height, so a run moves nothing below it.
+    if (const int total = propagate_total(); total > 0) {
+        const int done = std::min(propagate_done(), total);
+        ui::ProgressBar((float)done / (float)total,
+                        ImVec2(px(420.0f), ImGui::GetTextLineHeight()), msg::prop_progress,
+                        {done, total});
+        ImGui::SameLine();
+        ImGui::BeginDisabled(propagate_cancelling());
+        if (ui::SmallButton(msg::prop_cancel)) cancel_propagate();
+        ImGui::EndDisabled();
+        ui::help_on_hover_disabled(msg::prop_cancel_help);
+    } else {
+        ui::TextDisabled(msg::prop_warn_moves);
+    }
     note_row_width();
 
     // Row D: find missing. The count's width changes as the scan runs, which
@@ -632,7 +657,7 @@ void MaskSession::handle_keys(const Mapping& m) {
         if (!io.KeyShift && !path_mode() && _tool.id() == ToolId::Polygon && _tool.in_progress() &&
             _tool.pop_point())
             return;
-        upload_rect(io.KeyShift ? redo() : undo());
+        upload_rect(io.KeyShift ? redo() : undo_step());
     }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) save();
     const ImGuiInputFlags route = ImGuiInputFlags_RouteFocused |
@@ -721,7 +746,7 @@ void MaskSession::draw_status() {
                  {(int)std::lround(radius())});
         ImGui::SameLine();
         ui::Text(msg::status_commit, {one_decimal(_last_commit_ms)});
-        ui::TextDisabledWrapped(erasing() ? msg::hint_eraser : msg::hint_buttons);
+        ui::TextDisabledWrapped(erasing() != _subtract ? msg::hint_eraser : msg::hint_buttons);
     }
     if (path_mode()) {
         ui::TextDisabledWrapped(msg::hint_path);
@@ -759,8 +784,8 @@ void MaskSession::draw_sam_clicks(ImDrawList* dl, const Mapping& m, float ox, fl
 void MaskSession::draw_sam_status() {
     if (_model_picker) _model_picker();
     if (!sam_has_model()) ui::TextDisabled(dmsg::mask_model_first);
-    // The editor's own margin, never the dataset's. A drop takes it, and a
-    // release re-applies it to the drop just made (sam_margin_changed).
+    // The editor's own margin, never the dataset's. Every add takes it, and a
+    // release re-applies it to the add just made (sam_margin_changed).
     MaskSettings& p = sam_prompt();
     if (draw_margin_slider(p.dilate_ratio, p.shrink_ratio, /*keep=*/false, px(220.0f),
                            /*inline_label=*/true))
@@ -793,23 +818,22 @@ void MaskSession::draw_sam_status() {
     if (pad > 0.0f) ImGui::Dummy(ImVec2(0.0f, pad));
 }
 
-// The phrase field on one row with Find and the palette's button, or the reason
-// there is none (SAM 2 has no text tower), so the strip never grows.
+// The phrase field on one row with Find and the palette's button, so the strip
+// never grows. SAM 2 has no text tower: a phrase is still typed and submitted,
+// and the refusal says to switch to SAM 3.
 void MaskSession::draw_sam_text() {
     MaskSettings& p = sam_prompt();
-    const bool no_text = !sam_has_model() || !sam_text_supported();
-    ImGui::BeginDisabled(no_text);
+    const bool no_text = sam_has_model() && !sam_text_supported();
+    ImGui::BeginDisabled(!sam_has_model());
     ImGui::SetNextItemWidth(px(420.0f));
     if (ui::InputTextEnglish(msg::sam_text_label, "person; monopod", &p.prompt,
                              ImGuiInputTextFlags_EnterReturnsTrue))
         sam_submit_text();
     ImGui::EndDisabled();
-    if (no_text)
-        ui::help_on_hover_disabled(sam_has_model() ? msg::sam_text_unsupported
-                                                   : dmsg::mask_model_first);
+    if (!sam_has_model()) ui::help_on_hover_disabled(dmsg::mask_model_first);
     ImGui::SameLine();
     const std::string why = sam_text_refused();
-    ImGui::BeginDisabled(!why.empty());
+    ImGui::BeginDisabled(!why.empty() && !no_text);
     if (ui::Button(msg::sam_text_find)) sam_submit_text();
     ImGui::EndDisabled();
     ui::help_on_hover_raw(why.c_str(), ImGuiHoveredFlags_AllowWhenDisabled);

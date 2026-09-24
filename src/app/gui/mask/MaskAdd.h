@@ -52,11 +52,9 @@ struct HeldRegion {
 HeldRegion hold_region(const AddRegion& g);
 AddRegion expand_region(const HeldRegion& held);
 
-// The margin grows what is thrown away, as on the dataset screen: a drop takes
-// the editor's ratio, a keep or a clear SAM's exact outline. Never signed.
-inline float drop_margin(Paint mode, float ratio) {
-    return mode == Paint::ForceDrop && ratio > 0.0f ? ratio : 0.0f;
-}
+// Every mode grows by the margin: a keep or clear that stopped at SAM's exact
+// outline would leave the rim an earlier drop's margin took. Never signed.
+inline float add_margin(float ratio) { return ratio > 0.0f ? ratio : 0.0f; }
 
 }  // namespace mask
 }  // namespace gui

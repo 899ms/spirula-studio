@@ -21,12 +21,15 @@
 namespace app {
 
 struct MaskShape {
-    enum class Kind { Ellipse, Rect, Path };
+    enum class Kind { Ellipse, Rect, Path, Stroke };
     Kind  kind = Kind::Ellipse;
     bool  remove = false;           // false = keep what is inside
     float cx = 0.5f, cy = 0.5f;     // rect: the two corners go in cx,cy / rx,ry
+    // Stroke: its half-width per axis, so a brush stays round on any aspect.
     float rx = 0.5f, ry = 0.5f;
-    std::vector<float> pts;         // path: 3+ corners as x,y pairs, closed
+    // x,y pairs. Path: 3+ corners, closed, even-odd. Stroke: 1+ points of a
+    // round-capped polyline, what a brush drags.
+    std::vector<float> pts;
 };
 
 // Shapes are applied IN ORDER, each one adding its inside to what is kept or
@@ -43,8 +46,8 @@ struct FrameMask {
 };
 
 // "ellipse 0.5,0.5,0.49,0.49; -rect 0.2,0.9,0.8,1; path 0.1,0.1,0.9,0.1,0.5,0.9":
-// ';'-separated, a leading '-' removes what is inside. A rect takes two corners,
-// an ellipse centre and radii, a path 3+ corners. FrameMask::image has no spelling.
+// ';'-separated, '-' removes. rect: two corners; ellipse: centre, radii; path:
+// 3+ corners; stroke: rx, ry, then 1+ points. The file form is app/FrameMaskSvg.h.
 bool parse_mask_shapes(const std::string& spec, std::vector<MaskShape>& out,
                        std::string& error);
 std::string format_mask_shapes(const std::vector<MaskShape>& shapes);

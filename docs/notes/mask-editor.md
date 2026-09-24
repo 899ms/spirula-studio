@@ -7,11 +7,13 @@ corrections re-applied instead of losing them.
 
 ## Opening it
 
-**Correct masks** appears in two places once the dataset has masks: on the
-dataset screen, and on the Train screen next to the dataset path. The editor
-opens on the first frame; the frame slider, `<` and `>` move between frames.
-A frame is saved when you leave it, when you close the window, or on **Save**
-(Ctrl+S). **Revert frame** puts the run's mask back and deletes that frame's
+**Correct Masks** appears in two places once the dataset has masks: on the
+dataset screen, beside **Open in trainer** and **Edit reconstruction** (also
+for a finished dataset loaded there, with or without a reconstruction), and on
+the Train screen next to the dataset path. The editor
+opens on the first frame with the SAM tool selected; the frame slider, `<` and `>` move between frames.
+A frame is saved when you leave it, when you close the window (the green
+**Done** at the end of the tool row), or on **Save** (Ctrl+S). **Revert frame** puts the run's mask back and deletes that frame's
 corrections; **Revert all** does the same for every frame, after asking.
 
 ## Tools
@@ -28,7 +30,9 @@ On macOS, Ctrl below means Command, as elsewhere in the app.
 Shapes, brush and path paint with the 3D editor's selection grammar:
 a plain or Shift drag **drops**, Ctrl **keeps**, Shift+Ctrl **clears** the
 correction back to what the run wrote. The modifiers are read when the shape
-completes. Right click or Enter closes a polygon; Ctrl+Z takes back its last
+completes. **Add / Subtract**, beside the frame slider, swaps drop and keep
+for every tool, SAM clicks included: under Subtract a plain drag keeps and Ctrl
+drops. The eraser swaps them too, so under Subtract it drops. Right click or Enter closes a polygon; Ctrl+Z takes back its last
 point. Esc cancels a shape in progress.
 
 **Brush size** is in mask pixels, 1 to 4096, and shared by the brush and the
@@ -41,17 +45,19 @@ Barrett's intelligent scissors). Click the first anchor, press Enter or right
 click to close and paint the inside. Hold Ctrl (keep) or Shift+Ctrl (clear)
 when you place the first anchor. Ctrl+Z removes an anchor; Esc cancels.
 
-**SAM.** Needs a masking checkpoint; the strip shows the dataset screen's
-model picker and download. A click drops the object under it, Ctrl+click
+**SAM.** Needs a masking checkpoint; the strip has its own model picker,
+SAM 2.1 Base+ by default (fast clicks), separate from the dataset screen's. A click drops the object under it, Ctrl+click
 keeps it, Shift+Ctrl+click clears its corrections, and a right click marks a
-part as "not this". Further clicks on the same object refine it in place, so
-one undo removes the whole object. The object list works as on the dataset
+part as "not this". Further clicks on the same object refine it in place;
+Ctrl+Z (or Undo) takes back the last click and prompts again with the rest,
+and the object's only click takes the object with it. The object list works as on the dataset
 screen. **Text prompt**: type phrases separated by `;` and press Enter or
 **Find** to drop every match on the frame; **Common subjects** opens the
 subject palette, whose exceptions protect what they name. SAM 2 checkpoints
-have no text encoder, so the field is disabled. **Extra margin around what's
-removed** grows drops (never keeps or clears) by a fraction of the object's
-size; releasing the slider re-applies it to the last drop while that is still
+have no text encoder, so a phrase is refused with a note to switch to SAM 3. **Extra margin around what's
+removed** grows every SAM add -- drop, keep or clear -- by a fraction of the
+object's size, so a keep over a drop made with a margin takes back the whole
+drop; releasing the slider re-applies it to the last add while that is still
 the newest edit. Esc cancels a prompt once its current step finishes.
 
 ## Viewing
@@ -75,6 +81,10 @@ its own model output underneath. It replaces the corrections a target already
 had, and it copies pixels: it does not follow an object that moves. A target
 whose mask has another size is refused and named. **Undo propagate** puts
 every touched frame back; it is offered while the source frame is still open.
+**Stop**, beside the progress bar, ends a propagate or its undo after the
+frames being written: what was done stays done and undoable, and a stopped
+undo leaves the rest for Undo propagate. Done stops a running one the same way
+and logs how far it got.
 
 ## Find missing
 
@@ -144,7 +154,10 @@ Undo keeps the RLE of each stroke's rectangle, capped at 96 steps or 256 MB.
 
 **Threads.** The UI thread owns the document and every GL call. A single
 **worker** loads, saves, reverts and propagates, in order; the UI hands it
-snapshots, so painting continues while an 8K frame encodes.
+snapshots, so painting continues while an 8K frame encodes. A propagate
+spreads its targets over `propagate_threads` inside its worker job (about
+1 GB of planes in flight), each on a copy of its own index entry, and writes
+`index.json` at most once a second and at the end.
 A **scan** thread reads kept fractions for find missing, and discards any
 read a worker job overlapped. The slideshow's **prefetch pool** decodes a few
 frames ahead into a ring; its thread count comes from a byte budget. SAM
@@ -178,14 +191,18 @@ device, and loads on the device the app froze for inference.
 - A job co-owns the frame's pixels through `shared_ptr<const ...>` (`MaskSession.h:481`).
 - `_doc_gen` is bumped at the one place a document is installed (`MaskSession.cpp:352`).
 - Re-compose compares pictures, not file bytes, before it replaces a base (`MaskLayer.cpp:363`).
-- Propagate saves its source inside its own job, so it sees that save fail (`MaskSession.cpp:539`).
-- The margin grows drops only (`MaskAdd.h:57`).
+- Propagate saves its source inside its own job, so it sees that save fail (`MaskSession.cpp:595`).
+- The margin grows every mode, keep and clear too (`MaskAdd.h:57`).
+- Layer PNGs are encoded by miniz, not stb: 43 ms against 280 at 8K (`MaskLayer.cpp:107`).
 - The canvas owns Tab except while a text field has focus (`MaskPanel.cpp:395`).
 - The slideshow's decoder count comes from the byte budget, not the core count (`MaskSlideshow.h:59`).
 
 **Measured** on an M5 Pro with 7680x3840 frames: the slideshow holds 16.6 fps
 into a 1024 px pane and 13.4 fps into 4096 px; resident memory 10 s into
 playback is +244 MB over the Train screen (median of three launches).
+Propagating one frame's corrections to 23 others at 8K takes 1.7 s on an
+8-core Linux box, 25.7 s before the pool and the miniz encoder
+(`SS_MASK_BENCH`, `bench propagate`).
 
 ## Tests and checks
 

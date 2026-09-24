@@ -1,8 +1,10 @@
 // frame_mask_test -- app/FrameMask.h shapes with no GUI: the even-odd fill
 // in core/PolygonFill.h against a ray cast, the path spelling round trip,
-// the path fill on a non-square frame, and the ordered composition rule.
+// the path fill on a non-square frame, the ordered composition rule, brush
+// strokes, and the SVG file form (app/FrameMaskSvg.h).
 
 #include "app/FrameMask.h"
+#include "app/FrameMaskSvg.h"
 #include "core/PolygonFill.h"
 #include "core/SourcePath.h"
 
@@ -357,6 +359,138 @@ void test_path_point_matches_fill_boundary() {
                      "bow tie, grid-aligned");
 }
 
+
+// A stroke is a capsule chain of rx*W by ry*H pixels.
+void test_stroke_fill() {
+    app::FrameMask m;
+    app::MaskShape s;
+    s.kind = app::MaskShape::Kind::Stroke;
+    s.remove = true;
+    s.rx = 0.05f;
+    s.ry = 0.05f;
+    s.pts = {0.25f, 0.5f, 0.75f, 0.5f};
+    m.shapes.push_back(s);
+    std::vector<uint8_t> px;
+    std::string err;
+    check(app::rasterize_frame_mask(m, 200, 100, px, err), "stroke rasterizes");
+    auto at = [&](int x, int y) { return px[(size_t)y * 200 + x]; };
+    check(at(100, 50) == 0 && at(50, 50) == 0 && at(150, 50) == 0, "stroke: the segment is removed");
+    check(at(100, 53) == 0 && at(100, 57) == 255, "stroke: half-height is ry*H = 5 px");
+    check(at(42, 50) == 0 && at(38, 50) == 255, "stroke: the cap reaches rx*W = 10 px past the end");
+    check(at(10, 10) == 255, "stroke: the rest is kept");
+
+    // One point is a dot, and the spelling carries the radii first.
+    s.pts = {0.5f, 0.5f};
+    std::vector<app::MaskShape> back;
+    check(app::parse_mask_shapes(app::format_mask_shapes({s}), back, err) && back.size() == 1 &&
+              back[0].kind == app::MaskShape::Kind::Stroke && back[0].remove &&
+              std::fabs(back[0].rx - 0.05f) < 1e-4f && std::fabs(back[0].ry - 0.05f) < 1e-4f &&
+              back[0].pts.size() == 2,
+          "stroke spelling round trip: " + app::format_mask_shapes({s}));
+}
+
+std::vector<uint8_t> raster(const std::vector<app::MaskShape>& shapes, int W, int H) {
+    app::FrameMask m;
+    m.shapes = shapes;
+    std::vector<uint8_t> px;
+    std::string err;
+    app::rasterize_frame_mask(m, W, H, px, err);
+    return px;
+}
+
+// Every kind written and read back rasterizes to the same pixels; a keep
+// first makes the base black in the file as in the fill.
+void test_svg_round_trip() {
+    std::vector<app::MaskShape> shapes(5);
+    shapes[0].kind = app::MaskShape::Kind::Rect;
+    shapes[0].remove = true;
+    shapes[0].cx = 0.1f; shapes[0].cy = 0.7f; shapes[0].rx = 0.9f; shapes[0].ry = 1.0f;
+    shapes[1].kind = app::MaskShape::Kind::Ellipse;
+    shapes[1].remove = false;
+    shapes[1].cx = 0.5f; shapes[1].cy = 0.8f; shapes[1].rx = 0.2f; shapes[1].ry = 0.1f;
+    shapes[2].kind = app::MaskShape::Kind::Path;
+    shapes[2].remove = true;
+    shapes[2].pts = {0.1f, 0.1f, 0.4f, 0.1f, 0.25f, 0.4f};
+    shapes[3].kind = app::MaskShape::Kind::Stroke;
+    shapes[3].remove = true;
+    shapes[3].rx = 0.02f;
+    shapes[3].ry = 0.02f;
+    shapes[3].pts = {0.6f, 0.1f, 0.9f, 0.3f, 0.6f, 0.5f};
+    shapes[4].kind = app::MaskShape::Kind::Stroke;
+    shapes[4].remove = false;
+    shapes[4].rx = 0.03f;
+    shapes[4].ry = 0.06f;
+    shapes[4].pts = {0.75f, 0.3f};
+    const std::string svg = app::write_mask_svg(shapes, "Selfie stick & me");
+    std::vector<app::MaskShape> back;
+    std::string title, err;
+    check(app::read_mask_svg(svg, back, title, err), "svg reads back: " + err);
+    check(title == "Selfie stick & me", "svg title round trip: '" + title + "'");
+    check(back.size() == shapes.size(), "svg: every shape comes back, " +
+                                            std::to_string(back.size()));
+    for (size_t i = 0; i < back.size() && i < shapes.size(); i++)
+        check(back[i].kind == shapes[i].kind && back[i].remove == shapes[i].remove,
+              "svg: shape " + std::to_string(i) + " keeps its kind and op");
+    check(raster(back, 160, 90) == raster(shapes, 160, 90), "svg: identical raster at 160x90");
+    check(svg.find("data-rx=\"0.03\" data-ry=\"0.06\"") != std::string::npos &&
+              svg.find("data-rx=\"0.02\"") == std::string::npos,
+          "svg: only a stroke that differs per axis carries data-rx/ry");
+    check(svg.find("fill=\"#fff\"/>") != std::string::npos &&
+              svg.find("data-role=\"base\"") != std::string::npos,
+          "svg: the base rect is written");
+
+    std::vector<app::MaskShape> keep_first(shapes.begin() + 1, shapes.end());
+    const std::string k = app::write_mask_svg(keep_first);
+    check(k.find("data-role=\"base\" x=\"0\" y=\"0\" width=\"1\" height=\"1\" fill=\"#000\"") !=
+              std::string::npos,
+          "svg: a keep first paints a black base");
+    check(app::read_mask_svg(k, back, title, err) &&
+              raster(back, 64, 64) == raster(keep_first, 64, 64),
+          "svg: keep-first file reads back to the same raster");
+}
+
+// Hand-made SVG: pixel viewBox, circle, polygon, curves, style="", groups,
+// defaults (a bare shape is black, so it removes).
+void test_svg_hand_made() {
+    const std::string svg =
+        "<?xml version='1.0'?><!-- made by hand -->\n"
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 100'>"
+        "<defs><rect x='0' y='0' width='200' height='100'/></defs>"
+        "<g fill='white'><circle cx='100' cy='50' r='10' fill='black'/>"
+        "<polygon points='0,0 20,0 0,20'/></g>"
+        "<path style='fill:none;stroke:#000;stroke-width:4' d='M150 10 C 160 10, 170 20, 170 30'/>"
+        "<path d='M10 90 h20 v-10 h-20 z m40 0 h10 v-10 h-10 z'/>"
+        "<path d='M 100 90 A 5 5 0 1 0 110 90'/>"
+        "</svg>";
+    std::vector<app::MaskShape> out;
+    std::string title, err;
+    check(app::read_mask_svg(svg, out, title, err), "hand-made svg reads: " + err);
+    check(out.size() == 6, "hand-made svg: circle, polygon, stroke, two subpaths, arc -- " +
+                               std::to_string(out.size()));
+    if (out.size() == 6) {
+        check(out[0].kind == app::MaskShape::Kind::Ellipse && out[0].remove &&
+                  std::fabs(out[0].cx - 0.5f) < 1e-5f && std::fabs(out[0].rx - 0.05f) < 1e-5f &&
+                  std::fabs(out[0].ry - 0.1f) < 1e-5f,
+              "circle: normalized per axis by the viewBox");
+        check(out[1].kind == app::MaskShape::Kind::Path && !out[1].remove,
+              "polygon inherits the group's white fill: keeps");
+        check(out[2].kind == app::MaskShape::Kind::Stroke && out[2].remove &&
+                  out[2].pts.size() > 4 && std::fabs(out[2].rx - 0.01f) < 1e-6f &&
+                  std::fabs(out[2].ry - 0.02f) < 1e-6f,
+              "style='' stroke becomes a flattened stroke, 4 units wide per viewBox axis");
+        check(out[3].kind == app::MaskShape::Kind::Path && out[4].kind == app::MaskShape::Kind::Path &&
+                  std::fabs(out[4].pts[0] - 0.25f) < 1e-5f,
+              "relative subpaths: one shape each, the second at x=50");
+        check(out[5].kind == app::MaskShape::Kind::Path && out[5].pts.size() > 8,
+              "an arc flattens into a filled path");
+    }
+    check(!app::read_mask_svg("<svg><rect transform='rotate(4)' width='1' height='1'/></svg>",
+                              out, title, err) &&
+              err.find("transform") != std::string::npos,
+          "a transform is refused by name");
+    check(!app::read_mask_svg("hello", out, title, err), "not an SVG is refused");
+}
+
 }  // namespace
 
 int main() {
@@ -366,6 +500,9 @@ int main() {
     test_path_order();
     test_format_extreme_values_do_not_truncate();
     test_path_point_matches_fill_boundary();
+    test_stroke_fill();
+    test_svg_round_trip();
+    test_svg_hand_made();
     std::printf("%s: %d failure(s)\n", SS_FILE, g_failures);
     return g_failures;
 }

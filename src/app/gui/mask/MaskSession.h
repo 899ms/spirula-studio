@@ -67,6 +67,14 @@ enum class PropagateScope { Next, Range, Camera };
 // only read for Range.
 std::vector<int> propagate_targets(const std::vector<FrameRef>& frames, int src,
                                    PropagateScope scope, int lo, int hi);
+// Frames a propagate works on at once: about 1 GB of w x h planes in flight
+// (six a frame), never more than the cores minus one, never more than 8.
+inline int propagate_threads(int w, int h, unsigned hardware_threads) {
+    const int cap = std::clamp((int)hardware_threads - 1, 1, 8);
+    const size_t one = w > 0 && h > 0 ? (size_t)w * (size_t)h * 6u : 0;
+    if (one == 0) return 1;
+    return std::clamp((int)std::min<size_t>(((size_t)1 << 30) / one, 8), 1, cap);
+}
 struct PropagateReport {
     int done = 0, refused = 0, failed = 0;
     int unrestored = 0;                 // failed targets that could not be put back
@@ -76,6 +84,7 @@ struct PropagateReport {
     std::string unrestored_key, unrestored_path;   // the first failure not put back
     bool failed_stray = false;          // that failure is a .base.png with no index entry
     int w = 0, h = 0;                   // the source's size
+    int skipped = 0;                    // targets a cancel left untouched
     bool undoable = false;
     size_t bytes = 0;                   // of the undo record
 };
@@ -158,6 +167,9 @@ public:
     bool sam_mode() const { return _mode == CanvasMode::Sam; }
     // Off returns to the shapes, which is where every other picker leaves it.
     void set_erasing(bool on) { _mode = on ? CanvasMode::Eraser : CanvasMode::Shape; }
+    // Subtract swaps drop and keep for every tool, as the eraser does for the brush.
+    bool subtracting() const { return _subtract; }
+    void set_subtract(bool on) { _subtract = on; }
     // ONE radius, shared by the brush and the eraser: the operator wants the
     // size to carry when they switch tools mid-correction. A second copy is
     // the defect to avoid here, not a feature to add.
@@ -305,7 +317,9 @@ public:
     // The mode a stroke commits with, from the modifiers on the frame it
     // completes and the tool it was drawn with.
     static Paint paint_for(bool shift, bool ctrl, bool erasing);
-    Paint paint_now(bool shift, bool ctrl) const { return paint_for(shift, ctrl, erasing()); }
+    Paint paint_now(bool shift, bool ctrl) const {
+        return paint_for(shift, ctrl, erasing() != _subtract);
+    }
     // The radius arithmetic, all of it, in mask pixels. clamp_brush is the
     // one place [kMinBrush, kMaxBrush] is enforced -- and it folds NaN to the
     // minimum, which std::clamp would propagate instead.
@@ -319,6 +333,11 @@ public:
     static float wheel_brush(float r, float wheel);
     Rect undo();
     Rect redo();
+    // SAM mode's undo: the object just clicked loses its last click and is
+    // prompted again with the rest, in place; its only click goes with the add.
+    // False when the top step is not that object's add.
+    bool sam_undo_click(Rect& changed);
+    Rect undo_step();
     void save();
     void revert_open_frame();
     void revert_every_frame();
@@ -331,6 +350,13 @@ public:
     bool can_undo_propagate() const;
     void undo_propagate();
     PropagateReport last_propagate() const;
+    // Frames handled and in all by the propagate (or undo) now running; total 0 when none is.
+    int propagate_done() const { return _prop_done.load(); }
+    int propagate_total() const { return _prop_total.load(); }
+    // Stops a running propagate or undo after the frames in flight; what was
+    // done stays done and undoable.
+    void cancel_propagate() { _prop_cancel = true; }
+    bool propagate_cancelling() const { return _prop_cancel.load() && _prop_total.load() > 0; }
 
     // ---- find missing ----
     float band_lo() const { return _band_lo; }
@@ -421,6 +447,7 @@ private:
     void stop_scan();
     void scan_main();
     void refresh_health(const std::vector<std::string>& keys);
+    void note_health(int i, const std::string& key);   // one frame just written, any thread
     Rect shown_rect(const Rect& stored) const;
     bool sam_add_on_top(int object) const;
     bool sam_add_redoable() const;
@@ -488,7 +515,8 @@ private:
     // imgui); a frame change asks it to reset through this flag.
     bool _tool_reset = false;
     float _brush = 24.0f;            // mask pixels, the brush's AND the eraser's
-    CanvasMode _mode = CanvasMode::Shape;
+    CanvasMode _mode = CanvasMode::Sam;
+    bool _subtract = false;
     bool _panning = false;
     double _last_commit_ms = 0.0;
 
@@ -630,6 +658,10 @@ private:
     std::function<void(int, bool)> _scan_hook;
     std::function<void(bool)> _worker_hook;
     size_t _prop_byte_cap = kMaxHistoryBytes;   // UI thread; copied into the job
+    // A running propagate or its undo, for the bar: targets handled, of total.
+    std::atomic<int> _prop_done{0}, _prop_total{0};
+    std::atomic<bool> _prop_cancel{false};
+    std::string _prop_stopped;       // guarded by _mu: the status of a run a cancel cut short
     std::string _status, _error;     // guarded by _mu
     bool _error_sticky = false;      // guarded by _mu
     int _corrected = 0;              // guarded by _mu

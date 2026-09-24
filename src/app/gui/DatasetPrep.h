@@ -615,6 +615,7 @@ struct WorkspaceState {
     bool frames = false;    // images/ this run would extract into
     bool features = false;  // features/, matches.bin, database.db -- reusable
     bool masks = false;     // masks/ this run would generate into
+    bool input_masks = false;  // masks an input came with (PrepInput::mask_dir)
     // A reconstruction any dataset reader can open: this run's own sparse/, or
     // the transforms.json, root-level COLMAP files or Metashape export of a
     // dataset that arrived finished. A run pointed at one ADDS to it.

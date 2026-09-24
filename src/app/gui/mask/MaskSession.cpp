@@ -10,6 +10,7 @@
 #include "i18n/catalog/MaskEdit.h"
 
 #include <algorithm>
+#include <iterator>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -57,6 +58,55 @@ std::string size_mismatch_text(const std::string& joined, const MaskDoc& doc) {
     }
     return text;
 }
+
+// fn(i) once for each i in [0, n), lowest first, on up to `threads` threads;
+// none starts after `stop` is set.
+void run_pool(int n, int threads, const std::atomic<bool>& stop,
+              const std::function<void(int)>& fn) {
+    std::atomic<int> next{0};
+    auto body = [&] {
+        while (!stop.load()) {
+            const int i = next.fetch_add(1);
+            if (i >= n) return;
+            fn(i);
+        }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < std::min(threads, n); t++) pool.emplace_back(body);
+    body();
+    for (std::thread& t : pool) t.join();
+}
+
+// An index a pool shares: each frame works on a copy holding only its own
+// entry, merged back under the lock; the file is written at most once a second.
+struct SharedIndex {
+    LayerIndex& idx;
+    const std::string& root;
+    std::mutex mu;
+    std::chrono::steady_clock::time_point saved = std::chrono::steady_clock::now();
+
+    LayerIndex copy(const std::string& key) {
+        LayerIndex x;
+        x.in_memory = true;
+        std::lock_guard<std::mutex> lk(mu);
+        x.mask_root = idx.mask_root;
+        x.mask_flipped = idx.mask_flipped;
+        const auto it = idx.frames.find(key);
+        if (it != idx.frames.end()) x.frames[key] = it->second;
+        return x;
+    }
+    void merge(const std::string& key, const LayerIndex& x) {
+        std::lock_guard<std::mutex> lk(mu);
+        const auto it = x.frames.find(key);
+        if (it != x.frames.end()) idx.frames[key] = it->second;
+        else idx.frames.erase(key);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - saved < std::chrono::seconds(1)) return;
+        saved = now;
+        std::string ignored;   // the save after the pool reports
+        idx.save(root, ignored);
+    }
+};
 
 }  // namespace
 
@@ -167,6 +217,7 @@ bool MaskSession::open(const std::string& workspace, const std::string& image_di
         _health.assign(_frames.size(), FrameHealth{});
         _scanned = 0;
     }
+    _mode = CanvasMode::Sam;   // every open starts on click masking
     _quit = false;
     _worker = std::thread([this] { worker_main(); });
     _open = true;
@@ -187,6 +238,10 @@ void MaskSession::close() {
     }
     _slide_playing = false;
     _slide_pic = Picture{};
+    // A propagate stops after the frames in flight rather than holding the
+    // window open for the rest; the log says how far it got.
+    const bool propagating = _prop_total.load() > 0;
+    _prop_cancel = true;
     if (_doc && _doc->dirty()) save();
     close_sam();   // order vs the worker join is free: the save never touches SAM
     {
@@ -198,11 +253,13 @@ void MaskSession::close() {
     // The status strip is gone by now, so a write that failed on the way out
     // has nowhere else to be seen.
     if (_log) {
-        std::string lost;
+        std::string lost, stopped;
         {
             std::lock_guard<std::mutex> lk(_mu);
             if (_error_sticky) lost = _error;
+            if (propagating) stopped = _prop_stopped;
         }
+        if (!stopped.empty()) _log(stopped);
         if (!lost.empty()) _log(lost);
     }
     _quit = false;
@@ -545,22 +602,35 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
         bool dirty = false, comp = false;
         uint64_t rev = 0;
         size_t byte_cap = 0;
+        int threads = 1;
         std::vector<FrameRef> targets;
+        std::vector<int> at;   // each target's index in _frames
     };
     auto j = std::make_shared<Job>();
     j->byte_cap = _prop_byte_cap;   // the setter is the UI thread's
     j->source_key = _doc->key();
     j->W = _doc->width();
     j->H = _doc->height();
+    j->threads = propagate_threads(j->W, j->H, std::thread::hardware_concurrency());
     j->base = _doc->base();
     j->drop = _doc->drop();
     j->keep = _doc->keep();
     j->dirty = _doc->dirty();
     j->comp = _doc->base_state() != BaseState::Missing;
     j->rev = _doc->revision();
-    for (int t : targets) j->targets.push_back(_frames[(size_t)t]);
+    for (int t : targets) {
+        j->targets.push_back(_frames[(size_t)t]);
+        j->at.push_back(t);
+    }
     post_status(msg::prop_working.get(), false);
+    _prop_cancel = false;
+    _prop_done = 0;
+    _prop_total = (int)j->targets.size();
     enqueue([this, j] {
+        struct Progress {
+            std::atomic<int>& total;
+            ~Progress() { total = 0; }
+        } progress{_prop_total};
         std::string err;
         if (j->dirty) {
             if (!save_frame(_layer_root, _mask_root, j->source_key, j->W, j->H, j->base.data(),
@@ -577,6 +647,54 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
             _saved_comp = j->comp;
             _saved_ready = true;
         }
+        struct Outcome {
+            enum What { NotRun, NoSnapshot, Stray, Refused, Done, Failed } what = NotRun;
+            LayerSnapshot snap;
+            std::string err;
+            PropagateRefusal refused;
+            bool unrestored = false;
+        };
+        std::vector<Outcome> out(j->targets.size());
+        SharedIndex shared{_index, _layer_root};
+        run_pool((int)out.size(), j->threads, _prop_cancel, [&](int i) {
+            const FrameRef& f = j->targets[(size_t)i];
+            Outcome& o = out[(size_t)i];
+            LayerIndex x = shared.copy(f.key);
+            // Without a snapshot nothing could be put back: skipped, counted.
+            if (!snapshot_layers(_layer_root, f.key, x, o.snap, o.err)) {
+                o.what = Outcome::NoSnapshot;
+                _prop_done++;
+                return;
+            }
+            // Undo would revert through a base no entry vouches for, copying
+            // it over the mask on disk, whatever wrote that since.
+            const std::string stray = layer_file(_layer_root, f.key, Layer::Base);
+            std::error_code ec;
+            if (!o.snap.had_entry && fs::exists(stray, ec)) {
+                o.what = Outcome::Stray;
+                o.err = stray;
+                _prop_done++;
+                return;
+            }
+            if (propagate_to(_layer_root, _mask_root, f.key, f.file, j->W, j->H, j->drop.data(),
+                             j->keep.data(), x, o.refused, o.err)) {
+                o.what = Outcome::Done;
+            } else if (o.err.empty()) {
+                o.what = Outcome::Refused;
+            } else {
+                // Written, or partly: the snapshot is what puts it back.
+                o.what = Outcome::Failed;
+                std::string rerr;
+                o.unrestored = !restore_layers(_layer_root, _mask_root, o.snap, x, rerr);
+            }
+            shared.merge(f.key, x);
+            if (o.what != Outcome::Refused) note_health(j->at[(size_t)i], f.key);
+            _prop_done++;
+        });
+        std::string index_err;
+        const bool index_saved = shared.idx.save(_layer_root, index_err);
+
+        // In target order, so the first failure named is the first frame's.
         PropagateRecord rec;
         rec.source_key = j->source_key;
         PropagateReport rep;
@@ -589,63 +707,56 @@ void MaskSession::propagate(PropagateScope scope, int lo, int hi) {
             rep.failed_path = path;
             rep.failed_stray = stray;
         };
-        for (const FrameRef& f : j->targets) {
-            LayerSnapshot snap;
-            std::string serr;
-            // Without a snapshot nothing could be put back: skipped, counted.
-            if (!snapshot_layers(_layer_root, f.key, _index, snap, serr)) {
-                fail(f.key, serr, false);
-                continue;
-            }
-            // Undo would revert through a base no entry vouches for, copying
-            // it over the mask on disk, whatever wrote that since.
-            const std::string stray = layer_file(_layer_root, f.key, Layer::Base);
-            std::error_code ec;
-            if (!snap.had_entry && fs::exists(stray, ec)) {
-                fail(f.key, stray, true);
-                continue;
-            }
-            PropagateRefusal refused;
-            const bool ok = propagate_to(_layer_root, _mask_root, f.key, f.file, j->W, j->H,
-                                         j->drop.data(), j->keep.data(), _index, refused, err);
-            if (!ok && err.empty()) {
+        for (size_t i = 0; i < out.size(); i++) {
+            Outcome& o = out[i];
+            const std::string& key = j->targets[i].key;
+            switch (o.what) {
+            case Outcome::NotRun: rep.skipped++; break;
+            case Outcome::NoSnapshot: fail(key, o.err, false); break;
+            case Outcome::Stray: fail(key, o.err, true); break;
+            case Outcome::Refused:
                 rep.refused++;
                 if (rep.refused_key.empty()) {
-                    rep.refused_key = f.key;
-                    rep.refused_w = refused.w;
-                    rep.refused_h = refused.h;
+                    rep.refused_key = key;
+                    rep.refused_w = o.refused.w;
+                    rep.refused_h = o.refused.h;
                 }
-                continue;
-            }
-            // Written, or partly: the snapshot is what puts it back either way.
-            rec.bytes += snap.bytes();
-            if (ok) {
-                rep.done++;
-            } else {
-                fail(f.key, err, false);
-                std::string rerr;
-                if (!restore_layers(_layer_root, _mask_root, snap, _index, rerr) && !rep.unrestored++) {
-                    rep.unrestored_key = f.key;
-                    rep.unrestored_path = err;
+                break;
+            case Outcome::Done:
+            case Outcome::Failed:
+                rec.bytes += o.snap.bytes();
+                if (o.what == Outcome::Done) {
+                    rep.done++;
+                } else {
+                    fail(key, o.err, false);
+                    if (o.unrestored && !rep.unrestored++) {
+                        rep.unrestored_key = key;
+                        rep.unrestored_path = o.err;
+                    }
                 }
+                rec.targets.push_back(std::move(o.snap));
+                break;
             }
-            rec.targets.push_back(std::move(snap));
         }
         rep.bytes = rec.bytes;
         rep.undoable = !rec.targets.empty() && rec.bytes <= j->byte_cap;
         set_corrected((int)_index.frames.size());
-        std::vector<std::string> touched;
-        for (const FrameRef& t : j->targets) touched.push_back(t.key);
-        if (j->dirty) touched.push_back(j->source_key);   // saved above
-        refresh_health(touched);
+        if (j->dirty) refresh_health({j->source_key});   // saved above
         std::lock_guard<std::mutex> lk(_mu);
         _prop_report = rep;
         _prop_undoable = rep.undoable;
         _prop = rep.undoable ? std::move(rec) : PropagateRecord{};
-        _status = spirula::i18n::format(msg::prop_done, {rep.done, rep.refused, rep.failed});
+        _status = rep.skipped
+                      ? spirula::i18n::format(msg::prop_stopped,
+                                              {rep.done, rep.skipped, rep.refused, rep.failed})
+                      : spirula::i18n::format(msg::prop_done, {rep.done, rep.refused, rep.failed});
+        _prop_stopped = rep.skipped ? _status : std::string();
         // By priority, so a failure named in the loop is never clobbered, and
         // a frame left not put back is named before any that was.
-        if (rep.unrestored)
+        if (!index_saved) {
+            _error = spirula::i18n::format(msg::err_write, {index_err});
+            _error_sticky = true;
+        } else if (rep.unrestored)
             _error = spirula::i18n::format(rep.undoable ? msg::prop_failed_not_restored
                                                         : msg::prop_failed_not_restored_final,
                                            {rep.unrestored_key, rep.unrestored_path, rep.unrestored});
@@ -676,38 +787,73 @@ void MaskSession::undo_propagate() {
     }
     std::map<std::string, int> at;
     for (size_t i = 0; i < _frames.size(); i++) at[_frames[i].key] = (int)i;
-    std::vector<int> frames;
-    for (const LayerSnapshot& t : rec->targets)
-        if (at.count(t.key)) frames.push_back(at[t.key]);
+    std::vector<int> frames, slot;   // slot: each target's frame, -1 if gone
+    for (const LayerSnapshot& t : rec->targets) {
+        const auto it = at.find(t.key);
+        slot.push_back(it == at.end() ? -1 : it->second);
+        if (it != at.end()) frames.push_back(it->second);
+    }
     sam_forget_clicks(frames);
-    enqueue([this, rec] {
-        std::vector<std::string> touched;   // before the loop moves the failures out
-        for (const LayerSnapshot& t : rec->targets) touched.push_back(t.key);
+    const int threads = propagate_threads(_doc->width(), _doc->height(),
+                                          std::thread::hardware_concurrency());
+    _prop_cancel = false;
+    _prop_done = 0;
+    _prop_total = (int)rec->targets.size();
+    enqueue([this, rec, threads, slot] {
+        struct Progress {
+            std::atomic<int>& total;
+            ~Progress() { total = 0; }
+        } progress{_prop_total};
+        const size_t n = rec->targets.size();
+        std::vector<int> result(n, 0);   // 0 not reached, 1 restored, 2 failed
+        std::vector<std::string> errs(n);
+        SharedIndex shared{_index, _layer_root};
+        run_pool((int)n, threads, _prop_cancel, [&](int i) {
+            const LayerSnapshot& t = rec->targets[(size_t)i];
+            LayerIndex x = shared.copy(t.key);
+            result[(size_t)i] = restore_layers(_layer_root, _mask_root, t, x, errs[(size_t)i]) ? 1 : 2;
+            shared.merge(t.key, x);
+            note_health(slot[(size_t)i], t.key);
+            _prop_done++;
+        });
+        std::string index_err;
+        const bool index_saved = shared.idx.save(_layer_root, index_err);
+        // Failed and not reached, in record order; with no index written,
+        // every frame, so Undo can try again.
         PropagateRecord left;
         left.source_key = rec->source_key;
         std::string failed_key, failed_path;
-        for (auto it = rec->targets.rbegin(); it != rec->targets.rend(); ++it) {
-            std::string err;
-            if (restore_layers(_layer_root, _mask_root, *it, _index, err)) continue;
-            if (failed_key.empty()) {
-                failed_key = it->key;
-                failed_path = err;
+        int restored = 0, skipped = 0;
+        for (size_t i = 0; i < n; i++) {
+            LayerSnapshot& t = rec->targets[i];
+            if (result[i] == 1 && index_saved) {
+                restored++;
+                continue;
             }
-            left.bytes += it->bytes();
-            left.targets.push_back(std::move(*it));
+            if (result[i] == 0) skipped++;
+            // The last in record order, which the undo used to meet first.
+            if (result[i] == 2) {
+                failed_key = t.key;
+                failed_path = errs[i];
+            }
+            left.bytes += t.bytes();
+            left.targets.push_back(std::move(t));
         }
-        std::reverse(left.targets.begin(), left.targets.end());   // record order
-        const int restored = (int)(rec->targets.size() - left.targets.size());
         set_corrected((int)_index.frames.size());
-        refresh_health(touched);
         std::lock_guard<std::mutex> lk(_mu);
         _prop_report = PropagateReport{};
-        _status = spirula::i18n::format(msg::prop_undone, {restored});
-        if (failed_key.empty()) {
+        _status = skipped ? spirula::i18n::format(msg::prop_undo_stopped, {restored, skipped})
+                          : spirula::i18n::format(msg::prop_undone, {restored});
+        _prop_stopped = skipped ? _status : std::string();
+        if (!index_saved) {
+            _error = spirula::i18n::format(msg::err_write, {index_err});
+            _error_sticky = true;
+        } else if (failed_key.empty()) {
             _error.clear();
-            return;
+        } else {
+            _error = spirula::i18n::format(msg::prop_undo_failed, {failed_key, failed_path});
         }
-        _error = spirula::i18n::format(msg::prop_undo_failed, {failed_key, failed_path});
+        if (left.targets.empty()) return;
         _prop = std::move(left);
         _prop_undoable = true;
     });
@@ -847,6 +993,15 @@ void MaskSession::refresh_health(const std::vector<std::string>& keys) {
     }
 }
 
+void MaskSession::note_health(int i, const std::string& key) {
+    FrameHealth h;
+    h.scanned = true;
+    KeptCache none;   // the mask was just written, so no cached fraction fits
+    h.missing_mask = !kept_fraction_of(_mask_root, key, _mask_flipped, none, h.kept);
+    std::lock_guard<std::mutex> lk(_mu);
+    if (i >= 0 && (size_t)i < _health.size()) _health[(size_t)i] = h;
+}
+
 Rect MaskSession::shown_rect(const Rect& stored) const {
     if (!_doc) return {};
     return rect_to_displayed(stored, _turn, _doc->width(), _doc->height());
@@ -901,6 +1056,43 @@ Rect MaskSession::undo() {
     if (!_doc || !_doc->can_undo()) return {};
     _doc->undo();
     return shown_rect(_doc->last_change());
+}
+
+bool MaskSession::sam_undo_click(Rect& changed) {
+    changed = {};
+    if (!_sam || !_doc || _idx < 0 || sam_busy() || _sam_release_pending) return false;
+    const int obj = _sam_add_object;
+    if (!sam_add_on_top(obj)) return false;
+    MaskSettings& p = _sam->prompt();
+    const std::string& camera = _frames[(size_t)_idx].camera;
+    auto mine = [&](const MaskClick& c) {
+        return c.source.empty() && c.object == obj && c.frame == _idx && c.camera == camera;
+    };
+    const auto last = std::find_if(p.clicks.rbegin(), p.clicks.rend(), mine);
+    if (last == p.clicks.rend()) return false;
+    const MaskClick popped = *last;
+    p.clicks.erase(std::next(last).base());
+    if (std::none_of(p.clicks.begin(), p.clicks.end(), mine)) {
+        changed = undo();
+        _sam_held.clear();
+        return true;
+    }
+    p.current_object = obj;
+    if (!sam_gate_passes() ||
+        !_sam->start_points(sam_frame_stamp(), _rgb, _fw, _fh, _doc->width(), _doc->height(),
+                            _sam->object_points(_idx, camera), _sam_add_mode, p.dilate_ratio)) {
+        p.clicks.push_back(popped);
+        return false;
+    }
+    _sam_job_object = obj;
+    _sam_t0 = std::chrono::steady_clock::now();
+    return true;
+}
+
+Rect MaskSession::undo_step() {
+    Rect r;
+    if (sam_mode() && sam_undo_click(r)) return r;
+    return undo();
 }
 
 Rect MaskSession::redo() {
@@ -1278,7 +1470,13 @@ bool MaskSession::sam_phrases_blank(const std::string& phrases) {
 }
 
 bool MaskSession::sam_submit_text() {
-    return !sam_busy() && sam_prompt_text(sam_prompt().prompt);
+    if (sam_busy() || sam_phrases_blank(sam_prompt().prompt)) return false;
+    // Refused before the device gate, which would freeze a GPU for nothing.
+    if (sam_has_model() && !sam_text_supported()) {
+        sam().refuse(msg::sam_text_unsupported.get());
+        return false;
+    }
+    return sam_prompt_text(sam_prompt().prompt);
 }
 
 std::string MaskSession::sam_text_refusal(bool has_model, bool text, const std::string& blocker,
@@ -1351,7 +1549,7 @@ void MaskSession::sam_start_margin() {
     _sam_margin_pending = false;
     if (!sam_margin_reapplies()) return;
     if (_sam->start_margin(sam_frame_stamp(), std::move(_sam_held), _doc->width(), _doc->height(),
-                           sam_prompt().dilate_ratio))
+                           _sam_add_mode, sam_prompt().dilate_ratio))
         _sam_margin_starts++;
 }
 
@@ -1441,8 +1639,7 @@ Paint MaskSession::sam_click_mode(bool shift, bool ctrl) const {
 }
 
 bool MaskSession::sam_margin_reapplies() const {
-    return !_sam_held.empty() && _sam_add_mode == Paint::ForceDrop &&
-           sam_add_on_top(_sam_add_object);
+    return !_sam_held.empty() && sam_add_on_top(_sam_add_object);
 }
 
 size_t MaskSession::sam_held_bytes() const {

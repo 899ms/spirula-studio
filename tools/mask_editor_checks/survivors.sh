@@ -60,9 +60,11 @@ else
     echo "FAIL row B/C gated by !_doc || !idle() || _slide_playing on the line right after the Row B/C comment"
     FAILS=$((FAILS + 1))
 fi
+# The warning row (the propagate bar while one runs) opens right after the gate.
 warn_order=$(awk '
 { line=$0; gsub(/^[ \t]+|[ \t]+$/, "", line)
-  if (line == "ui::TextDisabled(msg::prop_warn_moves);") { print p2; print p1; exit }
+  if (line ~ /^\/\//) next
+  if (line == "if (const int total = propagate_total(); total > 0) {") { print p2; print p1; exit }
   p2=p1; p1=line }
 ' "$F")
 if [ "$warn_order" = "$(printf 'ImGui::EndDisabled();\nnote_row_width();')" ]; then

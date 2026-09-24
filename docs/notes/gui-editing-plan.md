@@ -329,6 +329,11 @@ the same rotation a dataset-level pose normalization would want.
 
 ## The 2D half: masks, the pen tool, intelligent scissors
 
+*Built, except the pen tool's curves* -- the per-frame corrections are
+[mask-editor.md](mask-editor.md), the per-camera stencil with paths, brush
+strokes, livewire and its SVG file is [frame-stencil.md](frame-stencil.md).
+What follows is the plan as it was written.
+
 `app::FrameMask` is further along than it looks. It already holds an *ordered*
 list of keep/remove ellipses and rectangles normalized to the frame, plus an
 image stencil intersected with them, and `SegmentPanel` already drags those

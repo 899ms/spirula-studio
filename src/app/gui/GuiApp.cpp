@@ -539,6 +539,12 @@ static void file_log_line(std::ofstream& f, const std::string& s) {
     f.flush();
 }
 
+static std::string cached_model_path(const std::string& id) {
+    const ModelEntry* e = find_model(id);
+    if (!e || !model_is_cached(*e)) return "";
+    return model_path(*e);
+}
+
 // Value formatting for the settings snapshot.
 static std::string cfg_str(const std::string& v) { return v; }
 static std::string cfg_str(bool v) { return v ? "true" : "false"; }
@@ -884,6 +890,7 @@ DatasetSettings GuiApp::capture_dataset_settings() const {
     s.mask_model_id = _model_id;
     s.use_found_masks = _use_found_masks;
     s.border_enable = _border_enable;
+    s.frame_shapes = _frame_shapes;
     // The panel-level copies are what the user edits; sync_dataset_jobs() fans
     // them out, and a preset has to carry what was edited rather than what a
     // sync happened to leave behind.
@@ -917,6 +924,8 @@ void GuiApp::apply_dataset_settings(const DatasetSettings& in) {
     if (find_model(s.mask_model_id)) _model_id = s.mask_model_id;
     _use_found_masks = s.use_found_masks;
     _border_enable = s.border_enable;
+    _frame_shapes = s.frame_shapes;
+    apply_frame_shapes();
     _resume = s.sfm.prep.resume;
     _photo_import = s.sfm.prep.photo_import;
     _flip_found_masks = s.sfm.prep.flip_found_masks;
@@ -2293,6 +2302,7 @@ bool GuiApp::add_sources(const std::vector<std::string>& paths, bool replace) {
         _border_enable = true;
         if (in.stencil.empty()) in.stencil.detect_border = true;
     }
+    apply_frame_shapes(first_new);
     for (const std::string& masks : mask_folders) {
         if (attach_mask_folder(_sources, masks))
             log(i18n::format(dmsg::log_masks_attached, {masks}));
@@ -2324,6 +2334,30 @@ void GuiApp::add_existing_dataset(const std::string& dir) {
     // model would leave the folder holding the capture twice.
     _photo_import = PhotoImport::InPlace;
     _workspace = _workspace_auto = fs::absolute(dir, ec).string();
+}
+
+// What this run draws on its inputs, kept in the output folder for next time.
+void GuiApp::save_run_stencils() {
+    if (!_border_enable || _workspace.empty()) return;
+    std::vector<std::pair<std::string, std::vector<app::MaskShape>>> inputs;
+    for (const PrepInput& in : _sources) inputs.push_back({in.path, in.stencil.mask.shapes});
+    std::string err;
+    const std::vector<std::string> written = save_dataset_stencils(_workspace, inputs, err);
+    if (!err.empty()) log(i18n::format(dmsg::stencil_save_failed, {err}));
+    for (const std::string& f : written) log(i18n::format(dmsg::stencil_autosaved, {f}));
+}
+
+void GuiApp::apply_frame_shapes(size_t first_input) {
+    if (_frame_shapes.empty()) return;
+    std::vector<app::MaskShape> shapes;
+    std::string err;
+    if (!load_stencil_preset(_frame_shapes, shapes, err)) {
+        log(i18n::format(dmsg::stencil_load_failed, {err}));
+        _frame_shapes.clear();
+        return;
+    }
+    for (size_t i = first_input; i < _sources.size(); i++)
+        _sources[i].stencil.mask.shapes = shapes;
 }
 
 // A folder of EXRs declares its own colour space, and the picker for it is
@@ -2370,6 +2404,7 @@ const char* GuiApp::dir_key(PickAction a, FileDialog::Mode m) {
         case PickAction::EditSaveFolder:
         case PickAction::RenderAddModel:
         case PickAction::MeshSource:        return "model";
+        case PickAction::StencilFile:       return "stencil";
         case PickAction::RenderProjectSave:
         case PickAction::RenderProjectOpen: return "render_project";
         case PickAction::RenderOutput:      return "render_output";
@@ -2470,6 +2505,10 @@ void GuiApp::handle_dialog_result(const std::vector<std::string>& paths) {
             break;
         case PickAction::MeshSource:
             set_mesh_source(path);
+            break;
+        case PickAction::StencilFile:
+            if (_segment.is_open() && _mask_preview_input < (int)_sources.size())
+                _segment.load_file(_sources[(size_t)_mask_preview_input].stencil, path);
             break;
         case PickAction::MeshPhotos:
             _mesh_job.data_dir = path;
@@ -2816,9 +2855,10 @@ void GuiApp::frame() {
         // already taken the device.
         _mask_editor.set_sam_blocker(mask::MaskSession::sam_blocker(
             _segment.is_open(), _geometry_panel.is_open(), native_work_busy()));
-        // Every frame: a pick on either screen, or a finished download, lands now.
-        const ModelEntry* me = find_model(_model_id);
-        _mask_editor.set_sam_model(selected_model_path(), me && me->text_prompts);
+        // Every frame: a pick, or a finished download, lands now.
+        const ModelEntry* me = find_model(_mask_editor_model_id);
+        _mask_editor.set_sam_model(cached_model_path(_mask_editor_model_id),
+                                   me && me->text_prompts);
         _mask_editor.draw();
     }
     // After every screen and the editor, so either can raise the one consent modal.
@@ -3222,22 +3262,19 @@ bool GuiApp::license_accepted(const std::string& family) const {
                      family) != _accepted_licenses.end();
 }
 
-std::string GuiApp::selected_model_path() const {
-    const ModelEntry* e = find_model(_model_id);
-    if (!e || !model_is_cached(*e)) return "";
-    return model_path(*e);
-}
+std::string GuiApp::selected_model_path() const { return cached_model_path(_model_id); }
 
 // Fetch the selected checkpoint, from wherever the screen offers it. Consent
 // first, every time the family has not been agreed to (ModelCache.h says why).
-void GuiApp::request_model_download() {
-    const ModelEntry* e = find_model(_model_id);
+void GuiApp::request_model_download(const std::string& id) {
+    const ModelEntry* e = find_model(id);
     if (!e || model_is_cached(*e)) return;
     if (_download.state() == ModelDownload::State::Running) return;
     if (license_accepted(e->family)) {
         _download.start(*e);
     } else {
         _license_prompt = e->family;
+        _license_model_id = id;
         _license_tick = false;
     }
 }
@@ -3433,6 +3470,7 @@ bool GuiApp::launch_dataset_job() {
     // it goes on describing whoever built it.
     if (_redo_model || !workspace_state().model) _built_workspace = _workspace;
     sync_dataset_jobs();
+    save_run_stencils();
     const std::string stamp = run_log_stamp();
     const fs::path prep_log_file =
         open_run_log(_prep_log,
@@ -4656,6 +4694,25 @@ void GuiApp::draw_masking_options() {
             if (in.stencil.empty()) in.stencil.detect_border = true;
     }
     ui::help_on_hover(dmsg::mask_border_enable_help);
+    if (_border_enable) {
+        ImGui::Indent();
+        ImGui::SetNextItemWidth(px(240.0f));
+        const std::string shown =
+            _frame_shapes.empty() ? dmsg::stencil_areas_per_input.get() : _frame_shapes;
+        if (ui::BeginCombo(dmsg::stencil_areas_preset, shown.c_str())) {
+            if (ImGui::IsWindowAppearing()) _frame_shapes_list = list_stencil_presets();
+            if (ui::Selectable(dmsg::stencil_areas_per_input, _frame_shapes.empty()))
+                _frame_shapes.clear();
+            for (const StencilPreset& p : _frame_shapes_list)
+                if (ui::SelectableRaw(p.name, p.name == _frame_shapes)) {
+                    _frame_shapes = p.name;
+                    apply_frame_shapes();
+                }
+            ImGui::EndCombo();
+        }
+        ui::help_on_hover(dmsg::stencil_areas_preset_help);
+        ImGui::Unindent();
+    }
 
     // Asked wherever the dataset ends up with masks at all, including ones
     // that arrived with the photographs: what it decides is the reconstruction,
@@ -4672,7 +4729,8 @@ void GuiApp::draw_masking_options() {
     const bool builtin_masking = backends().builtin_masking;
 
     if (_mask_enable && builtin_masking) {
-        draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
+        draw_mask_model_picker(_model_id, _download,
+                               [this] { request_model_download(_model_id); });
         entry = find_model(_model_id);
         if (entry && !entry->text_prompts && _mask.clicks.empty())
             ui::TextColored(kWarn, dmsg::mask_no_text_prompts);
@@ -5428,19 +5486,63 @@ void GuiApp::draw_dataset_rerun(const WorkspaceState& prior) {
     if (go) start_dataset_job();
 }
 
-// The correction editor, offered wherever the dataset already has masks.
-void GuiApp::draw_mask_editor_entry(const WorkspaceState& prior) {
-    if (!prior.masks) return;
-    ImGui::BeginDisabled(dataset_busy() || native_work_busy());
-    if (ui::Button(mmsg::correct_masks)) {
-        const fs::path ws(_workspace);
+GuiApp::DatasetFolders GuiApp::workspace_folders(const WorkspaceState& prior) const {
+    DatasetFolders f;
+    f.dir = _workspace;
+    f.image_dir = planned_image_dir(_sources, _workspace, _photo_import);
+    std::error_code ec;
+    if (prior.masks) {
         // The run's own masks/, which every branch of DatasetPrep writes in
         // the app's convention -- only a bundled folder is ever left flipped.
-        open_mask_editor(_workspace, (ws / "images").string(), (ws / "masks").string(),
-                         /*mask_flipped=*/false);
+        f.mask_dir = (fs::path(_workspace) / "masks").string();
+    } else if (prior.input_masks && _sources.size() == 1 && !_sources[0].is_video &&
+               _sources[0].packed_lenses == 0) {
+        // Masks that came with the photos pair with them where they lie.
+        f.image_dir = fs::absolute(_sources[0].path, ec).string();
+        f.mask_dir = fs::absolute(_sources[0].mask_dir, ec).string();
+        f.mask_flipped = _flip_found_masks;
     }
-    ImGui::EndDisabled();
-    ui::help_on_hover(mmsg::correct_masks_help);
+    return f;
+}
+
+void GuiApp::draw_dataset_open_buttons(const DatasetFolders& f, bool model) {
+    if (model) {
+        if (ui::Button(dmsg::open_in_trainer)) {
+            if (training_busy()) {
+                _pending = Pending::OpenDataset;
+                _pending_path = f.dir;
+                _open_confirm = true;
+            } else {
+                open_dataset(f.dir, f.image_dir, f.mask_dir, f.mask_flipped,
+                             /*keep_log=*/true);
+            }
+        }
+        // Cleaning the seed cloud belongs here rather than after training: a
+        // floater removed now is one the run never fits to.
+        ImGui::SameLine();
+        if (ui::Button(emsg::sparse_edit)) {
+            _edit_after_open = true;
+            _sparse_edit_src = f;
+            request_open_splat(f.dir);
+        }
+        ui::help_on_hover(emsg::sparse_edit_help);
+    }
+    if (!f.mask_dir.empty()) {
+        if (model) ImGui::SameLine();
+        ImGui::BeginDisabled(dataset_busy() || native_work_busy());
+        if (ui::Button(mmsg::correct_masks)) {
+            // A run reports its folders as the config spells them: relative to
+            // the dataset, and empty for the parser's default.
+            TrainConfig stock;
+            auto under = [&](const std::string& d, const std::string& fallback) {
+                return (fs::path(f.dir) / (d.empty() ? fallback : d)).lexically_normal().string();
+            };
+            open_mask_editor(f.dir, under(f.image_dir, stock.image_dir),
+                             under(f.mask_dir, stock.mask_dir), f.mask_flipped);
+        }
+        ImGui::EndDisabled();
+        ui::help_on_hover(mmsg::correct_masks_help);
+    }
 }
 
 void GuiApp::open_mask_editor(const std::string& workspace, const std::string& image_dir,
@@ -5448,9 +5550,10 @@ void GuiApp::open_mask_editor(const std::string& workspace, const std::string& i
     if (dataset_busy() || native_work_busy()) return;
     close_native_previews();
     _mask_editor.set_log([this](const std::string& s) { log(s); });
-    // The dataset screen's own picker, over the app's one model and download.
+    // The editor's own checkpoint, over the app's one download.
     _mask_editor.set_model_picker([this] {
-        draw_mask_model_picker(_model_id, _download, [this] { request_model_download(); });
+        draw_mask_model_picker(_mask_editor_model_id, _download,
+                               [this] { request_model_download(_mask_editor_model_id); });
     });
     // SAM loads on the device every other inference user freezes, never nn's
     // default; a failed freeze refuses the prompt with the same sentence.
@@ -6132,11 +6235,11 @@ void GuiApp::draw_dataset_form(float height, bool running) {
     // ---- run / status ----
     const float action_y0 = ImGui::GetCursorPosY();
     ImGui::Spacing();
+    bool input_missing = _sources.empty() || _workspace.empty();
+    for (const PrepInput& s : _sources)
+        input_missing = input_missing || s.path.empty();
+    const bool ready = !running && !input_missing && _source_probes_ready;
     if (!running) {
-        bool input_missing = _sources.empty() || _workspace.empty();
-        for (const PrepInput& s : _sources)
-            input_missing = input_missing || s.path.empty();
-        const bool ready = !input_missing && _source_probes_ready;
         const bool need_mask_model = mask_model_missing();
         const bool need_feat_model = feature_model_missing();
         const bool need_geom_model = geometry_model_missing();
@@ -6174,13 +6277,12 @@ void GuiApp::draw_dataset_form(float height, bool running) {
             else if (ui::Button(need_mask_model   ? dmsg::mask_get_model
                                 : need_feat_model ? dmsg::feat_get_model
                                                   : dmsg::geom_get_model)) {
-                if (need_mask_model)      request_model_download();
+                if (need_mask_model)      request_model_download(_model_id);
                 else if (need_feat_model) request_feature_download();
                 else                      request_geometry_download();
             }
         }
         if (ready) {
-            draw_mask_editor_entry(workspace_state());
             draw_dataset_rerun(workspace_state());
             draw_dataset_reset();
         }
@@ -6219,29 +6321,22 @@ void GuiApp::draw_dataset_form(float height, bool running) {
         if (effective_engine() == Engine::BuiltIn && _sfm.not_metric())
             ui::TextColoredWrapped(kWarn, dmsg::not_metric_reconstruction);
         ui::TextColoredWrapped(kOk, dmsg::done_at, {st.dir});
-        if (ui::Button(dmsg::open_in_trainer)) {
-            if (training_busy()) {
-                _pending = Pending::OpenDataset;
-                _pending_path = st.dir;
-                _open_confirm = true;
-            } else {
-                open_dataset(st.dir, st.image_dir, st.mask_dir, st.mask_flipped,
-                             /*keep_log=*/true);
-            }
-        }
-        // Cleaning the seed cloud belongs here rather than after training: a
-        // floater removed now is one the run never fits to.
-        ImGui::SameLine();
-        if (ui::Button(emsg::sparse_edit)) {
-            _edit_after_open = true;
-            _sparse_edit_src = {st.dir, st.image_dir, st.mask_dir, st.mask_flipped};
-            request_open_splat(st.dir);
-        }
-        ui::help_on_hover(emsg::sparse_edit_help);
     } else if (st.failed) {
         ui::TextColoredWrapped(kErr, dmsg::failed, {st.err});
     } else if (st.cancelled) {
         ui::TextColored(kDim, dmsg::cancelled);
+    }
+    // A dataset loaded from disk offers the same buttons as one just built.
+    if (st.done) {
+        DatasetFolders f{st.dir, st.image_dir, st.mask_dir, st.mask_flipped};
+        const fs::path masks = fs::path(st.dir) / st.mask_dir;
+        std::error_code ec;
+        if (st.mask_dir.empty() || !fs::is_directory(masks, ec) || fs::is_empty(masks, ec))
+            f.mask_dir.clear();
+        draw_dataset_open_buttons(f, /*model=*/true);
+    } else if (ready) {
+        const WorkspaceState& prior = workspace_state();
+        draw_dataset_open_buttons(workspace_folders(prior), prior.model);
     }
     _ds_action_h = ImGui::GetCursorPosY() - action_y0;
 }
@@ -6320,7 +6415,12 @@ void GuiApp::draw_new_dataset() {
             _segment.close();
         } else {
             if (_mask_preview_input >= (int)_sources.size()) _mask_preview_input = 0;
+            _segment.set_workspace(_workspace);
             _segment.draw(_mask, _sources[(size_t)_mask_preview_input].stencil);
+            if (_segment.take_shapes_edited()) _frame_shapes.clear();
+            if (_segment.take_browse_request())
+                open_pick(PickAction::StencilFile, dmsg::stencil_pick_file.get(),
+                          FileDialog::Mode::File, {".svg"});
         }
     }
     if (_geometry_panel.is_open()) _geometry_panel.draw(_geometry);
@@ -6376,7 +6476,7 @@ void GuiApp::draw_license_modal() {
     ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
     ui::TextDisabledRaw(li.url);
     ImGui::PopTextWrapPos();
-    if (const ModelEntry* e = find_model(_model_id))
+    if (const ModelEntry* e = find_model(_license_model_id))
         ui::TextDisabled(dmsg::license_download_size, {human_bytes(e->bytes)});
     ImGui::Spacing();
 
@@ -6388,7 +6488,7 @@ void GuiApp::draw_license_modal() {
     if (ui::Button(dmsg::license_download, ImVec2(150, 0))) {
         _accepted_licenses.push_back(_license_prompt);
         save_settings();
-        if (const ModelEntry* e = find_model(_model_id)) _download.start(*e);
+        if (const ModelEntry* e = find_model(_license_model_id)) _download.start(*e);
         _license_prompt.clear();
         ImGui::CloseCurrentPopup();
     }

@@ -950,6 +950,8 @@ WorkspaceState probe_workspace(const std::string& workspace,
 
     st.frames = has_content(ws / "images") && !is_input(ws / "images", false);
     st.masks = has_content(ws / "masks") && !is_input(ws / "masks", true);
+    for (const PrepInput& in : inputs)
+        st.input_masks = st.input_masks || (!in.mask_dir.empty() && has_content(in.mask_dir));
     st.features = has_content(ws / "features") || fs::exists(ws / "matches.bin", ec) ||
                   fs::exists(ws / "database.db", ec);
     // Stricter than folder_looks_like_dataset, which answers "where should a

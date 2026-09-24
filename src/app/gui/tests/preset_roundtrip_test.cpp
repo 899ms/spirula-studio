@@ -52,6 +52,7 @@ static void test_dataset_preset() {
     s.use_found_masks = false;
     s.border_enable = true;
     s.mask_model_id = "sam2.1_hiera_large";
+    s.frame_shapes = "selfie stick";
 
     s.sfm.prep.resume = false;
     s.sfm.prep.photo_import = gui::PhotoImport::Move;
@@ -166,6 +167,7 @@ static void test_dataset_preset() {
     CHECK_EQ(b.use_found_masks, s.use_found_masks);
     CHECK_EQ(b.border_enable, s.border_enable);
     CHECK_EQ(b.mask_model_id, s.mask_model_id);
+    CHECK_EQ(b.frame_shapes, s.frame_shapes);
 
     CHECK_EQ(b.sfm.prep.resume, s.sfm.prep.resume);
     CHECK(b.sfm.prep.photo_import == s.sfm.prep.photo_import);

@@ -64,6 +64,7 @@ set(SS_TOOL_LIBS "")
 # including the ones the GUI spawns.
 list(APPEND SS_TOOL_SOURCES
      ${SS_SRC}/app/FrameMask.cpp
+     ${SS_SRC}/app/FrameMaskSvg.cpp
      ${SS_SRC}/app/FrameLook.cpp
      ${SS_SRC}/app/FrameMotion.cpp
      ${SS_SRC}/app/Pano360.cpp
@@ -319,6 +320,7 @@ if(SS_SEPARATE_TOOLS)
     endif()
     if(SS_BUILD_SAM)
         set(_sam_src ${SS_SRC}/app/cli/sam_main.cpp ${SS_SRC}/app/FrameMask.cpp
+                     ${SS_SRC}/app/FrameMaskSvg.cpp
                      ${SS_SRC}/app/FrameLook.cpp ${SS_SRC}/app/FrameMotion.cpp
                      ${SS_SRC}/app/Pano360.cpp)
         set(_sam_lib ss_sam)
@@ -362,6 +364,7 @@ ss_configure_app(packed_lens_test)
 add_executable(frame_mask_test
     ${SS_SRC}/app/tests/frame_mask_test.cpp
     ${SS_SRC}/app/FrameMask.cpp
+    ${SS_SRC}/app/FrameMaskSvg.cpp
     ${SS_SRC}/app/FrameLook.cpp)
 ss_configure_app(frame_mask_test)
 
@@ -419,6 +422,17 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/AppPaths.cpp)
     ss_configure_app(preset_roundtrip_test)
 
+    add_executable(stencil_edit_test
+        ${SS_SRC}/app/gui/tests/stencil_edit_test.cpp
+        ${SS_SRC}/app/gui/StencilEdit.cpp
+        ${SS_SRC}/app/gui/StencilPreset.cpp
+        ${SS_SRC}/app/gui/PresetFile.cpp
+        ${SS_SRC}/app/AppPaths.cpp
+        ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameMaskSvg.cpp
+        ${SS_SRC}/app/FrameLook.cpp)
+    ss_configure_app(stencil_edit_test)
+
     # The mask editor's layer, document and session, none of which draw.
     add_executable(mask_doc_test
         ${SS_SRC}/app/gui/tests/mask_doc_test.cpp
@@ -432,6 +446,7 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/edit/SelectShape.cpp
         ${SS_SRC}/app/gui/edit/Selection.cpp
         ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameMaskSvg.cpp
         ${SS_SRC}/app/FrameLook.cpp
         ${SS_SRC}/app/gui/mask/Livewire.cpp
         ${SS_SRC}/app/gui/mask/PathTool.cpp
@@ -450,6 +465,7 @@ if(SS_BUILD_GUI)
         ${SS_SRC}/app/gui/Subprocess.cpp
         ${SS_SRC}/app/gui/mask/MaskLayer.cpp
         ${SS_SRC}/app/FrameMask.cpp
+        ${SS_SRC}/app/FrameMaskSvg.cpp
         ${SS_SRC}/app/FrameLook.cpp
         ${SS_SRC}/app/FrameMotion.cpp
         ${SS_SRC}/app/Pano360.cpp)

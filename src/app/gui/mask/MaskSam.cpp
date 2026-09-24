@@ -133,7 +133,7 @@ SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions
                            int doc_h, Paint mode, float margin, float score, bool hold,
                            const std::vector<AddRegion>& veto) {
     SamResult r;
-    if (hold && mode == Paint::ForceDrop)
+    if (hold)
         for (const AddRegion& g : regions) r.held.push_back(hold_region(g));
     r.frame_key = std::move(frame_key);
     r.mode = mode;
@@ -144,17 +144,17 @@ SamResult MaskSam::prepare(std::string frame_key, std::vector<AddRegion> regions
     };
     const bool matched = !veto.empty() && std::any_of(regions.begin(), regions.end(), any_set);
     r.landed = build_add_stencil(regions, doc_w, doc_h, r.stencil, r.bounds, r.set_px,
-                                 drop_margin(mode, margin), veto);
+                                 add_margin(margin), veto);
     r.vetoed_all = matched && !r.landed;
     return r;
 }
 
 SamResult MaskSam::remargin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
-                            int doc_h, float margin) {
+                            int doc_h, Paint mode, float margin) {
     std::vector<AddRegion> regions;
     for (const HeldRegion& h : held) regions.push_back(expand_region(h));
     SamResult r = prepare(std::move(frame_key), std::move(regions), doc_w, doc_h,
-                          Paint::ForceDrop, margin, 0.0f, false);
+                          mode, margin, 0.0f, false);
     r.held = std::move(held);
     r.margin_job = true;
     return r;
@@ -323,7 +323,7 @@ bool MaskSam::start_text(const std::string& frame_key,
 // The same worker and hand-off as a prompt, so the two can never land out of
 // order; the ~150-300 ms of stencil work at 15520x7760 stays off the UI thread.
 bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
-                           int doc_h, float margin) {
+                           int doc_h, Paint mode, float margin) {
     if (busy() || held.empty()) return false;
     if (_s->worker.joinable()) _s->worker.join();
     margin_begin(*_s);
@@ -332,7 +332,7 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
     State* s = _s.get();
     try {
         _s->worker = std::thread([s, key = std::move(frame_key), held = std::move(held), doc_w,
-                                  doc_h, margin]() mutable {
+                                  doc_h, mode, margin]() mutable {
             auto finish = [s](const std::string& error) {
                 margin_end(*s, error);
                 s->running = false;
@@ -343,7 +343,8 @@ bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, 
                     publish_unless_cancelled(
                         [&] {
                             SamResult r =
-                                remargin(std::move(key), std::move(held), doc_w, doc_h, margin);
+                                remargin(std::move(key), std::move(held), doc_w, doc_h, mode,
+                                         margin);
                             r.ms = std::chrono::duration<double, std::milli>(
                                        std::chrono::steady_clock::now() - t0).count();
                             return r;
@@ -561,10 +562,10 @@ bool MaskSam::start_text(const std::string&, std::shared_ptr<const std::vector<u
 }
 
 bool MaskSam::start_margin(std::string frame_key, std::vector<HeldRegion> held, int doc_w,
-                           int doc_h, float margin) {
+                           int doc_h, Paint mode, float margin) {
     if (held.empty()) return false;
     margin_begin(*_s);
-    publish(*_s, remargin(std::move(frame_key), std::move(held), doc_w, doc_h, margin));
+    publish(*_s, remargin(std::move(frame_key), std::move(held), doc_w, doc_h, mode, margin));
     margin_end(*_s, std::string());
     return true;
 }

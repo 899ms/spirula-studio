@@ -71,6 +71,8 @@ struct LayerIndex {
     // a file under mask_root, and every write into it, goes through it.
     bool mask_flipped = false;
     std::map<std::string, IndexEntry> frames;
+    // save() writes nothing: one worker's copy of a frame's entry, merged later.
+    bool in_memory = false;
     // A missing file is an empty index and succeeds; a corrupt one fails.
     bool load(const std::string& layer_root, std::string& error);
     bool save(const std::string& layer_root, std::string& error) const;

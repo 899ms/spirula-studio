@@ -29,6 +29,8 @@ struct DatasetSettings {
     std::string mask_model_id = "sam3-q4_0";
     bool use_found_masks = true;
     bool border_enable = false;
+    // A saved stencil's name (StencilPreset.h), drawn on every input.
+    std::string frame_shapes;
 };
 
 struct DatasetPreset {
