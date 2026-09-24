@@ -801,7 +801,8 @@ function showTooltip(e, i) {
   const MODEL = ['Pinhole','Fisheye','Equisolid','Equirectangular'];
   const d = cam.dist || [];
   const nz = d.some(x => x);
-  const dlabels = ['k1','k2','k3','k4','p1','p2','s1','s2','b1','b2'];
+  const dlabels = cam.distType === 1 ? ['k1','k2','p1','p2']
+                : ['k1','k2','k3','k4','p1','p2','sx1','sy1'];
   const dstr = nz ? d.map((x,j)=> x ? `${dlabels[j]} ${x.toFixed(4)}` : null).filter(Boolean).join(', ') : 'none';
   el.innerHTML =
     `<b>${cam.name || 'camera ' + i}</b><br>` +

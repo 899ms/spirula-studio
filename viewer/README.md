@@ -82,8 +82,9 @@ plain C++17 with no CUDA dependency (see `csrc/CameraModel.h`).
   - Renders the **seed point cloud** and **camera frustums** with the true
     per-camera projection: the image border is discretized and unprojected
     through the camera model (pinhole / fisheye / equisolid / equirectangular)
-    **including OpenCV distortion** (Newton undistort, `k1–k4 p1 p2 s1 s2 b1
-    b2`), so a fisheye camera's frustum visibly bulges. Wide cameras get an
+    **including lens distortion** (Newton undistort over the parser's
+    distortion tier: OpenCV `k1 k2 p1 p2` or thin-prism `k1–k4 p1 p2 sx1
+    sy1`), so a fisheye camera's frustum visibly bulges. Wide cameras get an
     image-aligned wire dome (fisheye) or a lat/long wire globe
     (equirectangular) instead of a lone border ring. Point size and frustum
     size are adjustable; either layer can be hidden.
