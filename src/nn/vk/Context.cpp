@@ -142,7 +142,35 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     return VK_FALSE;
 }
 
+#if defined(SS_HAVE_VIDEO) && defined(__linux__)
+void appendEnvToken(const char* name, const char* token) {
+    const char* cur = std::getenv(name);
+    std::string v = cur ? cur : "";
+    if (("," + v + ",").find("," + std::string(token) + ",") != std::string::npos)
+        return;
+    if (!v.empty()) v += ',';
+    v += token;
+    setenv(name, v.c_str(), 1);
+}
+
+// Mesa hides Vulkan Video on RADV (25.2) and on older ANV behind these debug
+// flags, read in vkCreateInstance, before the driver can be identified. Each
+// driver ignores the other's variable.
+void enableMesaVideo() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        appendEnvToken("RADV_PERFTEST", "video_decode");
+        appendEnvToken("RADV_PERFTEST", "video_encode");
+        appendEnvToken("ANV_DEBUG", "video-decode");
+        appendEnvToken("ANV_DEBUG", "video-encode");
+    });
+}
+#endif
+
 VkInstance createInstance(bool validation, VkDebugUtilsMessengerEXT* messenger) {
+#if defined(SS_HAVE_VIDEO) && defined(__linux__)
+    enableMesaVideo();
+#endif
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "ssam";
     app.apiVersion = VK_API_VERSION_1_3;  // request 1.3, we only *require* 1.2
