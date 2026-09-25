@@ -390,9 +390,13 @@ std::vector<int64_t> train_subset(int64_t n, const std::vector<std::string>& nam
 // validation_fraction partition of 0..N-1 into ds.train_indices/val_indices.
 void assign_val_split(ParsedDataset& ds, float validation_fraction);
 
-// Auxiliary mask/depth/normal discovery by filename convention.
+// Auxiliary mask/depth/normal discovery by filename convention. "" when
+// `rel_name` is empty or would leave `aux_dir`.
 std::string find_aux_file(const std::string& aux_dir, const std::string& rel_name,
                           const char* suffix_tag);
+
+// `path` relative to `dir`, both folded lexically; "" when it is not under `dir`.
+std::string relative_under(const std::string& path, const std::string& dir);
 
 // Outlier-frame mask via geometric median of camera positions. Returns
 // keep-flags, all-true when threshold is inf. positions = [N, 3].
