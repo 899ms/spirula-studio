@@ -269,7 +269,7 @@ struct VideoPipeline::Impl {
 
     VkImage        dpb_image = VK_NULL_HANDLE;
     VkDeviceMemory dpb_mem = VK_NULL_HANDLE;
-    std::vector<VkImageView> dpb_views;
+    VkImageView    dpb_view = VK_NULL_HANDLE;
     bool dpb_ready = false;
 
     struct BsBuf {
@@ -369,8 +369,7 @@ VideoPipeline::Impl::~Impl() {
         if (p.image) vkDestroyImage(dev, p.image, nullptr);
         if (p.mem) vkFreeMemory(dev, p.mem, nullptr);
     }
-    for (VkImageView v : dpb_views)
-        if (v) vkDestroyImageView(dev, v, nullptr);
+    if (dpb_view) vkDestroyImageView(dev, dpb_view, nullptr);
     if (dpb_image) vkDestroyImage(dev, dpb_image, nullptr);
     if (dpb_mem) vkFreeMemory(dev, dpb_mem, nullptr);
     for (auto& b : bs) {
@@ -730,12 +729,17 @@ bool VideoPipeline::Impl::createImages(int lookahead, std::string& error) {
         error = "cannot allocate the video reference picture buffer";
         return false;
     }
-    dpb_views.resize(fmt.max_dpb_slots);
-    for (uint32_t i = 0; i < fmt.max_dpb_slots; ++i)
-        if (!create_view(dpb_image, dpb_format, i, dpb_views[i])) {
-            error = "cannot create a DPB image view";
-            return false;
-        }
+    // One 2D-array view, slot chosen by baseArrayLayer: a 2D view per layer
+    // decoded inter frames wrong on AMD's Windows driver (R9700, 26.Q3).
+    VkImageViewCreateInfo dpb_vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    dpb_vci.image = dpb_image;
+    dpb_vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    dpb_vci.format = dpb_format;
+    dpb_vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, fmt.max_dpb_slots};
+    if (vkCreateImageView(dev, &dpb_vci, nullptr, &dpb_view) != VK_SUCCESS) {
+        error = "cannot create a DPB image view";
+        return false;
+    }
     dpb_pin.assign(fmt.max_dpb_slots, -1);
 
     // Output pictures: enough for the reorder queue, the caller's window, the
@@ -943,11 +947,11 @@ bool VideoPipeline::Impl::recordDecode(int pool_idx, const PictureInfo& pi,
                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr,
                          (uint32_t)barriers.size(), barriers.data());
 
-    auto picture_resource = [&](VkImageView view) {
+    auto picture_resource = [&](VkImageView view, uint32_t layer = 0) {
         VkVideoPictureResourceInfoKHR pr{VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR};
         pr.codedOffset = {0, 0};
         pr.codedExtent = coded;
-        pr.baseArrayLayer = 0;
+        pr.baseArrayLayer = layer;
         pr.imageViewBinding = view;
         return pr;
     };
@@ -960,9 +964,10 @@ bool VideoPipeline::Impl::recordDecode(int pool_idx, const PictureInfo& pi,
     std::vector<VkVideoReferenceSlotInfoKHR>   begin_slots;
     begin_res.reserve(pi.refs.size() + 1);
     begin_slots.reserve(pi.refs.size() + 1);
-    for (const auto& r : pi.refs) begin_res.push_back(picture_resource(dpb_views[(size_t)r.slot]));
+    for (const auto& r : pi.refs)
+        begin_res.push_back(picture_resource(dpb_view, (uint32_t)r.slot));
     if (pi.setup_slot >= 0)
-        begin_res.push_back(picture_resource(dpb_views[(size_t)pi.setup_slot]));
+        begin_res.push_back(picture_resource(dpb_view, (uint32_t)pi.setup_slot));
     for (size_t i = 0; i < pi.refs.size(); ++i) {
         VkVideoReferenceSlotInfoKHR sl{VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR};
         sl.slotIndex = pi.refs[i].slot;
