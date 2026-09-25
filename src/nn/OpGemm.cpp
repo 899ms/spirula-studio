@@ -76,7 +76,7 @@ void dispatch_tile(const TileKernel& k, const vk::SpecList& spec, int64_t M, int
                "gemm: %lldx%lld output exceeds the dispatch grid cap", (long long)M,
                (long long)N);
     vk::Stream::get().dispatch(k.entry, spec, k.n_on_x ? tn : tm, k.n_on_x ? tm : tn, 1,
-                               &p, sizeof(p));
+                               &p, sizeof(p), 2.0 * M * N * p.K);
 }
 
 double time_tile(const TileKernel& k, const vk::SpecList& spec, int64_t M, int64_t N,
@@ -199,13 +199,17 @@ void dispatch_gemm(const Tensor& out, const Tensor& x_in, const Tensor& w_in,
     const int64_t x_elem = x.dtype == DType::F16 ? 2 : 4;
 
     // Row tiles take one grid axis (65535 cap: a full-resolution 1x1 conv passes
-    // 4.2 M rows) and each call must also stay inside one pointer span. Rows are
-    // independent and row-contiguous, so a tall GEMM is the same call again.
+    // 4.2 M rows), each call must stay inside one pointer span and one submit's
+    // work budget. Rows are independent, so a tall GEMM is the same call again.
     auto by_rows = [&](int64_t tile_m, const auto& run) {
         // A row tile is the dispatch granularity, so the span is counted in tiles.
         const int64_t pitch = std::max(N * 4, (int64_t)p.x_row_stride * x_elem);
         const int64_t tiles = span_rows("gemm", pitch * tile_m);
-        const int64_t per_call = std::min(tiles, (int64_t)65535) * tile_m;
+        const double tile_work = 2.0 * tile_m * N * K;
+        const int64_t budget_tiles =
+            std::max<int64_t>(1, (int64_t)(vk::Stream::get().workCap() / tile_work));
+        const int64_t per_call =
+            std::min({tiles, budget_tiles, (int64_t)65535}) * tile_m;
         for (int64_t m0 = 0; m0 < M; m0 += per_call) {
             const int64_t rows = std::min(per_call, M - m0);
             GemmParams q = p;
@@ -239,7 +243,7 @@ void dispatch_gemm(const Tensor& out, const Tensor& x_in, const Tensor& w_in,
             by_rows(tile_m, [&](const GemmParams& q, int64_t rows) {
                 vk::Stream::get().dispatch("gemm_coop.gemm_nt_coop", cspec, tn,
                                            (uint32_t)((rows + tile_m - 1) / tile_m), 1,
-                                           &q, sizeof(q));
+                                           &q, sizeof(q), 2.0 * rows * N * K);
             });
             return;
         }
@@ -253,7 +257,7 @@ void dispatch_gemm(const Tensor& out, const Tensor& x_in, const Tensor& w_in,
         const uint32_t rows = (uint32_t)((N + per_row - 1) / per_row);
         p.groups_per_row = per_row;
         vk::Stream::get().dispatch("gemm.gemm_nt_thin", spec, per_row, rows, (uint32_t)M, &p,
-                                   sizeof(p));
+                                   sizeof(p), 2.0 * M * N * K);
     } else {
         // gemm_nt_big keeps the weight tile packed as fp16 in shared, so it has
         // nothing to offer an fp32 second operand (a matmul against another

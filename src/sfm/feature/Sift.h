@@ -13,6 +13,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/SubmitBudget.h"
 #include "sfm/core/Log.h"
 #include "i18n/catalog/Sfm.h"
 #include "sfm/core/Features.h"
@@ -265,6 +267,8 @@ private:
         ctx_.dispatch(cb, name, grid(w, 16), p, grid(h, 16));
     }
 
+    // One pyramid is 0.83 s on a 2-CU RADV iGPU at 3200 px and past its 2 s
+    // watchdog at 5000, so it is submitted in pieces of the budget's size.
     void runPyramid() {
         VkCommandBuffer cb = ctx_.begin();
         for (int o = 0; o < octaves_; o++) {
@@ -291,20 +295,34 @@ private:
                 const Level& hi = gL(o, d + 1);
                 const Level& dd = dL(o, d);
                 img2d(cb, "dog_diff", dd.w, dd.h, pk(lo.off, hi.off, dd.off, dd.w, dd.h));
+                pyramidWork_ += (double)dd.w * dd.h;
             }
             ctx_.barrier(cb);
         }
-        ctx_.submit(cb);
+        submitTimed(cb, pyramidBudget_, pyramidWork_);
     }
 
     // separable blur src->dst using step kernel `step`; requires src != tmp usage
-    void blur(VkCommandBuffer cb, uint32_t srcOff, uint32_t dstOff, uint32_t w, uint32_t h,
+    void blur(VkCommandBuffer& cb, uint32_t srcOff, uint32_t dstOff, uint32_t w, uint32_t h,
               int step) {
         uint32_t woff = stepOff_[step], r = stepRad_[step];
         img2d(cb, "blur_h", w, h, pk(srcOff, w, h, r, woff));
         ctx_.barrier(cb);
         img2d(cb, "blur_v", w, h, pk(dstOff, w, h, r, woff));
         ctx_.barrier(cb);
+        pyramidWork_ += 2.0 * w * h * (2 * r + 1);
+        if (pyramidWork_ >= pyramidBudget_.limit()) {
+            submitTimed(cb, pyramidBudget_, pyramidWork_);
+            cb = ctx_.begin();
+        }
+    }
+
+    void submitTimed(VkCommandBuffer cb, spirula::SubmitBudget& budget, double& work) {
+        const auto t0 = std::chrono::steady_clock::now();
+        ctx_.submit(cb);
+        budget.record(work, std::chrono::duration<double>(
+                                std::chrono::steady_clock::now() - t0).count());
+        work = 0;
     }
 
     uint32_t runExtrema() {
@@ -334,14 +352,24 @@ private:
         return n;
     }
 
+    // orient and descriptor are one thread per keypoint: 392 and 222 ms for one
+    // image's dispatch on a 2-CU RADV iGPU, so they go in keypoint ranges.
     uint32_t runOrient(uint32_t nkp) {
         VkCommandBuffer cb = ctx_.begin();
         ctx_.fillZero(cb, bOkpCnt_);
         ctx_.barrier(cb);
-        if (nkp > 0)
-            ctx_.dispatch(cb, "orient", grid(nkp, 64),
-                          pk(nkp, (uint32_t)opt_.max_num_orientations, opt_.max_oriented_keypoints));
-        ctx_.submit(cb);
+        for (uint32_t k0 = 0;;) {
+            const uint32_t n = (uint32_t)std::min<int64_t>(nkp - k0, orientBudget_.chunk(4096, nkp));
+            if (n > 0)
+                ctx_.dispatch(cb, "orient", grid(n, 64),
+                              pk(k0 + n, (uint32_t)opt_.max_num_orientations,
+                                 opt_.max_oriented_keypoints, k0));
+            double work = n;
+            submitTimed(cb, orientBudget_, work);
+            k0 += n;
+            if (k0 >= nkp) break;
+            cb = ctx_.begin();
+        }
         uint32_t n = 0;
         ctx_.download(bOkpCnt_, &n, 4);
         if (n > opt_.max_oriented_keypoints) {
@@ -407,10 +435,14 @@ private:
     }
 
     void runDescriptor(uint32_t nsel) {
-        if (nsel == 0) return;
-        VkCommandBuffer cb = ctx_.begin();
-        ctx_.dispatch(cb, "descriptor", grid(nsel, 64), pk(nsel));
-        ctx_.submit(cb);
+        for (uint32_t k0 = 0; k0 < nsel;) {
+            const uint32_t n = (uint32_t)std::min<int64_t>(nsel - k0, descBudget_.chunk(1024, nsel));
+            VkCommandBuffer cb = ctx_.begin();
+            ctx_.dispatch(cb, "descriptor", grid(n, 64), pk(k0 + n, k0));
+            double work = n;
+            submitTimed(cb, descBudget_, work);
+            k0 += n;
+        }
     }
 
     FeatureSet readback(int w0, int h0, uint32_t nsel) {
@@ -486,6 +518,9 @@ private:
 
     SiftOptions opt_;
     VkContext ctx_;
+    // Pyramid work is pixels x taps; orient and descriptor count keypoints.
+    spirula::SubmitBudget pyramidBudget_, orientBudget_, descBudget_;
+    double pyramidWork_ = 0;
     int W0_ = 0, H0_ = 0, octaves_ = 0;
     uint32_t gaussFloats_ = 0, dogFloats_ = 0;
     std::vector<Level> gLevels_, dLevels_;

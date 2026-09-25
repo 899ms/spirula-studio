@@ -436,7 +436,7 @@ static void rowwise(const char* entry, const Tensor& out, const Tensor& x, float
         const vk::Stream::Fold fold = vk::Stream::fold1D(p.rows, 1);
         p.groups_per_row = fold.per_row;
         vk::Stream::get().dispatch(entry, spec, fold.per_row, fold.rows, 1, &p,
-                                   sizeof(p));
+                                   sizeof(p), (double)p.rows * cols * vk::Stream::kElemWork);
     }
 }
 

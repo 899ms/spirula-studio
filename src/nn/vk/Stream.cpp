@@ -8,6 +8,7 @@
 #include <cstring>
 #include <map>
 #include "core/Env.h"
+#include "core/SubmitBudget.h"
 
 namespace nn {
 namespace vk {
@@ -34,6 +35,16 @@ struct Stream::Impl {
     int             cur = 0;
     bool            recording = false;
     uint32_t        recorded = 0;  // dispatches in the command buffer being built
+    double          work = 0;      // their summed cost
+
+    // Two timestamps per ring slot bracket each submission; read back once the
+    // slot retires, they are what the budget learns this device's rate from.
+    VkQueryPool     submit_queries = VK_NULL_HANDLE;
+    double          slot_work[kRing] = {};  // cost of an unharvested submission
+    // Assumed until measured: a 2-CU iGPU's attention rate, so the first
+    // submits of a process are safe everywhere and a fast GPU outgrows it at once.
+    static constexpr double kPriorFlops = 50e9;
+    spirula::SubmitBudget budget{kPriorFlops};
 
     VkSemaphore timeline = VK_NULL_HANDLE;
     uint64_t    submitted = 0;
@@ -59,6 +70,7 @@ struct Stream::Impl {
 
     void init();
     void resolveQueries();
+    void harvest(int slot);
 };
 
 Stream& Stream::get() {
@@ -109,6 +121,18 @@ void Stream::Impl::init() {
                                          /*prefer_cached=*/true);
     ring_addr = Allocator::get().allocHost(kParamsRingBytes, &ring_map, "params.ring");
 
+    uint32_t nqf = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(ctx.physical(), &nqf, nullptr);
+    std::vector<VkQueueFamilyProperties> qfp(nqf);
+    vkGetPhysicalDeviceQueueFamilyProperties(ctx.physical(), &nqf, qfp.data());
+    if (ctx.timestampPeriod() > 0.0f && ctx.queueFamily() < nqf &&
+        qfp[ctx.queueFamily()].timestampValidBits > 0) {
+        VkQueryPoolCreateInfo qpi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qpi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qpi.queryCount = 2 * kRing;
+        NN_VK_CHECK(vkCreateQueryPool(ctx.device(), &qpi, nullptr, &submit_queries));
+    }
+
     if (ctx.profiling() && ctx.timestampPeriod() > 0.0f) {
         VkQueryPoolCreateInfo qpi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qpi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -131,6 +155,8 @@ void Stream::shutdown() {
         Allocator::get().free(s.impl_->ring_addr);
         Context& ctx = Context::get();
         if (s.impl_->query_pool) vkDestroyQueryPool(ctx.device(), s.impl_->query_pool, nullptr);
+        if (s.impl_->submit_queries)
+            vkDestroyQueryPool(ctx.device(), s.impl_->submit_queries, nullptr);
         if (s.impl_->timeline) vkDestroySemaphore(ctx.device(), s.impl_->timeline, nullptr);
         if (s.impl_->pool) vkDestroyCommandPool(ctx.device(), s.impl_->pool, nullptr);
     }
@@ -158,12 +184,18 @@ VkCommandBuffer Stream::begin() {
             wi.pValues = &s.cb_value[s.cur];
             NN_VK_CHECK(vkWaitSemaphores(ctx.device(), &wi, UINT64_MAX));
         }
+        s.harvest(s.cur);
     }
     NN_VK_CHECK(vkResetCommandBuffer(s.cbs[s.cur], 0));
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     NN_VK_CHECK(vkBeginCommandBuffer(s.cbs[s.cur], &bi));
     s.recording = true;
+    if (s.submit_queries) {
+        vkCmdResetQueryPool(s.cbs[s.cur], s.submit_queries, 2 * s.cur, 2);
+        vkCmdWriteTimestamp(s.cbs[s.cur], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            s.submit_queries, 2 * s.cur);
+    }
     if (s.query_pool) {
         vkCmdResetQueryPool(s.cbs[s.cur], s.query_pool, 0, kMaxQueries);
         s.query_next = 0;
@@ -187,6 +219,9 @@ void Stream::flush() {
     Impl& s = impl();
     if (!s.recording) return;
     Context& ctx = Context::get();
+    if (s.submit_queries)
+        vkCmdWriteTimestamp(s.cbs[s.cur], VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                            s.submit_queries, 2 * s.cur + 1);
     NN_VK_CHECK(vkEndCommandBuffer(s.cbs[s.cur]));
 
     const uint64_t signal = ++s.submitted;
@@ -211,10 +246,27 @@ void Stream::flush() {
     s.wait_values.clear();
 
     s.cb_value[s.cur] = signal;
+    s.slot_work[s.cur] = s.work;
     s.cur = (s.cur + 1) % Impl::kRing;
     s.recording = false;
     s.recorded = 0;
+    s.work = 0;
 }
+
+// Only for a slot whose submission has retired.
+void Stream::Impl::harvest(int slot) {
+    if (!submit_queries || slot_work[slot] <= 0) return;
+    uint64_t ts[2] = {};
+    VkResult r = vkGetQueryPoolResults(Context::get().device(), submit_queries,
+                                       2 * slot, 2, sizeof(ts), ts, sizeof(uint64_t),
+                                       VK_QUERY_RESULT_64_BIT);
+    if (r == VK_SUCCESS && ts[1] > ts[0])
+        budget.record(slot_work[slot],
+                      (double)(ts[1] - ts[0]) * Context::get().timestampPeriod() * 1e-9);
+    slot_work[slot] = 0;
+}
+
+double Stream::workCap() { return impl().budget.limit(); }
 
 void Stream::sync() {
     Impl& s = impl();
@@ -230,6 +282,7 @@ void Stream::sync() {
         wi.pValues = &s.submitted;
         NN_VK_CHECK(vkWaitSemaphores(ctx.device(), &wi, UINT64_MAX));
     }
+    for (int i = 0; i < Impl::kRing; ++i) s.harvest(i);
     s.resolveQueries();
 }
 
@@ -277,7 +330,7 @@ Stream::Fold Stream::fold1D(int64_t total, uint32_t block) {
 }
 
 void Stream::dispatch(const char* entry, const SpecList& spec, uint32_t gx, uint32_t gy,
-                      uint32_t gz, const void* params, uint32_t params_size) {
+                      uint32_t gz, const void* params, uint32_t params_size, double work) {
     if (gx == 0 || gy == 0 || gz == 0) return;
     Impl& s = impl();
     Context& ctx = Context::get();
@@ -292,6 +345,8 @@ void Stream::dispatch(const char* entry, const SpecList& spec, uint32_t gx, uint
         NN_LOG_ERROR("[ssam-sync] %s (%u,%u,%u)...\n", entry, gx, gy, gz);
 
     VkPipeline pipe = Pipelines::get().acquire(entry, spec);
+    const double cap = s.budget.limit();
+    if (s.recording && s.recorded > 0 && s.work + work > cap) flush();
     VkCommandBuffer cb = begin();
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
     if (params_size)
@@ -310,6 +365,7 @@ void Stream::dispatch(const char* entry, const SpecList& spec, uint32_t gx, uint
         s.query_names.emplace_back(entry);
     }
     barrier(cb);
+    s.work += work;
 
     if (debug_sync_enabled()) {
         sync();
@@ -325,7 +381,7 @@ void Stream::dispatch(const char* entry, const SpecList& spec, uint32_t gx, uint
     // NVIDIA result, bit for bit), and there is no reason to want an unbounded
     // batch anyway: submitting sooner lets the GPU start while the host is
     // still recording, and the four-deep ring keeps the host from running away.
-    if (++s.recorded >= max_dispatches_per_batch()) flush();
+    if (++s.recorded >= max_dispatches_per_batch() || s.work >= cap) flush();
 }
 
 // Dispatches per command buffer. 64 is comfortably below where ANV starts
@@ -343,21 +399,22 @@ uint32_t Stream::max_dispatches_per_batch() {
 
 void Stream::dispatchBig(const char* entry, const SpecList& spec, uint32_t gx,
                          uint32_t gy, uint32_t gz, const void* params,
-                         uint32_t params_size) {
+                         uint32_t params_size, double work) {
     DevicePtr addr = 0;
     void* mapped = nullptr;
     paramsAlloc(params_size, &addr, &mapped);
     std::memcpy(mapped, params, params_size);
-    dispatch(entry, spec, gx, gy, gz, &addr, sizeof(addr));
+    dispatch(entry, spec, gx, gy, gz, &addr, sizeof(addr), work);
 }
 
 void Stream::dispatchFlat(const char* entry, const SpecList& spec, int64_t total,
                           uint32_t block, void* params, uint32_t params_size,
-                          uint32_t* groups_per_row_field) {
+                          uint32_t* groups_per_row_field, double work) {
     if (total <= 0) return;
     Fold f = fold1D(total, block);
     if (groups_per_row_field) *groups_per_row_field = f.per_row;
-    dispatch(entry, spec, f.per_row, f.rows, 1, params, params_size);
+    dispatch(entry, spec, f.per_row, f.rows, 1, params, params_size,
+             work >= 0 ? work : (double)total * kElemWork);
 }
 
 void Stream::paramsAlloc(uint32_t bytes, DevicePtr* addr_out, void** mapped_out) {

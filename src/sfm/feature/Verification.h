@@ -21,6 +21,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -699,6 +700,17 @@ inline std::vector<TwoViewMatches> verifyPairs(
         bool done_producing = false;
         const size_t max_queued = (size_t)nthreads * std::max(1, opt.queue_depth_per_thread);
 
+        // Any throw -- a worker's, or the matcher's on a lost device -- must reach
+        // the caller only after every worker is joined: unwinding past a
+        // joinable std::thread terminates the process.
+        std::exception_ptr error;
+        std::atomic<bool> failed{false};
+        auto fail = [&](std::exception_ptr e) {
+            std::lock_guard<std::mutex> lk(mtx);
+            if (!error) error = e;
+            failed = true;
+        };
+
         std::vector<std::thread> workers;
         workers.reserve(nthreads);
         for (int t = 0; t < nthreads; t++) {
@@ -713,31 +725,37 @@ inline std::vector<TwoViewMatches> verifyPairs(
                         queue.pop();
                     }
                     cv_space.notify_one();
-                    verifyOne(job.index, job.matches);
+                    if (failed) continue;  // keep draining so the producer never blocks
+                    try {
+                        verifyOne(job.index, job.matches);
+                    } catch (...) {
+                        fail(std::current_exception());
+                    }
                 }
             });
         }
 
-        // A cancel stops the producer and lets the queue drain; it must not
-        // throw from here, because the workers are still waiting on `cv_job`
-        // and an unwind past their join() would terminate the process.
-        bool stop = false;
-        for (size_t b = 0; b < pairs.size() && !stop; b += batch) {
-            size_t e = std::min(b + batch, pairs.size());
-            matchFn(b, e, batch_out);
-            for (size_t p = b; p < e; p++) {
-                std::vector<FeatureMatch>& m = batch_out[p - b];
-                putative += m.size();
-                {
-                    std::unique_lock<std::mutex> lk(mtx);
-                    cv_space.wait(lk, [&] { return queue.size() < max_queued; });
-                    queue.push({p, std::move(m)});
+        try {
+            for (size_t b = 0; b < pairs.size() && !failed; b += batch) {
+                size_t e = std::min(b + batch, pairs.size());
+                matchFn(b, e, batch_out);
+                for (size_t p = b; p < e; p++) {
+                    std::vector<FeatureMatch>& m = batch_out[p - b];
+                    putative += m.size();
+                    {
+                        std::unique_lock<std::mutex> lk(mtx);
+                        cv_space.wait(lk, [&] { return queue.size() < max_queued; });
+                        queue.push({p, std::move(m)});
+                    }
+                    cv_job.notify_one();
+                    if (progress) progress(p + 1, pairs.size());
+                    tick(p);
+                    if (cancel::requested() || failed) break;
                 }
-                cv_job.notify_one();
-                if (progress) progress(p + 1, pairs.size());
-                tick(p);
-                if (cancel::requested()) { stop = true; break; }
+                if (cancel::requested()) break;
             }
+        } catch (...) {
+            fail(std::current_exception());
         }
         {
             std::lock_guard<std::mutex> lk(mtx);
@@ -745,6 +763,7 @@ inline std::vector<TwoViewMatches> verifyPairs(
         }
         cv_job.notify_all();
         for (std::thread& w : workers) w.join();
+        if (error) std::rethrow_exception(error);
     }
     cancel::check();   // safe now: every worker has been joined
 

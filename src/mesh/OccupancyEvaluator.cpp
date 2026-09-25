@@ -19,11 +19,13 @@
 #include "mesh/MeshingRaster.h"
 
 #include "core/CameraModel.h"     // kCameraDistortionParams (portable spelling)
+#include "core/SubmitBudget.h"
 
 #include "backend/api/BackendRuntime.h"
 #include "backend/common/SortScan.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -59,12 +61,20 @@ namespace {
 constexpr int kPointsPerLaunch = 1 << 19;
 
 // fn(first, count) over [0, n) in ranges of at most `chunk`, checking each.
+// Ranges start at 1/16 of it and grow as the budget learns the device: a
+// chunk is 19 ms on an RTX 5070 and can be seconds on an iGPU.
 template <typename Fn>
 void for_ranges(int n, int chunk, const char* stage, Fn&& fn) {
     chunk = std::max(chunk, 1);
-    for (int i = 0; i < n; i += chunk) {
-        fn(i, std::min(chunk, n - i));
+    spirula::SubmitBudget budget;
+    for (int i = 0; i < n;) {
+        const int m = (int)std::min<int64_t>(n - i, budget.chunk(chunk / 16, chunk));
+        const auto t0 = std::chrono::steady_clock::now();
+        fn(i, m);
         sync_checked(stage);
+        budget.record(m, std::chrono::duration<double>(
+                             std::chrono::steady_clock::now() - t0).count());
+        i += m;
     }
 }
 

@@ -65,7 +65,7 @@ void layer_norm(const Tensor& out, const Tensor& x, const Tensor& w, const Tenso
         vk::Stream::Fold f = vk::Stream::fold1D(p.rows, 1);
         p.groups_per_row = f.per_row;
         vk::Stream::get().dispatch("norm.layer_norm", spec, f.per_row, f.rows, 1, &p,
-                                   sizeof(p));
+                                   sizeof(p), (double)p.rows * cols * vk::Stream::kElemWork);
     }
 }
 
@@ -91,7 +91,7 @@ void group_norm(vk::Arena& arena, const Tensor& out, const Tensor& x, const Tens
     sp.eps = eps;
     vk::SpecList spec{0u, (uint32_t)(x.dtype == DType::F16)};
     vk::Stream::get().dispatch(stats_entry, spec, (uint32_t)groups, 1, 1, &sp,
-                               sizeof(sp));
+                               sizeof(sp), (double)n * channels * vk::Stream::kElemWork);
 
     GroupNormApplyParams ap{};
     ap.out = out.ptr;

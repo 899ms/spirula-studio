@@ -6,14 +6,11 @@
 // a SAM 3 image encode issues a few thousand dispatches, and submitting each
 // one separately costs more than the kernels do.
 //
-// Between every recorded command sits a conservative global
-// COMPUTE|TRANSFER -> COMPUTE|TRANSFER memory barrier. That reproduces
-// straight-line data dependence exactly, which is what a forward pass needs;
-// per-resource narrowing is a later optimization, applied with a profile, not
-// by default.
+// A global COMPUTE|TRANSFER memory barrier sits between every recorded command,
+// which reproduces straight-line data dependence exactly.
 //
-// Flush points: sync(), download(), a params-ring wrap, and the command-buffer
-// ring running dry. Everything else stays in flight.
+// Flush points: sync(), download(), a params-ring wrap, the command-buffer
+// ring running dry, and a batch reaching its dispatch or work cap.
 
 #include "nn/vk/Context.h"
 #include "nn/vk/Memory.h"
@@ -32,13 +29,13 @@ public:
     static void    shutdown();
 
     // --- dispatch ---------------------------------------------------------
-    // `params` is the byte image of the entry point's `uniform` struct. Up to
-    // the device push limit it is pushed directly; use dispatchBig() for larger
-    // structs (it writes them to the params ring and pushes the address).
+    // `params` is the entry point's `uniform` struct (dispatchBig(): through the
+    // params ring); `work` is its cost in FLOPs, what the submit budget counts.
     void dispatch(const char* entry, const SpecList& spec, uint32_t gx, uint32_t gy,
-                  uint32_t gz, const void* params, uint32_t params_size);
+                  uint32_t gz, const void* params, uint32_t params_size, double work = 0);
     void dispatchBig(const char* entry, const SpecList& spec, uint32_t gx, uint32_t gy,
-                     uint32_t gz, const void* params, uint32_t params_size);
+                     uint32_t gz, const void* params, uint32_t params_size,
+                     double work = 0);
 
     // Flat 1-D helper: folds `total` threads into `block`-wide workgroups.
     // Vulkan caps EVERY dispatch dimension at 65535, so long ranges fold into a
@@ -47,9 +44,13 @@ public:
     // given, is written into the params struct before the dispatch.
     struct Fold { uint32_t per_row, rows; };
     static Fold fold1D(int64_t total, uint32_t block);
+    // Its work defaults to kElemWork per thread.
     void dispatchFlat(const char* entry, const SpecList& spec, int64_t total,
                       uint32_t block, void* params, uint32_t params_size,
-                      uint32_t* groups_per_row_field = nullptr);
+                      uint32_t* groups_per_row_field = nullptr, double work = -1);
+    // A memory-bound thread in FLOP-equivalents: ~12 bytes against a GPU's
+    // FLOP:byte ratio of 10-50.
+    static constexpr double kElemWork = 32;
 
     // --- memory ops -------------------------------------------------------
     void fill(DevicePtr dst, uint32_t word, VkDeviceSize bytes);
@@ -67,6 +68,9 @@ public:
     // Dispatches recorded before flush() happens on its own. See the definition
     // for why an unbounded command buffer is not an option.
     static uint32_t max_dispatches_per_batch();
+    // FLOPs one submission may carry before the driver's watchdog is at risk
+    // (core/SubmitBudget.h). An op whose single dispatch would exceed it splits.
+    double workCap();
 
     // Makes the NEXT submission wait on an external timeline. Used by the video
     // decoder, whose work runs on a different queue family: the decode signals

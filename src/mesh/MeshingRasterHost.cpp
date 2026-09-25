@@ -16,6 +16,7 @@
 #include "mesh/MeshingDevice.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -28,6 +29,7 @@
 #include <core/Tensor.h>
 #include <core/Common.cuh>
 #include "core/Camera.h"   // camera_{model,distortion}_to_string
+#include "core/SubmitBudget.h"
 
 #include "backend/api/BackendRuntime.h"
 #include "backend/common/SortScan.h"
@@ -76,9 +78,9 @@ inline TorchTensorView tv(const float* p, std::initializer_list<int64_t> shape) 
     return TorchTensorView((uint64_t)p, 4, shape);
 }
 
-// Bounds on one cull launch. Windows resets the GPU when a submission runs past
-// TdrDelay (2 s by default). RTX 5070: 2.7M vertices x 530 cameras in one launch
-// took 3.8 s; 262K vertices x 16 cameras at most 0.11 s.
+// Bounds on one cull launch; below the pair cap, SubmitBudget sizes it from the
+// launches before. RTX 5070: 2.7M vertices x 530 cameras in one launch took
+// 3.8 s, past the 2 s TDR; 262K vertices x 16 cameras at most 0.11 s.
 constexpr int kCullCamerasPerLaunch = 16;
 constexpr int64_t kCullPairsPerLaunch = 1 << 22;   // vertex x camera tests
 
@@ -259,13 +261,9 @@ void render_evaluate_occupancy(
     DBuf<float3> d_moments(npix);
     DBuf<float> d_occ_kmin((size_t)n * k);
     DBuf<int> d_cnt((size_t)n);
-    {
-        std::vector<float> big((size_t)n * k, 1e30f);
-        backend::memcpy_sync(d_occ_kmin.get(), big.data(),
-                             (size_t)n * k * sizeof(float),
-                             backend::MemcpyKind::HostToDevice);
-        backend::memset_sync(d_cnt.get(), 0, (size_t)n * sizeof(int));
-    }
+    // 0x7f7f7f7f is 3.4e38, the "+inf" padding; finalize never reads it back.
+    backend::memset_sync(d_occ_kmin.get(), 0x7f, (size_t)n * k * sizeof(float));
+    backend::memset_sync(d_cnt.get(), 0, (size_t)n * sizeof(int));
 
     for (int ci = 0; ci < num_cams; ++ci) {
         int cam = cam_indices[ci];
@@ -421,6 +419,7 @@ void render_cull_unseen_vertices(
     for (int c = 0; c < ctx->C; ++c)
         groups[{ctx->models[c], ctx->dists[c]}].push_back(c);
     constexpr int kD = kCameraDistortionParams;
+    spirula::SubmitBudget budget;
     for (const auto& [key, cams] : groups) {
         const int G = (int)cams.size();
         std::vector<float> vm((size_t)G * 16), in((size_t)G * 4), di((size_t)G * kD);
@@ -443,9 +442,12 @@ void render_cull_unseen_vertices(
 
         for (int c0 = 0; c0 < G; c0 += kCullCamerasPerLaunch) {
             const int nc = std::min(kCullCamerasPerLaunch, G - c0);
-            const int nvc = (int)std::max<int64_t>(1, kCullPairsPerLaunch / nc);
-            for (int v0 = 0; v0 < nv; v0 += nvc) {
-                launch_cull(d_verts, v0, std::min(nvc, nv - v0), d_faces, nf,
+            for (int v0 = 0; v0 < nv;) {
+                const int64_t pairs =
+                    budget.chunk(kCullPairsPerLaunch / 64, kCullPairsPerLaunch);
+                const int n = (int)std::min<int64_t>(nv - v0, std::max<int64_t>(1, pairs / nc));
+                const auto t0 = std::chrono::steady_clock::now();
+                launch_cull(d_verts, v0, n, d_faces, nf,
                             g_vm.get() + (size_t)c0 * 16,
                             g_in.get() + (size_t)c0 * 4,
                             g_di.get() + (size_t)c0 * kD,
@@ -453,6 +455,9 @@ void render_cull_unseen_vertices(
                             key.first, key.second, nc,
                             d_leafMin, d_leafMax, d_internal, d_nodeAABB, d_vis);
                 sync_checked("visibility cull");
+                budget.record((double)n * nc, std::chrono::duration<double>(
+                                                  std::chrono::steady_clock::now() - t0).count());
+                v0 += n;
             }
         }
     }

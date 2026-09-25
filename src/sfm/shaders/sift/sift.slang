@@ -266,11 +266,11 @@ uint gaussLevelIndex(uint oct, float s_cont) {
 // Orientation assignment
 // =====================================================================
 
-// One thread per raw keypoint. Emits up to p1 oriented keypoints.
-// p0=kpCount  p1=maxOri  p2=okpCap
+// One thread per raw keypoint of [p3, p0). Emits up to p1 oriented keypoints.
+// p0=kpEnd  p1=maxOri  p2=okpCap  p3=kpBegin
 [shader("compute")] [numthreads(64, 1, 1)]
 void orient(uint3 t : SV_DispatchThreadID) {
-    uint ki = t.x;
+    uint ki = t.x + p3;
     if (ki >= p0) return;
     uint b = ki * uint(KP_STRIDE);
     float x_oct = kp[b + 0], y_oct = kp[b + 1];
@@ -402,10 +402,10 @@ void select_topk(uint3 t : SV_DispatchThreadID) {
 // 128-D descriptor
 // =====================================================================
 
-// One thread per selected keypoint.  p0=selCount
+// One thread per selected keypoint of [p1, p0).
 [shader("compute")] [numthreads(64, 1, 1)]
 void descriptor(uint3 t : SV_DispatchThreadID) {
-    uint ki = t.x;
+    uint ki = t.x + p1;
     if (ki >= p0) return;
     uint ob = ki * uint(OKP_STRIDE);
     float theta = fokp[ob + 3];
