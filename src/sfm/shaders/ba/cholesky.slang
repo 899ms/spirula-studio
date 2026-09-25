@@ -7,7 +7,8 @@
 // then the two triangular solves run blockwise on u_g in place.
 //
 // Push constants: u0 = n (matrix dim), u1 = k (block index),
-//                 u2 = item count for the dispatch (tiles or rows).
+//                 u2 = item count for the dispatch (tiles or rows),
+//                 u4 = first tile of a launch split into ranges.
 // Included at the end of ba.slang; shares its bindings and push constants.
 
 static const uint kBs = 32;
@@ -55,7 +56,7 @@ void chol_panel(uint3 t : SV_DispatchThreadID, uint3 wg : SV_GroupID, uint gi : 
     uint k = u1;
     uint r = gi;
     uint base = k * kBs;
-    uint rbase = (k + 1 + wg.x) * kBs;
+    uint rbase = (k + 1 + wg.x + u4) * kBs;
     uint gr = rbase + r;
     bool valid = gr < n;
 
@@ -85,7 +86,7 @@ void chol_panel(uint3 t : SV_DispatchThreadID, uint3 wg : SV_GroupID, uint gi : 
 // dispatch per step (chol_diag proper only runs for k = 0).
 [shader("compute")] [numthreads(kBs, kBs, 1)]
 void chol_update(uint3 wg : SV_GroupID, uint3 lt : SV_GroupThreadID) {
-    uint tid = wg.x;
+    uint tid = wg.x + u4;
     if (tid >= u2) return;
     uint n = u0;
     uint k = u1;

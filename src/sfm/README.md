@@ -154,9 +154,10 @@ unless `--ba-real df` says otherwise.
 
 A device that *had* the feature and then failed anyway — `VK_ERROR_DEVICE_LOST`
 (what a Windows TDR reset looks like from here: the watchdog kills a driver
-whose kernel runs past two seconds, and a thousand-image dense factorization
-is one long kernel), or an allocation the driver refused — does not end the
-run. `runGlobalBA` re-runs that solve on the host and sends every later solve
+whose submit runs past two seconds, which the solver's submit sizing is there
+to prevent, ba/README.md "Watchdog"), or an allocation the driver refused —
+does not end the run. `solveBundle` re-runs that solve on the host, from the parameters the
+device last checkpointed (every 5 s of progress), and sends every later solve
 at least that big straight there, because the mapper's problems only grow;
 `VkContext`'s `VK_CHECK` throws rather than exits so it can. The run says so
 once, and `--ba-real cpu --ba-real-coarse cpu` (Spirula Studio: "Bundle
@@ -280,8 +281,8 @@ spirula sfm match   feats/ -o matches.bin
 spirula sfm map     matches.bin feats/ -o sparse/ --images IMAGES/
 spirula sfm map     matches.bin feats/ -o sparse/ --no-compact-unused-features
 spirula sfm merge   sparse/ -o merged/
-spirula sfm ba      problem.txt --real df       # solver benchmark on a BAL problem
-spirula sfm ba      sparse/0 --real cpu        # ... the same solve, on the host
+spirula sfm ba      sparse/0 refined/0          # the mapper's global BA on a model
+spirula sfm ba      sparse/0 sparse/0 --real cpu  # ... in place, on the host
 ```
 
 `spirula sfm --help` lists the commands, `spirula sfm <command> --help` (or

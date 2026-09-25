@@ -74,6 +74,14 @@ struct BAOverBudget : std::runtime_error {
     double need_mb, budget_mb;
 };
 
+// Where a device solve had got to: its parameters are in the problem's host
+// vectors as of `iterations` LM iterations, so a restart after a device failure
+// resumes from here instead of from the start.
+struct SolverCheckpoint {
+    int iterations = 0;
+    double damping = 0, cost = 0;
+};
+
 struct SolverOptions {
     RealCfg real = RealCfg::F64;
     float loss_param = 1.0f;      // Huber delta / Cauchy c (unused by trivial loss)
@@ -105,6 +113,9 @@ struct SolverOptions {
     bool validate = false;
     bool verbose = true;
     bool profile = false;
+    // Written by a device solve every few seconds of accepted progress, along
+    // with the problem's parameters. Null = no checkpoints.
+    SolverCheckpoint* checkpoint = nullptr;
 };
 
 struct SolverStats {

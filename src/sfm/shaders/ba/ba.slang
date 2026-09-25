@@ -7,7 +7,8 @@
 // lambda)^-1 A_up^T is assembled into a packed lower triangle (cholesky.slang)
 // or applied matrix-free (cg.slang). The Jacobian pass stores Jc (2 x dof), Jp
 // (2 x 3) and the weighted residual per observation; A_cp = Jc^T Jp is never
-// materialized. Push constants: u0..u3 counts / offsets, f0..f3 damping / loss.
+// materialized. Push constants: u0..u3 counts / offsets, f0..f3 damping / loss,
+// u4 is the first item of a launch the host split into ranges (sfm/ba/Solver.h).
 
 #include "common/camera.slang"
 #include "common/loss.slang"
@@ -27,6 +28,7 @@ static const uint kNoMember = 0xFFFFFFFFu;
 [[vk::push_constant]] cbuffer PC {
     uint u0; uint u1; uint u2; uint u3;
     float f0; float f1; float f2; float f3;
+    uint u4;
 };
 
 // ---- problem data ----
@@ -386,7 +388,7 @@ void point_prep(uint3 t : SV_DispatchThreadID) {
 // u0 = num_obs
 [shader("compute")] [numthreads(256, 1, 1)]
 void y_prep(uint3 t : SV_DispatchThreadID) {
-    uint o = t.x;
+    uint o = t.x + u4;
     if (o >= u0) return;
     uint p = u_obs_point[o];
     Real W[9];
@@ -640,29 +642,29 @@ void intr_update(uint3 t : SV_DispatchThreadID) {
 // =====================================================================
 
 [shader("compute")] [numthreads(128, 1, 1)]
-void schur_obs_c(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofCompact>(t.x); }
+void schur_obs_c(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofCompact>(t.x + u4); }
 [shader("compute")] [numthreads(128, 1, 1)]
-void schur_obs_m(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofMid>(t.x); }
+void schur_obs_m(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofMid>(t.x + u4); }
 [shader("compute")] [numthreads(128, 1, 1)]
-void schur_obs_w(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofWide>(t.x); }
+void schur_obs_w(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofWide>(t.x + u4); }
 [shader("compute")] [numthreads(128, 1, 1)]
-void schur_obs_x(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofRig>(t.x); }
+void schur_obs_x(uint3 t : SV_DispatchThreadID) { schurObsImpl<kDofRig>(t.x + u4); }
 
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void schur_pair_c(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { schurPairImpl<kDofCompact>(wg.x, gi); }
+void schur_pair_c(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { schurPairImpl<kDofCompact>(wg.x + u4, gi); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void schur_pair_m(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { schurPairImpl<kDofMid>(wg.x, gi); }
+void schur_pair_m(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { schurPairImpl<kDofMid>(wg.x + u4, gi); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void schur_pair_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { schurPairImpl<kDofWide>(wg.x, gi); }
+void schur_pair_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { schurPairImpl<kDofWide>(wg.x + u4, gi); }
 
 [shader("compute")] [numthreads(256, 1, 1)]
-void dp_accum_c(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofCompact>(t.x); }
+void dp_accum_c(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofCompact>(t.x + u4); }
 [shader("compute")] [numthreads(256, 1, 1)]
-void dp_accum_m(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofMid>(t.x); }
+void dp_accum_m(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofMid>(t.x + u4); }
 [shader("compute")] [numthreads(256, 1, 1)]
-void dp_accum_w(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofWide>(t.x); }
+void dp_accum_w(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofWide>(t.x + u4); }
 [shader("compute")] [numthreads(256, 1, 1)]
-void dp_accum_x(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofRig>(t.x); }
+void dp_accum_x(uint3 t : SV_DispatchThreadID) { dpAccumImpl<kDofRig>(t.x + u4); }
 
 // =====================================================================
 // per-model entry points -- four lines per camera model: cost and Jacobian,

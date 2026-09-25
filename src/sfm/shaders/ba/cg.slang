@@ -345,21 +345,21 @@ void cgScatterImpl<let MD : int>(uint wgx, uint gi) {
 // Tiered entry points: wide covers every problem without a refined member
 // extrinsic (the pre-rig kernels exactly), rig the rest (sfm/ba/Solver.h).
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void cg_cam_diag_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgCamDiagImpl<kDofWide>(wg.x, gi); }
+void cg_cam_diag_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgCamDiagImpl<kDofWide>(wg.x + u4, gi); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void cg_cam_diag_x(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgCamDiagImpl<kDofRig>(wg.x, gi); }
+void cg_cam_diag_x(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgCamDiagImpl<kDofRig>(wg.x + u4, gi); }
 [shader("compute")] [numthreads(256, 1, 1)]
-void cg_gather_w(uint3 t : SV_DispatchThreadID) { cgGatherImpl<kDofWide>(t.x); }
+void cg_gather_w(uint3 t : SV_DispatchThreadID) { cgGatherImpl<kDofWide>(t.x + u4); }
 [shader("compute")] [numthreads(256, 1, 1)]
-void cg_gather_x(uint3 t : SV_DispatchThreadID) { cgGatherImpl<kDofRig>(t.x); }
+void cg_gather_x(uint3 t : SV_DispatchThreadID) { cgGatherImpl<kDofRig>(t.x + u4); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
 void cg_bmul_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgBmulImpl<kDofWide>(wg.x, gi); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
 void cg_bmul_x(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgBmulImpl<kDofRig>(wg.x, gi); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void cg_scatter_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgScatterImpl<kDofWide>(wg.x, gi); }
+void cg_scatter_w(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgScatterImpl<kDofWide>(wg.x + u4, gi); }
 [shader("compute")] [numthreads(kPairWg, 1, 1)]
-void cg_scatter_x(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgScatterImpl<kDofRig>(wg.x, gi); }
+void cg_scatter_x(uint3 wg : SV_GroupID, uint gi : SV_GroupIndex) { cgScatterImpl<kDofRig>(wg.x + u4, gi); }
 
 // Dot-product partials over the n_dim vectors, one value per workgroup.
 // u1 selects the products (0: p.Sp -> slot 0; 1: r.z -> slot 0, r.r -> slot 1)

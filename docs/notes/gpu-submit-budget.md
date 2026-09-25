@@ -23,6 +23,7 @@ bit-identical except where noted below).
 | SIFT orient / descriptor | keypoints | keypoint ranges | 392 / 222 ms, one dispatch each |
 | inference stream (`nn/vk/Stream.cpp`) | FLOPs, per-op estimate | submits by cost; GEMM rows and attention queries/batches past the cap | SAM 3 memory attention ~190 GFLOP in one dispatch |
 | meshing cull / occupancy / bisection / color | pairs or points | launch ranges, capped at the old sizes | cull: 0.11 s per launch on an RTX 5070 |
+| GPU bundle adjustment (`sfm/ba/Solver.h`) | ~ns of RTX 5070 fp64, per-kernel weights rescaled by a first timed launch | LM iteration at barriers; per-obs, per-chunk and Cholesky-tile launches into ranges | one LM iteration of a 6946-image rig capture: 2.4 s on the RTX 5070 itself |
 
 The inference stream submits asynchronously, so it brackets every command
 buffer with two timestamps and reads them when the ring slot comes round
@@ -34,8 +35,11 @@ Slicing attention by query block can change the key-split decision per
 slice, so outputs move by float-reordering noise (a handful of mask-edge
 pixels in `spirula geometry`); everything else is bit-identical.
 
-Not covered: GPU bundle adjustment records up to `cg_max_iters` PCG
-iterations (or a whole dense Cholesky) per submit, but it only runs on a
-device with fp64 atomic add, which neither NVIDIA nor RADV consumer parts
-expose. The splat viewer's forward pass is the training forward and was
+Bundle adjustment weights its kernels as measured on the RTX 5070, and the
+first launch of each big kernel on a device is a 1/32-budget range timed
+alone, because the ratios do not carry across devices (sfm/ba/README.md
+"Watchdog"). It runs on NVIDIA by default (fp64 atomic add) and on anything
+with int64 atomics under `--ba-real df`, which is how the iGPU exercises it.
+
+Not covered: the splat viewer's forward pass is the training forward and was
 left alone.

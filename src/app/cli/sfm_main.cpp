@@ -1,22 +1,13 @@
 // spirula-sfm: the SfM pipeline CLI. Subcommands are the stage graph
-// (src/sfm/README.md), each reading and writing files on disk so any one of
-// them can be replaced by COLMAP's equivalent to bisect a failure:
-//
-//   spirula-sfm auto    <image_dir> -o <workspace>      all of the below
-//   spirula-sfm extract <image|dir> -o <features>
-//   spirula-sfm match   <features>  -o <matches.bin>
-//   spirula-sfm map     <matches.bin> <features> -o <sparse/>
-//   spirula-sfm merge   <sparse/>   -o <merged/>
-//   spirula-sfm ba      <bal_problem.txt>               solver benchmark
+// (src/sfm/README.md: auto, extract, match, map, merge, ba), each reading and
+// writing files on disk so any one of them can be replaced by COLMAP's
+// equivalent to bisect a failure.
 //
 // This file is presentation and plumbing only: what a flag *means* lives in
 // sfm/SfmConfig.h's descriptor table, which is also what `--help` prints and
-// what the GUI will edit. Flags that do not name one scalar field are parsed
-// here, before the table is offered the token, so a hand-parsed name always
-// wins -- `map --audit` (run an audit pass) has to beat the table's `--audit`
-// / `--no-audit` switch for the audit pass.
-//
-// The self-checks are separate binaries (src/sfm/tests/, one per area).
+// what the GUI edits. Flags that do not name one scalar field are parsed here
+// first, so a hand-parsed name wins -- `map --audit` (run an audit pass) has to
+// beat the table's `--audit` / `--no-audit` switch.
 #include "app/Tools.h"
 #include "sfm/Pipeline.h"
 

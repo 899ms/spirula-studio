@@ -290,6 +290,30 @@ inline Reconstruction Reconstruction::readBinary(const std::string& dir) {
             r.next_point3D_id = std::max(r.next_point3D_id, id + 1);
         }
     }
+    // Some exporters drop untriangulated keypoints from images.bin and leave
+    // the tracks indexing the old lists (Hierarchical 3DGS "campus": 26.6 M of
+    // 29.7 M entries out of range), so a disagreeing model is re-tracked from images.
+    auto agrees = [&](uint64_t id, const TrackElement& e) {
+        auto it = r.images.find(e.image_id);
+        return it != r.images.end() && e.point2D_idx < it->second.point3D_ids.size() &&
+               it->second.point3D_ids[e.point2D_idx] == id;
+    };
+    bool consistent = true;
+    for (const auto& kv : r.points3D)
+        for (const TrackElement& e : kv.second.track) consistent = consistent && agrees(kv.first, e);
+    if (!consistent) {
+        std::fprintf(stderr, "[model] %s: tracks disagree with images.bin; rebuilt from the images\n",
+                     dir.c_str());
+        for (auto& kv : r.points3D) kv.second.track.clear();
+        for (auto& kv : r.images)
+            for (uint32_t k = 0; k < kv.second.point3D_ids.size(); k++) {
+                uint64_t& id = kv.second.point3D_ids[k];
+                if (id == kInvalidPoint3D) continue;
+                auto it = r.points3D.find(id);
+                if (it == r.points3D.end()) id = kInvalidPoint3D;
+                else it->second.track.push_back({kv.first, k});
+            }
+    }
     return r;
 }
 

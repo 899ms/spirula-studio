@@ -415,6 +415,52 @@ inline void noteBaDeviceFailure(const VkError& e, uint64_t num_obs) {
         slog::warn(slog::Tag::Map, spirula::i18n::msg::sfm::ba_host_fallback, {e.what()});
 }
 
+struct BundleRun {
+    SolverStats stats;
+    RealCfg real = RealCfg::F64;  // what the solve that finished ran in
+    double t_init = 0, t_solve = 0;
+};
+
+// Solve `P` in place, moving to the host if the device fails. The device solve
+// checkpoints `P` every few seconds (SolverOptions::checkpoint), so the host
+// picks up where it stopped instead of from the start.
+inline BundleRun solveBundle(BAProblem& P, SolverOptions sopt, VkContext* shared) {
+    BundleRun r;
+    if (P.num_obs >= baHostObsThreshold().load()) sopt.real = RealCfg::CPU;
+    SolverCheckpoint ck;
+    sopt.checkpoint = &ck;
+    auto attempt = [&] {
+        auto t0 = std::chrono::steady_clock::now();
+        BundleSolver solver(P, sopt, shared);
+        solver.init();
+        auto t1 = std::chrono::steady_clock::now();
+        solver.solve();
+        auto t2 = std::chrono::steady_clock::now();
+        solver.downloadParams();
+        r.stats = solver.stats();
+        r.real = solver.real();
+        r.t_init = std::chrono::duration<double>(t1 - t0).count();
+        r.t_solve = std::chrono::duration<double>(t2 - t1).count();
+    };
+    try {
+        attempt();
+    } catch (const VkError& e) {
+        if (!vkErrorIsResourceFailure(e.result)) throw;
+        noteBaDeviceFailure(e, P.num_obs);
+        sopt.real = RealCfg::CPU;
+        sopt.checkpoint = nullptr;
+        if (ck.iterations > 0) {
+            sopt.init_damping = ck.damping;
+            sopt.max_iters = std::max(1, sopt.max_iters - ck.iterations);
+            slog::diag(slog::Tag::Map, "[ba] resuming on the host at iteration %d, cost %.6e",
+                       ck.iterations, ck.cost);
+        }
+        attempt();
+        r.stats.iterations += ck.iterations;
+    }
+    return r;
+}
+
 // Global BA over all registered images and all 3D points. Overwrites poses,
 // point positions, and intrinsics in `rec`. Returns the final RMS reprojection
 // cost reported by the solver (0 if nothing to optimize).
@@ -429,33 +475,12 @@ inline double runGlobalBA(Reconstruction& rec, const BundleOptions& bopt) {
     BundleLayout L = buildBundle(rec, bopt);
     BAProblem& P = L.P;
     if (P.num_images < 2) return 0;
-
-    SolverOptions sopt = bundleSolverOptions(bopt);
-    if (P.num_obs >= baHostObsThreshold().load()) sopt.real = RealCfg::CPU;
     double t_build = prof_lap();
 
-    double t_init = 0, t_solve = 0;
-    SolverStats stats;
-    // The solver reads the problem's host parameters at init() and writes them
-    // only in downloadParams(), so a failed attempt leaves `P` where it
-    // started and the host solver can restart from the same model.
-    auto attempt = [&] {
-        BundleSolver solver(P, sopt, bopt.shared_ctx);
-        solver.init();
-        t_init = prof_lap();
-        solver.solve();
-        t_solve = prof_lap();
-        solver.downloadParams();
-        stats = solver.stats();
-    };
-    try {
-        attempt();
-    } catch (const VkError& e) {
-        if (!vkErrorIsResourceFailure(e.result)) throw;
-        noteBaDeviceFailure(e, P.num_obs);
-        sopt.real = RealCfg::CPU;
-        attempt();
-    }
+    const BundleRun run = solveBundle(P, bundleSolverOptions(bopt), bopt.shared_ctx);
+    const SolverStats& stats = run.stats;
+    const double t_init = run.t_init, t_solve = run.t_solve;
+    prof_lap();
     writeBundle(rec, L, P);
 
     double t_write = prof_lap();

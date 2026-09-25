@@ -146,6 +146,10 @@ void splitCamerasBySize(std::vector<Reconstruction>& models,
 void writeModels(const std::vector<Reconstruction>& models,
                  const std::filesystem::path& dir, bool verbose,
                  const std::vector<ModelGauge>& gauge = {}, const RigTable* rigs = nullptr);
+void writeRigs(const std::filesystem::path& dir, const Reconstruction& m, const RigTable* rigs);
+// The rigs.txt writeRigs left beside a model, as a table over its image names
+// with each member's calibration in `m.rigs`. Empty when there is no file.
+RigTable readRigs(const std::filesystem::path& dir, Reconstruction& m);
 
 // ---------------------------------------------------------------------------
 // Reporting helpers the summary is built from

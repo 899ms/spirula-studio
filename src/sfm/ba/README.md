@@ -31,12 +31,12 @@ sfm/ba/
   Problem.h          model registry, camera groups, column layout, per-model obs lists,
                        BAL problem loading
   Options.h          scalar config, solver selection, options and stats
-  Solver.h           LM driver (records one command buffer per iteration)
+  Solver.h           LM driver (records each iteration in watchdog-sized submits)
   SolverCpu.h        the same solver on the host -- see "Host fallback" below
   CpuCamera.h        host mirror of the camera and loss models, forward-mode duals
   CpuDense.h         packed blocked Cholesky for the host path
   CpuParallel.h      the process-wide worker pool the host path runs on
-src/app/cli/sfm_ba.cpp   the `spirula sfm ba` subcommand: BAL problems + PLY dump
+src/app/cli/sfm_ba.cpp   the `spirula sfm ba` subcommand: a model's global BA, or a BAL problem
 ```
 
 `spirv_tool nocontract` (src/backend/vulkan/shaders/) is the SPIR-V post-pass
@@ -48,19 +48,22 @@ regenerates the minimax transcendental coefficients in `df.slang` /
 
 ```bash
 bash build_develop.bash -DSS_BACKEND=vulkan
-./build_vulkan/spirula sfm ba /path/to/bal/problem-16-22106-pre.txt --real double
-./build_vulkan/spirula sfm ba problem.txt --real df --loss huber --loss-param 1.0 --ply out
-./build_vulkan/spirula sfm ba /path/to/sparse/0 -o refined/       # a COLMAP model
-./build_vulkan/spirula sfm ba /path/to/sparse/0 --real cpu        # ... on the host
+./build_vulkan/spirula sfm ba /path/to/sparse/0 refined/0        # a COLMAP model
+./build_vulkan/spirula sfm ba /path/to/sparse/0 /path/to/sparse/0 # ... in place
+./build_vulkan/spirula sfm ba /path/to/sparse/0 refined/0 --real cpu   # ... on the host
+./build_vulkan/spirula sfm ba problem-16-22106-pre.txt out.ply --real df --loss huber
 ./build_vulkan/sfm_cholesky_test 500 --real df          # dense solver unit test
 ./build_vulkan/sfm_ba_cpu_test                          # host solver vs a written-out reference
 ```
 
-Given a *directory* rather than a BAL file, `ba` reads a COLMAP sparse model and
-runs exactly the global BA the mapper runs on it (`sfm/map/Bundle.h`, Huber 2 px
-unless `--loss` says otherwise). That is how the solver is profiled and
-regression-tested on real captures instead of on BAL, which has neither shared
-intrinsics groups nor any camera model but Snavely's.
+`ba` reads a COLMAP sparse model, runs the global BA the mapper runs on it
+(`sfm/map/Bundle.h`, Huber 2 px unless `--loss` says otherwise, the rigs in the
+model's `rigs.txt` unless `--rig` names others) and writes the model to the
+output directory, which may be the input. It goes through the mapper's own
+device-failure path (`solveBundle`), checkpoint resume included. That is also
+how the solver is profiled on real captures instead of on BAL, which has
+neither shared intrinsics groups nor any camera model but Snavely's; a BAL file
+as the input writes the refined points as a PLY instead.
 
 The shader variant matrix can be trimmed for faster iteration:
 `-DSS_SFM_REALS=df -DSS_SFM_LOSSES=trivial`. slangc is taken from PATH
@@ -68,7 +71,7 @@ or downloaded into the build tree (`cmake/SsSlang.cmake`).
 
 Options: `--real float|double|df|cpu`, `--loss trivial|huber|cauchy`,
 `--loss-param X`, `--model snavely|snavely_f`, `--shared-intrinsics`,
-`--max-iters N`, `--damping X`, `--rtol X`, `--patience N`, `--ply prefix`,
+`--max-iters N`, `--damping X`, `--rtol X`, `--patience N`, `--rig SPEC`,
 `--solver auto|dense|cg`, `--vram-budget MB`, `--cg-iters N`, `--cg-tol X`,
 `--cg-fallback auto|on|off`,
 `--device I`, `--validate`, `--quiet`, `--profile` (per-kernel GPU time
@@ -376,9 +379,10 @@ until the solver stalls in an ill-conditioned plateau, and a flat gentle
 reject multiplier recovers λ too slowly on ill-conditioned configs — hence
 hold-on-tie plus escalate-on-reject.
 
-Each iteration records one command buffer (assembly → Schur → factor+solve →
-point back-sub → parameter updates → cost) and reads back a single cost
-scalar for the accept/reject decision. Rejects restore parameters from
+Each iteration records assembly → Schur → factor+solve → point back-sub →
+parameter updates → cost and reads back a single cost scalar for the
+accept/reject decision. A small problem's iteration is one submit; a large one
+is cut into submits of about 0.25 s of GPU time (see "Watchdog" below). Rejects restore parameters from
 device-side backups — and since the restored parameters still match that
 iteration's per-observation Jacobians (`Jc`/`Jp`/`res`/`App`, plus a `Bp`
 snapshot), the retry skips the Jacobian pass entirely and re-solves with the
@@ -386,6 +390,32 @@ new λ -- and since the Schur kernels rebuild `S` and `g` from those on every
 path, nothing else has to be snapshotted (the packed `S` snapshot the atomic
 path used to keep was the single largest buffer on that path). Rejected steps are therefore cheap, which is what makes the fine λ
 search affordable.
+
+### Watchdog
+
+A submit that runs past the driver's watchdog (2 s under Windows TDR and for
+amdgpu on Linux) loses the device. One LM iteration of a 6946-image rig capture
+(13 M observations, CG at ~80 iterations per solve) is 2.4 s of GPU time on an
+RTX 5070, and a forced-dense one at `n_dim = 20864` is ~8 s, so both used to
+reset any GPU with a watchdog, however fast. The solver now records through a
+per-device `SubmitBudget` (`core/SubmitBudget.h`, `docs/notes/gpu-submit-budget.md`):
+it cuts at barriers, splits the big per-observation, per-chunk and per-tile
+launches into ranges (push constant `u4`), and reads the CG convergence flag
+back at each cut so a converged loop stops recording. The cost model is
+per-kernel weights measured on the RTX 5070 at fp64; since other devices differ
+per kernel (df `schur_obs` on a 2-CU iGPU costs 21x its weight, because its
+CAS atomics contend), each big kernel's first launch on a device is a 1/32-budget
+range timed alone, and its weight is rescaled by what it took.
+
+On a 22042-image capture (29.5 M observations, CG) the unsplit iterations were
+40 of 42 submits over 2 s, 5.0 s the longest, on that same RTX 5070; split, the
+longest of 678 is 0.32 s, and the solve takes 151 s instead of 212 s, since a
+converged CG loop is no longer recorded out to its iteration cap.
+
+A device solve also downloads its accepted parameters every 5 s
+(`SolverOptions::checkpoint`), so when a device does fail, the host solve that
+takes over (`solveBundle`) starts from that iterate and damping, not from the
+beginning.
 
 ## Results (RTX 4080 Super + i9 32 threads, 50 LM iterations cap)
 
@@ -472,4 +502,4 @@ peak (the largest single BA being 6372 images / 12.7 M observations).
   CUDA prototype).
 - The BAL loader covers the Snavely models only. Every other camera model
   reaches the solver through `sfm/map/Bundle.h` instead, which is what the
-  mapper uses; `spirula sfm ba` is a solver benchmark, not a general front end.
+  mapper and a model given to `spirula sfm ba` use.

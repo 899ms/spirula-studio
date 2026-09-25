@@ -1,21 +1,11 @@
-// Levenberg-Marquardt driver: owns GPU buffers, records the per-iteration
-// command stream (assembly -> linear solve -> updates), and runs the
-// accept/reject loop on the host (one small readback per iteration).
-//
-// Two linear solvers for the reduced camera system S dU = g:
-//   dense - packed in-place blocked Cholesky (cholesky.slang), with S built
-//           by the pair-aggregated (or atomic fallback) Schur kernels
-//   cg    - implicit-Schur block-Jacobi PCG (cg.slang); S is never formed,
-//           so the packed S, Y and pair-entry buffers are not allocated and
-//           peak VRAM stays linear in the observation count
-// Selection is automatic by problem size and a VRAM budget (see decidePaths),
-// or forced with SolverOptions::solver. Optionally the dense machinery is
-// kept allocated as a fallback: if CG fails to converge, the iteration is
-// re-solved densely (assembly reuse, like a rejected step).
-//
-// A device that can run none of the scalar configurations gets `RealCfg::CPU`,
-// and every entry point below delegates to bacpu::Solver -- the same LM loop
-// and the same two linear solvers, on the host.
+// Levenberg-Marquardt driver: owns GPU buffers, records each iteration
+// (assembly -> dense Cholesky or implicit-Schur PCG -> updates) and runs the
+// accept/reject loop on the host. An iteration goes to the device in as many
+// submits as the watchdog budget needs (core/SubmitBudget.h), so a large
+// problem on a slow GPU does not lose the device. Path selection, VRAM budget
+// and the dense fallback: sfm/ba/README.md. A device that can run none of the
+// scalar configurations gets `RealCfg::CPU`, and every entry point delegates
+// to bacpu::Solver -- the same LM loop and linear solvers, on the host.
 #pragma once
 
 #include <chrono>
@@ -29,6 +19,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/SubmitBudget.h"
 #include "sfm/ba/Options.h"
 #include "sfm/ba/Problem.h"
 #include "sfm/ba/SolverCpu.h"
@@ -437,11 +428,11 @@ public:
 
     double computeCost() {
         if (cpu_) return cpu_->computeCost();
-        VkCommandBuffer cb = ctx_.begin();
-        recordCost(cb);
-        ctx_.barrier(cb);
-        ctx_.recordDownload(cb, bCost_, realSize(opt_.real), 0, kDlCost);
-        ctx_.submit(cb);
+        beginSeg();
+        recordCost();
+        ctx_.barrier(cb_);
+        ctx_.recordDownload(cb_, bCost_, realSize(opt_.real), 0, kDlCost);
+        endSeg();
         return readCost();
     }
 
@@ -456,6 +447,7 @@ public:
         bool reuse = false;  // after a reject, the assembly still matches the params
         double reject_mult = 2.0;
         int consec_fallbacks = 0;
+        auto last_ckpt = std::chrono::steady_clock::now();
         for (int it = 0; it < opt_.max_iters; it++) {
             sfm::cancel::check();
             if (opt_.verbose)
@@ -465,9 +457,9 @@ public:
                            reuse ? " (reuse)" : "");
 
             LinSolve path = useCG_ ? LinSolve::CG : densePath_;
-            VkCommandBuffer cb = ctx_.begin();
-            recordIteration(cb, (float)damping, reuse, path);
-            ctx_.submit(cb);
+            beginSeg();
+            recordIteration((float)damping, reuse, path);
+            endSeg();
             double newCost = readCost();
             stats_.iterations = it + 1;
 
@@ -499,9 +491,9 @@ public:
                                        "iter %3d: CG hit %u-iteration cap, dense fallback",
                                        it, usedCap);
                         restore_pending_ = true;
-                        cb = ctx_.begin();
-                        recordIteration(cb, (float)damping, true, densePath_);
-                        ctx_.submit(cb);
+                        beginSeg();
+                        recordIteration((float)damping, true, densePath_);
+                        endSeg();
                         newCost = readCost();
                         stats_.cg_fallbacks++;
                         if (++consec_fallbacks >= 3) {
@@ -530,6 +522,14 @@ public:
                 stats_.accepted++;
                 reuse = false;
                 reject_mult = 2.0;
+                // 5 s of progress costs one parameter download (~20 ms for
+                // 4M points); an iteration of a small solve never reaches it.
+                const auto now = std::chrono::steady_clock::now();
+                if (opt_.checkpoint && now - last_ckpt > std::chrono::seconds(5)) {
+                    downloadParams();
+                    *opt_.checkpoint = {it + 1, damping, cost};
+                    last_ckpt = now;
+                }
             } else {
                 // reject: restore parameters; the assembly snapshot stays valid
                 restore_pending_ = true;
@@ -567,9 +567,9 @@ public:
     // debug: run one full assembly (no factor/solve) so S and g can be dumped
     void debugAssemble(float damping) {
         if (cpu_) return cpu_->assembleOnly(damping);
-        VkCommandBuffer cb = ctx_.begin();
-        recordAssembly(cb, damping, false, densePath_);
-        ctx_.submit(cb);
+        beginSeg();
+        recordAssembly(damping, false, densePath_);
+        endSeg();
     }
 
     // debug: the assembled S (packed lower triangle) and g, from whichever path
@@ -590,20 +590,20 @@ public:
         if (cpu_) return cpu_->compareStep(damping);
         if (!useCG_ || !haveFallback_)
             throw std::runtime_error("step comparison needs --solver cg + fallback on");
-        VkCommandBuffer cb = ctx_.begin();
-        recordAssembly(cb, damping, false, LinSolve::CG);
-        recordPCG(cb, (uint32_t)opt_.cg_max_iters);
-        ctx_.barrier(cb);
-        ctx_.recordDownload(cb, bCgScal_, 8 * realSize(opt_.real), 0, kDlCgScal);
-        ctx_.submit(cb);
+        beginSeg();
+        recordAssembly(damping, false, LinSolve::CG);
+        recordPCG((uint32_t)opt_.cg_max_iters);
+        ctx_.barrier(cb_);
+        ctx_.recordDownload(cb_, bCgScal_, 8 * realSize(opt_.real), 0, kDlCgScal);
+        endSeg();
         std::vector<double> xcg = downloadG();
         bool conv;
         double cg_iters;
         readCgStatus(conv, cg_iters);
-        cb = ctx_.begin();
-        recordAssembly(cb, damping, true, densePath_);  // reuse the same assembly
-        recordCholesky(cb);
-        ctx_.submit(cb);
+        beginSeg();
+        recordAssembly(damping, true, densePath_);  // reuse the same assembly
+        recordCholesky();
+        endSeg();
         std::vector<double> xd = downloadG();
         double dmax = 0, xmax = 0;
         for (uint32_t i = 0; i < P_.n_dim; i++) {
@@ -618,39 +618,11 @@ public:
         return rel;
     }
 
-    // record the in-place dense factor + triangular solves (public for
-    // selftest). chol_update also factors the next diagonal tile, so
-    // chol_diag proper only runs for the first block; the triangular solves
-    // are one fused dispatch per block (see cholesky.slang).
-    void recordCholesky(VkCommandBuffer cb) {
-        const uint32_t n = P_.n_dim, bs = 32;
-        const uint32_t nb = (n + bs - 1) / bs;
-        Push p;
-        p.u0 = n;
-        p.u1 = 0;
-        ctx_.dispatch(cb, "chol_diag", 1, p);
-        ctx_.barrier(cb);
-        for (uint32_t k = 0; k + 1 < nb; k++) {
-            p.u1 = k;
-            uint32_t below = nb - 1 - k;
-            ctx_.dispatch(cb, "chol_panel", below, p);
-            ctx_.barrier(cb);
-            p.u2 = below * (below + 1) / 2;
-            ctx_.dispatch(cb, "chol_update", p.u2, p);
-            ctx_.barrier(cb);
-        }
-        for (uint32_t k = 0; k < nb; k++) {
-            p.u1 = k;
-            p.u2 = (k + 1) * bs < n ? n - (k + 1) * bs : 0;
-            ctx_.dispatch(cb, "tri_fwd", std::max(1u, (p.u2 + 255) / 256), p);
-            ctx_.barrier(cb);
-        }
-        for (int k = (int)nb - 1; k >= 0; k--) {
-            p.u1 = (uint32_t)k;
-            p.u2 = (uint32_t)k * bs;
-            ctx_.dispatch(cb, "tri_bwd", std::max(1u, (p.u2 + 255) / 256), p);
-            ctx_.barrier(cb);
-        }
+    // Factor the packed S in place and solve against g (sfm_cholesky_test).
+    void cholesky() {
+        beginSeg();
+        recordCholesky();
+        endSeg();
     }
 
 private:
@@ -665,6 +637,7 @@ private:
         cgSuffix_ = maxDof <= 18 ? "_w" : "_x";
         const uint32_t tier = maxDof <= 18 ? 18 : 24;
         bBlk_ = tier * (tier + 1) / 2;
+        wide_ = std::max(maxDof, 6u) / 24.0;
     }
 
     static std::string costEntry(const BAProblem::ModelRange& mr) {
@@ -788,20 +761,218 @@ private:
         return b / (1024.0 * 1024.0);
     }
 
-    void recordCost(VkCommandBuffer cb) {
-        ctx_.fillZero(cb, bCost_);
-        ctx_.barrier(cb);
-        for (auto& mr : P_.model_ranges) {
-            Push p;
-            p.u0 = mr.count;
-            p.u1 = mr.offset;
-            p.f0 = opt_.loss_param;
-            ctx_.dispatch(cb, costEntry(mr), (mr.count + 255) / 256, p);
-        }
-        ctx_.barrier(cb);
+    // ---- submit budget ----
+
+    // Launch costs in the budget's unit, about a nanosecond of an RTX 5070 at
+    // fp64 with the 24-wide rig camera block (--profile, 6946-image capture);
+    // wide_ scales the camera-block kernels to a narrower tier.
+    static constexpr double kWLaunch = 2000, kWPoint = 0.25, kWVec = 1, kWImage = 5;
+    static constexpr double kWCost = 1.5, kWJac = 5.5, kWDp = 0.6, kWYPrep = 0.3;
+    static constexpr double kWCamDiag = 12.7, kWGather = 0.65, kWScatter = 1.2;
+    static constexpr double kWSchurObs = 40, kWPairEntry = 3, kWFlop = 2.6e-3;
+    // Until a submit has been timed, a device is taken to be 64x slower.
+    static constexpr double kPriorRate = 1e9 / 64;
+
+    static std::mutex& budgetMutex() {
+        static std::mutex m;
+        return m;
+    }
+    // One per device and scalar config: the mapper builds a solver per BA,
+    // and each should start from what the last one measured.
+    spirula::SubmitBudget& budgetLocked() {
+        static std::map<std::string, spirula::SubmitBudget> m;
+        return m.try_emplace(ctx_.selector() + realCfgName(opt_.real), kPriorRate).first->second;
+    }
+    double budgetLimit() {
+        std::lock_guard<std::mutex> g(budgetMutex());
+        return budgetLocked().limit();
+    }
+    // Measured over modelled cost of one kernel on this device, 0 until probed.
+    double& kernelScaleLocked(const std::string& name) {
+        static std::map<std::string, double> m;
+        return m[ctx_.selector() + realCfgName(opt_.real) + name];
     }
 
-    void recordAssembly(VkCommandBuffer cb, float damping, bool reuse, LinSolve path) {
+    void beginSeg() {
+        cb_ = ctx_.begin();
+        open_ = 0;
+        segCg_ = pollCg_;
+        segTop_.clear();
+        segTopWork_ = 0;
+    }
+    // A CG kernel past convergence returns at once, so a segment holding one
+    // is timed only if the flag it reads back is still clear (a 2-CU iGPU
+    // lost the device on a budget learned from such no-op segments).
+    double endSeg(bool record = true) {
+        if (segCg_) ctx_.recordDownload(cb_, bCgScal_, 8 * realSize(opt_.real), 0, kDlCgScal);
+        const auto t0 = std::chrono::steady_clock::now();
+        VkCommandBuffer cb = cb_;
+        cb_ = VK_NULL_HANDLE;
+        ctx_.submit(cb);
+        const double dt =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        cgNoop_ = segCg_ && cgFlagStaged();
+        segCg_ = false;
+        std::lock_guard<std::mutex> g(budgetMutex());
+        spirula::SubmitBudget& b = budgetLocked();
+        if (!record || cgNoop_) return dt;
+        // A segment that is mostly one probed kernel corrects that kernel's
+        // ratio, so the global rate drifting with the others cannot oversize
+        // it (jac in df drifted 3x on an iGPU); 2x a step, as tiny launches plateau.
+        double* scale = segTop_.empty() ? nullptr : &kernelScaleLocked(segTop_);
+        if (scale && *scale > 0 && segTopWork_ > 0.8 * open_ && dt > b.target() / 16 &&
+            b.rate() > 0) {
+            const double ratio = dt * b.rate() / open_;
+            *scale *= ratio > 1 ? std::min(ratio, 2.0) : std::sqrt(ratio);
+            *scale = std::min(std::max(*scale, 1.0 / 16), 256.0);
+        } else {
+            b.record(open_, dt);
+        }
+        return dt;
+    }
+    void split() {
+        endSeg();
+        beginSeg();
+    }
+    // Called after a barrier, before recording `w` more work: past the budget,
+    // what is recorded goes to the device first. True when it did.
+    bool room(double w) {
+        const bool full = open_ > 0 && open_ + w > budgetLimit();
+        if (full) split();
+        open_ += w;
+        return full;
+    }
+
+    // `n` items of `name` in budget-sized ranges, placed by `at(push, first, count)`.
+    // The weights are one GPU's, so a big kernel's first range is 1/32 of a
+    // budget, timed alone (schur_obs in df on a 2-CU iGPU took 21x its weight).
+    template <class At>
+    void launch(const std::string& name, uint32_t n, uint32_t per_group, double w_item,
+                const Push& p, At at) {
+        if (n == 0) return;
+        double lim, scale, rate;
+        bool measured;
+        auto read = [&] {
+            std::lock_guard<std::mutex> g(budgetMutex());
+            lim = budgetLocked().limit();
+            rate = budgetLocked().rate();
+            measured = budgetLocked().measured();
+            scale = kernelScaleLocked(name);
+        };
+        read();
+        const bool big = n * w_item > lim / 32;
+        if (scale == 0 && big && open_ > 0) {
+            split();  // what is pending may be the measurement a probe needs
+            read();
+        }
+        // At most 256 ranges: a small launch runs at a latency floor that no
+        // per-item cost fits, and 1/256 of any launch here is far under 2 s.
+        auto rangeOf = [&](double units) {
+            const double w = w_item * (scale > 0 ? scale : 1);
+            uint64_t c = lim > 0 ? (uint64_t)(units / std::max(w, 1e-9)) : n;
+            c = std::max<uint64_t>(c, n / 256);
+            return std::max<uint64_t>(per_group, c / per_group * per_group);
+        };
+        uint64_t a = 0;
+        if (scale == 0 && measured && big) {
+            if (open_ > 0) split();
+            const uint32_t c = (uint32_t)std::min<uint64_t>(rangeOf(lim / 32), n);
+            Push q = p;
+            at(q, 0, c);
+            ctx_.dispatch(cb_, name, (c + per_group - 1) / per_group, q);
+            open_ = kWLaunch + c * w_item;
+            const double dt = endSeg(false);
+            beginSeg();
+            if (!cgNoop_) {
+                std::lock_guard<std::mutex> g(budgetMutex());
+                kernelScaleLocked(name) =
+                    std::min(std::max(dt * rate / (c * w_item), 1.0 / 16), 256.0);
+            }
+            a = c;
+        }
+        while (a < n) {
+            read();
+            const uint32_t c = (uint32_t)std::min<uint64_t>(rangeOf(lim), n - a);
+            const double w = c * w_item * (scale > 0 ? scale : 1);
+            room(kWLaunch + w);
+            if (name == segTop_) segTopWork_ += w;
+            else if (w > segTopWork_) segTop_ = name, segTopWork_ = w;
+            Push q = p;
+            at(q, (uint32_t)a, c);
+            ctx_.dispatch(cb_, name, (c + per_group - 1) / per_group, q);
+            a += c;
+        }
+    }
+    // Kernels that take the whole count in u0 and a range's first item in u4.
+    static void atBase(Push& q, uint32_t first, uint32_t) { q.u4 = first; }
+
+    // ... and the per-model kernels, whose u0/u1 already are a count and an offset.
+    template <class Range>
+    static auto atModel(const Range& mr) {
+        return [&mr](Push& q, uint32_t first, uint32_t count) {
+            q.u0 = count;
+            q.u1 = mr.offset + first;
+        };
+    }
+
+    bool cgFlagStaged() {
+        std::vector<double> v;
+        unpackReals(v, (const uint8_t*)ctx_.stagingDownloadPtr() + kDlCgScal, 8, opt_.real);
+        return v[6] > 0.5;
+    }
+
+    // ---- recording ----
+
+    // chol_update also factors the next diagonal tile, so chol_diag proper
+    // only runs for the first block; the triangular solves are one fused
+    // dispatch per block (see cholesky.slang).
+    void recordCholesky() {
+        const uint32_t n = P_.n_dim, bs = 32;
+        const uint32_t nb = (n + bs - 1) / bs;
+        const double tile = 2.0 * bs * bs * bs * kWFlop;
+        Push p;
+        p.u0 = n;
+        p.u1 = 0;
+        room(kWLaunch + tile);
+        ctx_.dispatch(cb_, "chol_diag", 1, p);
+        ctx_.barrier(cb_);
+        for (uint32_t k = 0; k + 1 < nb; k++) {
+            p.u1 = k;
+            uint32_t below = nb - 1 - k;
+            launch("chol_panel", below, 1, tile, p, atBase);
+            ctx_.barrier(cb_);
+            p.u2 = below * (below + 1) / 2;
+            launch("chol_update", p.u2, 1, tile, p, atBase);
+            ctx_.barrier(cb_);
+        }
+        for (uint32_t k = 0; k < nb; k++) {
+            p.u1 = k;
+            p.u2 = (k + 1) * bs < n ? n - (k + 1) * bs : 0;
+            room(kWLaunch + 2.0 * bs * p.u2 * kWFlop);
+            ctx_.dispatch(cb_, "tri_fwd", std::max(1u, (p.u2 + 255) / 256), p);
+            ctx_.barrier(cb_);
+        }
+        for (int k = (int)nb - 1; k >= 0; k--) {
+            p.u1 = (uint32_t)k;
+            p.u2 = (uint32_t)k * bs;
+            room(kWLaunch + 2.0 * bs * p.u2 * kWFlop);
+            ctx_.dispatch(cb_, "tri_bwd", std::max(1u, (p.u2 + 255) / 256), p);
+            ctx_.barrier(cb_);
+        }
+    }
+
+    void recordCost() {
+        ctx_.fillZero(cb_, bCost_);
+        ctx_.barrier(cb_);
+        for (auto& mr : P_.model_ranges) {
+            Push p;
+            p.f0 = opt_.loss_param;
+            launch(costEntry(mr), mr.count, 256, kWCost, p, atModel(mr));
+        }
+        ctx_.barrier(cb_);
+    }
+
+    void recordAssembly(float damping, bool reuse, LinSolve path) {
         const bool dense = path != LinSolve::CG;
         if (reuse) {
             // Params were restored after a reject; the per-observation
@@ -809,82 +980,89 @@ private:
             // pass. S and g are rebuilt from those by the Schur kernels -- on
             // every path, which is why none of them is snapshotted. Bp is the
             // one thing the back-substitution overwrote, so it is.
-            ctx_.copy(cb, bBp0_, bBp_, bBp_.size);
+            ctx_.copy(cb_, bBp0_, bBp_, bBp_.size);
             if (dense) {
-                ctx_.fillZero(cb, bS_);
-                ctx_.fillZero(cb, bG_);
+                ctx_.fillZero(cb_, bS_);
+                ctx_.fillZero(cb_, bG_);
             }
-            ctx_.barrier(cb);
+            ctx_.barrier(cb_);
         } else {
             // backup params for possible reject
-            ctx_.copy(cb, bPoses_, bPosesBak_, bPoses_.size);
-            ctx_.copy(cb, bIntr_, bIntrBak_, bIntr_.size);
-            ctx_.copy(cb, bPoints_, bPointsBak_, bPoints_.size);
-            if (!P_.exts.empty()) ctx_.copy(cb, bExts_, bExtsBak_, bExts_.size);
+            ctx_.copy(cb_, bPoses_, bPosesBak_, bPoses_.size);
+            ctx_.copy(cb_, bIntr_, bIntrBak_, bIntr_.size);
+            ctx_.copy(cb_, bPoints_, bPointsBak_, bPoints_.size);
+            if (!P_.exts.empty()) ctx_.copy(cb_, bExts_, bExtsBak_, bExts_.size);
 
             if (dense) {
-                ctx_.fillZero(cb, bS_);
-                ctx_.fillZero(cb, bG_);
+                ctx_.fillZero(cb_, bS_);
+                ctx_.fillZero(cb_, bG_);
             }
-            ctx_.fillZero(cb, bApp_);
-            ctx_.fillZero(cb, bBp_);
-            ctx_.barrier(cb);
+            ctx_.fillZero(cb_, bApp_);
+            ctx_.fillZero(cb_, bBp_);
+            ctx_.barrier(cb_);
 
             for (auto& mr : P_.model_ranges) {
                 Push p;
-                p.u0 = mr.count;
-                p.u1 = mr.offset;
                 p.f0 = opt_.loss_param;
-                ctx_.dispatch(cb, jacEntry(mr), (mr.count + 127) / 128, p);
+                launch(jacEntry(mr), mr.count, 128, kWJac * wide_, p, atModel(mr));
             }
-            ctx_.barrier(cb);
+            ctx_.barrier(cb_);
 
-            ctx_.copy(cb, bBp_, bBp0_, bBp_.size);
-            ctx_.barrier(cb);
+            ctx_.copy(cb_, bBp_, bBp0_, bBp_.size);
+            ctx_.barrier(cb_);
         }
 
         {
             Push q;
             q.u0 = P_.num_points;
             q.f0 = damping;
-            ctx_.dispatch(cb, "point_prep", (P_.num_points + 255) / 256, q);
+            room(kWLaunch + P_.num_points * kWPoint);
+            ctx_.dispatch(cb_, "point_prep", (P_.num_points + 255) / 256, q);
             if (path == LinSolve::CG) {  // chunked cg_cam_diag accumulates atomically
-                ctx_.fillZero(cb, bCgB_);
-                ctx_.fillZero(cb, bCgM_);
-                ctx_.fillZero(cb, bG_);
+                ctx_.fillZero(cb_, bCgB_);
+                ctx_.fillZero(cb_, bCgM_);
+                ctx_.fillZero(cb_, bG_);
             }
         }
-        ctx_.barrier(cb);
+        ctx_.barrier(cb_);
 
         {
             Push p;
             p.f0 = damping;
             if (path == LinSolve::DensePair) {
                 p.u0 = P_.num_obs;
-                ctx_.dispatch(cb, "y_prep", (P_.num_obs + 255) / 256, p);
-                ctx_.barrier(cb);
+                launch("y_prep", P_.num_obs, 256, kWYPrep, p, atBase);
+                ctx_.barrier(cb_);
                 p.u0 = P_.num_pair_chunks;
-                ctx_.dispatch(cb, std::string("schur_pair") + schurSuffix_, P_.num_pair_chunks, p);
+                const double entries = P_.pair_entries.size() / 2.0;
+                launch(std::string("schur_pair") + schurSuffix_, P_.num_pair_chunks, 1,
+                       kWPairEntry * wide_ * wide_ * entries / std::max(1u, P_.num_pair_chunks),
+                       p, atBase);
             } else if (path == LinSolve::DenseObs) {
                 p.u0 = P_.num_obs;
-                ctx_.dispatch(cb, std::string("schur_obs") + schurSuffix_, (P_.num_obs + 127) / 128, p);
+                launch(std::string("schur_obs") + schurSuffix_, P_.num_obs, 128,
+                       kWSchurObs * wide_ * wide_, p, atBase);
             } else {
                 p.u0 = P_.num_cam_chunks;
                 p.u1 = P_.prec_exclusive ? 1 : 0;
                 p.u2 = P_.num_frames;  // member blocks follow the frame ones, then groups
                 p.u3 = P_.num_frames + (uint32_t)P_.members.size();
-                ctx_.dispatch(cb, std::string("cg_cam_diag") + cgSuffix_, P_.num_cam_chunks, p);
-                ctx_.barrier(cb);
+                launch(std::string("cg_cam_diag") + cgSuffix_, P_.num_cam_chunks, 1,
+                       kWCamDiag * wide_ * wide_ * P_.num_obs / std::max(1u, P_.num_cam_chunks),
+                       p, atBase);
+                ctx_.barrier(cb_);
                 p.u0 = P_.num_prec_blocks;
-                ctx_.dispatch(cb, "cg_prec_fact", (P_.num_prec_blocks + 255) / 256, p);
+                room(kWLaunch + P_.num_prec_blocks * kWImage);
+                ctx_.dispatch(cb_, "cg_prec_fact", (P_.num_prec_blocks + 255) / 256, p);
             }
         }
-        ctx_.barrier(cb);
+        ctx_.barrier(cb_);
     }
 
-    // Record the device-side PCG loop (see cg.slang). A fixed iteration count
-    // is recorded; every kernel no-ops once the convergence flag is set.
-    void recordPCG(VkCommandBuffer cb, uint32_t maxit) {
+    // Record the device-side PCG loop (see cg.slang). Every kernel no-ops once
+    // the convergence flag is set; where the budget splits the loop, the flag
+    // is read back and the rest is not recorded.
+    void recordPCG(uint32_t maxit) {
         const uint32_t n = P_.n_dim;
         const uint32_t ng = (n + 255) / 256;
         const uint32_t npart = ng;
@@ -897,69 +1075,79 @@ private:
         const VkDeviceSize intrSize =
             (VkDeviceSize)(rigs ? n : n - P_.pose_dim) * realSize(opt_.real);
         const bool zeroIntr = !P_.prec_exclusive && intrSize > 0;
+        const double wVecs = 5 * kWLaunch + 3.0 * n * kWVec;
+        room(wVecs + P_.num_prec_blocks * kWImage);
         Push pn;
         pn.u0 = n;
-        ctx_.dispatch(cb, "cg_init", ng, pn);
-        ctx_.barrier(cb);
+        ctx_.dispatch(cb_, "cg_init", ng, pn);
+        ctx_.barrier(cb_);
         Push pc;
         pc.u0 = P_.num_prec_blocks;
         pc.u1 = 0;  // flag was just cleared
-        ctx_.dispatch(cb, "cg_prec_apply", nib, pc);
-        ctx_.barrier(cb);
+        ctx_.dispatch(cb_, "cg_prec_apply", nib, pc);
+        ctx_.barrier(cb_);
         Push pr;
         pr.u0 = n;
         pr.u1 = 1;
         pr.u2 = npart;
         pr.u3 = 0;
-        ctx_.dispatch(cb, "cg_red2", ng, pr);
-        ctx_.barrier(cb);
+        ctx_.dispatch(cb_, "cg_red2", ng, pr);
+        ctx_.barrier(cb_);
         Push pf;
         pf.u0 = npart;
         pf.u1 = 0;
         pf.u2 = npart;
         pf.f0 = (float)opt_.cg_tol;
-        ctx_.dispatch(cb, "cg_fin", 1, pf);
-        ctx_.barrier(cb);
-        ctx_.dispatch(cb, "cg_copy", ng, pn);
-        ctx_.barrier(cb);
+        ctx_.dispatch(cb_, "cg_fin", 1, pf);
+        ctx_.barrier(cb_);
+        ctx_.dispatch(cb_, "cg_copy", ng, pn);
+        ctx_.barrier(cb_);
         pc.u1 = 1;
         pr.u3 = 1;
+        const double wTrack = (double)P_.num_obs / std::max(1u, P_.num_points);
+        const double wChunk = (double)P_.num_obs / std::max(1u, P_.num_cam_chunks);
+        pollCg_ = true;
         for (uint32_t it = 0; it < maxit; it++) {
+            if (room(2 * wVecs + P_.num_images * kWImage) && cgNoop_) break;
+            segCg_ = true;
             Push pg;
             pg.u0 = P_.num_points;
-            ctx_.dispatch(cb, std::string("cg_gather") + cgSuffix_, (P_.num_points + 255) / 256, pg);
-            ctx_.barrier(cb);
+            launch(std::string("cg_gather") + cgSuffix_, P_.num_points, 256,
+                   kWGather * wide_ * wTrack, pg, atBase);
+            ctx_.barrier(cb_);
             Push ps;
             ps.u0 = P_.num_images;
             ps.u1 = P_.prec_exclusive ? 1 : 0;
             if (zeroIntr) {
-                ctx_.fillZero(cb, bCgSp_, intrOff, intrSize);
-                ctx_.barrier(cb);
+                ctx_.fillZero(cb_, bCgSp_, intrOff, intrSize);
+                ctx_.barrier(cb_);
             }
-            ctx_.dispatch(cb, std::string("cg_bmul") + cgSuffix_, P_.num_images, ps);
-            ctx_.barrier(cb);
+            ctx_.dispatch(cb_, std::string("cg_bmul") + cgSuffix_, P_.num_images, ps);
+            ctx_.barrier(cb_);
             ps.u0 = P_.num_cam_chunks;
-            ctx_.dispatch(cb, std::string("cg_scatter") + cgSuffix_, P_.num_cam_chunks, ps);
-            ctx_.barrier(cb);
+            launch(std::string("cg_scatter") + cgSuffix_, P_.num_cam_chunks, 1,
+                   kWScatter * wide_ * wChunk, ps, atBase);
+            ctx_.barrier(cb_);
             pr.u1 = 0;
-            ctx_.dispatch(cb, "cg_red2", ng, pr);
-            ctx_.barrier(cb);
+            ctx_.dispatch(cb_, "cg_red2", ng, pr);
+            ctx_.barrier(cb_);
             pf.u1 = 1;
-            ctx_.dispatch(cb, "cg_fin", 1, pf);
-            ctx_.barrier(cb);
-            ctx_.dispatch(cb, "cg_axpy", ng, pn);
-            ctx_.barrier(cb);
-            ctx_.dispatch(cb, "cg_prec_apply", nib, pc);
-            ctx_.barrier(cb);
+            ctx_.dispatch(cb_, "cg_fin", 1, pf);
+            ctx_.barrier(cb_);
+            ctx_.dispatch(cb_, "cg_axpy", ng, pn);
+            ctx_.barrier(cb_);
+            ctx_.dispatch(cb_, "cg_prec_apply", nib, pc);
+            ctx_.barrier(cb_);
             pr.u1 = 1;
-            ctx_.dispatch(cb, "cg_red2", ng, pr);
-            ctx_.barrier(cb);
+            ctx_.dispatch(cb_, "cg_red2", ng, pr);
+            ctx_.barrier(cb_);
             pf.u1 = 2;
-            ctx_.dispatch(cb, "cg_fin", 1, pf);
-            ctx_.barrier(cb);
-            ctx_.dispatch(cb, "cg_updp", ng, pn);
-            ctx_.barrier(cb);
+            ctx_.dispatch(cb_, "cg_fin", 1, pf);
+            ctx_.barrier(cb_);
+            ctx_.dispatch(cb_, "cg_updp", ng, pn);
+            ctx_.barrier(cb_);
         }
+        pollCg_ = false;
     }
 
     // Put the parameters back where the last accepted step left them. A reject
@@ -969,12 +1157,12 @@ private:
     // sharing. So the reject only *marks* it, and the next command buffer to be
     // recorded carries it. Nothing runs in between: the LM loop either records
     // another iteration or leaves, and leaving flushes it (see solve()).
-    void recordRestore(VkCommandBuffer cb) {
-        ctx_.copy(cb, bPosesBak_, bPoses_, bPoses_.size);
-        ctx_.copy(cb, bIntrBak_, bIntr_, bIntr_.size);
-        ctx_.copy(cb, bPointsBak_, bPoints_, bPoints_.size);
-        if (!P_.exts.empty()) ctx_.copy(cb, bExtsBak_, bExts_, bExts_.size);
-        ctx_.barrier(cb);
+    void recordRestore() {
+        ctx_.copy(cb_, bPosesBak_, bPoses_, bPoses_.size);
+        ctx_.copy(cb_, bIntrBak_, bIntr_, bIntr_.size);
+        ctx_.copy(cb_, bPointsBak_, bPoints_, bPoints_.size);
+        if (!P_.exts.empty()) ctx_.copy(cb_, bExtsBak_, bExts_, bExts_.size);
+        ctx_.barrier(cb_);
     }
 
     // Emit a marked restore on its own, for the one caller that cannot defer:
@@ -982,61 +1170,63 @@ private:
     void flushRestore() {
         if (!restore_pending_) return;
         restore_pending_ = false;
-        VkCommandBuffer cb = ctx_.begin();
-        recordRestore(cb);
-        ctx_.submit(cb);
+        beginSeg();
+        recordRestore();
+        endSeg();
     }
 
-    void recordIteration(VkCommandBuffer cb, float damping, bool reuse, LinSolve path) {
+    void recordIteration(float damping, bool reuse, LinSolve path) {
         if (restore_pending_) {
             restore_pending_ = false;
-            recordRestore(cb);
+            recordRestore();
         }
-        recordAssembly(cb, damping, reuse, path);
+        recordAssembly(damping, reuse, path);
 
         if (path == LinSolve::CG)
-            recordPCG(cb, cgMaxit_);
+            recordPCG(cgMaxit_);
         else
-            recordCholesky(cb);
+            recordCholesky();
 
         {
             Push p;
             p.u0 = P_.num_obs;
-            ctx_.dispatch(cb, std::string("dp_accum") + schurSuffix_, (P_.num_obs + 255) / 256, p);
+            launch(std::string("dp_accum") + schurSuffix_, P_.num_obs, 256, kWDp * wide_, p,
+                   atBase);
         }
-        ctx_.barrier(cb);
+        ctx_.barrier(cb_);
 
         {
+            room(4 * kWLaunch + P_.num_points * kWPoint);
             Push p;
             p.u0 = P_.num_points;
-            ctx_.dispatch(cb, "point_update", (P_.num_points + 255) / 256, p);
+            ctx_.dispatch(cb_, "point_update", (P_.num_points + 255) / 256, p);
             Push q;
             q.u0 = P_.pose_dim;
-            ctx_.dispatch(cb, "cam_update", (P_.pose_dim + 255) / 256, q);
+            ctx_.dispatch(cb_, "cam_update", (P_.pose_dim + 255) / 256, q);
             if (!P_.members.empty()) {
                 Push e;
                 e.u0 = (uint32_t)P_.members.size();
-                ctx_.dispatch(cb, "ext_update", ((uint32_t)P_.members.size() + 63) / 64, e);
+                ctx_.dispatch(cb_, "ext_update", ((uint32_t)P_.members.size() + 63) / 64, e);
             }
             if (!P_.groups.empty()) {
                 Push r;
                 r.u0 = (uint32_t)P_.groups.size();
-                ctx_.dispatch(cb, "intr_update", ((uint32_t)P_.groups.size() + 63) / 64, r);
+                ctx_.dispatch(cb_, "intr_update", ((uint32_t)P_.groups.size() + 63) / 64, r);
             }
         }
-        ctx_.barrier(cb);
+        ctx_.barrier(cb_);
 
-        recordCost(cb);
+        recordCost();
         // Fold the two readbacks the LM loop needs into this command buffer.
         // A separate download() is its own fenced submit, so taking them here
         // halves the submits per iteration -- and a submit's latency, not its
         // arithmetic, is what a forty-image solve costs. The atom phase of a
         // bottom-up run spends five thousand iterations on problems that size,
         // with several solvers sharing the device.
-        ctx_.barrier(cb);
-        ctx_.recordDownload(cb, bCost_, realSize(opt_.real), 0, kDlCost);
+        ctx_.barrier(cb_);
+        ctx_.recordDownload(cb_, bCost_, realSize(opt_.real), 0, kDlCost);
         if (path == LinSolve::CG)
-            ctx_.recordDownload(cb, bCgScal_, 8 * realSize(opt_.real), 0, kDlCgScal);
+            ctx_.recordDownload(cb_, bCgScal_, 8 * realSize(opt_.real), 0, kDlCgScal);
     }
 
     // Offsets into the download staging buffer for the folded readbacks above.
@@ -1075,6 +1265,7 @@ private:
     const char* schurSuffix_ = "_c";  // dof tier of the Schur kernels (pickTiers)
     const char* cgSuffix_ = "_w";     // ... and of the CG ones
     uint32_t bBlk_ = kCamBlk;         // per-image B block stride at that tier
+    double wide_ = 1;                 // widest camera block over the rig tier's 24
     SolverStats stats_;
     std::unique_ptr<VkContext> owned_;      // null when running on a shared context
     VkContext& ctx_;
@@ -1091,6 +1282,13 @@ private:
     GpuBuffer bJp_, bS_, bG_, bApp_, bBp_, bCost_;
     GpuBuffer bPosesBak_, bExtsBak_, bIntrBak_, bPointsBak_;
     bool restore_pending_ = false;  // a rejected step's parameters are still live
+    VkCommandBuffer cb_ = VK_NULL_HANDLE;  // being recorded (beginSeg .. endSeg)
+    double open_ = 0;                      // budget work recorded into cb_
+    bool pollCg_ = false;                  // recording the PCG loop
+    bool segCg_ = false;                   // cb_ holds PCG loop kernels
+    bool cgNoop_ = false;                  // ... and the last one submitted found CG converged
+    std::string segTop_;                   // the launch() kernel with the most work in cb_
+    double segTopWork_ = 0;
     GpuBuffer bBp0_, bJc_, bRes_;
     GpuBuffer bPairEntries_, bPairChunks_, bW_, bYp_, bY_;
     GpuBuffer bCamRanges_, bCamObs_, bCamChunks_, bCgR_, bCgZ_, bCgP_, bCgSp_;

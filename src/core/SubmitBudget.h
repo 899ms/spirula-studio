@@ -28,6 +28,9 @@ public:
     // Work the next submit may carry, in the caller's units; 0 until a submit
     // has been timed (and no prior), which means "send the smallest unit".
     double limit() const { return rate_ > 0 ? rate_ * target_ : 0; }
+    double rate() const { return rate_; }
+    double target() const { return target_; }
+    bool measured() const { return measured_; }
 
     // limit() as a launch size in whole units: `first` before anything is
     // measured, never more than `most`, which keeps a fast GPU's launches as-is.
